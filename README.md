@@ -16,7 +16,8 @@ query.
 
 ## Status
 
-**Phase 0 — project setup.** Not yet functional.
+**Phase 1 — YAML reader.** `SCYAML` reads service definitions; 24 test cases, 108 assertions.
+Not yet functional as a tool: no service model, no liveness checks, no operations.
 
 ## Why
 

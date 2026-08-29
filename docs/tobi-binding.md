@@ -70,3 +70,30 @@ RESULT: CALL SUCCEEDED with RMTOOLS off the library list
 - `SCMAIN.PGM` needs `ctl-opt bnddir('RMSCPGM')` in its source, and `RMSCPGM.BNDDIR` as a
   `Rules.mk` prerequisite for ordering.
 - `RMSCPGM` must library-qualify its `RMSC.SRVPGM` entry.
+
+## Binding a test program
+
+A test suite binding to the service program under test needs **two** binding directories:
+
+```rpgle
+ctl-opt bnddir('RMSCPGM':'RMSCDEPS');
+```
+
+`RMSCPGM` supplies `RMSC.SRVPGM` for the procedures under test. `RMSCDEPS` is needed
+separately whenever the test itself calls `rmtools` procedures — `RMSC.BND` exports only this
+project's own symbols, so the `rmtools` code copied into `RMSC.SRVPGM` is deliberately not
+reachable from outside it. That restriction is correct; the test just needs its own copy.
+
+## Writing an IFS file in the right CCSID
+
+`IFS_OPEN_TYPE_WRITE` tags the file **CCSID 1208** and opens it `O_CCSID`, which declares
+"the bytes handed to `write()` are already in the file's CCSID".
+
+- `IFS_write` does a raw write, so job-CCSID data is stored as EBCDIC **under a UTF-8 tag**.
+  Nothing errors. The file looks right to `ls`, reports CCSID 1208, and comes back mangled.
+- `IFS_write_utf8` declares its parameter `ccsid(*utf8)`, so RPG converts at the call
+  boundary and the bytes on disk really are UTF-8.
+
+Reading is the mirror image: `IFS_OPEN_TYPE_READ` opens with `o_ccsid=<job ccsid>`, so the C
+runtime converts from the file's tagged CCSID on the way in. No `STRING_utf8` call is needed
+anywhere — the conversion is in the open.

@@ -1,0 +1,540 @@
+**free
+
+//==============================================================================
+// SCYAML.TEST - YAML reader test suite
+//
+// The suite writes its own fixtures rather than reading files from the deploy
+// directory, so it does not depend on a path that differs per user. The
+// fixtures are created with IFS_OPEN_TYPE_WRITE, which tags them CCSID 1208,
+// so the round trip exercises the real UTF-8 conversion both ways.
+//
+// Every case here is a form that appears in a real service definition. The
+// service names are invented; the shapes are not.
+//
+// 29/08/2026 - RM - created
+//==============================================================================
+
+ctl-opt nomain;
+// RMSCPGM brings in RMSC.SRVPGM for the SCYAML_* procedures under test.
+// RMSCDEPS is needed separately for the rmtools IFS_* procedures the fixture
+// helpers call: RMSC.BND exports only SCYAML_* symbols, so the rmtools code
+// copied into RMSC.SRVPGM is deliberately not reachable from here.
+ctl-opt bnddir('RMSCPGM':'RMSCDEPS');
+
+/include 'SCYAML_D.rpgleinc'
+/include 'include/RMIFS_D.rpgleinc'
+/include 'include/RMTOOLS_D.rpgleinc'
+/include QINCLUDE,TESTCASE
+
+//==============================================================================
+// Test environment
+//==============================================================================
+
+dcl-s g_dir like(STMF_t);
+
+dcl-pr write_fixture like(STMF_t);
+  name    like(STMF_t) const;
+  content like(STRING_t) const;
+end-pr;
+
+dcl-pr parse_fixture like(BOOLEAN_t);
+  name    like(STMF_t) const;
+  content like(STRING_t) const;
+  doc     likeds(SCYAML_DOC_t);
+end-pr;
+
+//==============================================================================
+// Suite set-up
+//==============================================================================
+
+dcl-proc setUpSuite export;
+
+  g_dir = '/tmp/rmsc-scyaml-test';
+  IFS_crtdir(g_dir);
+
+end-proc;
+
+//==============================================================================
+// Helpers
+//==============================================================================
+
+dcl-proc write_fixture;
+  dcl-pi *n like(STMF_t);
+    name    like(STMF_t) const;
+    content like(STRING_t) const;
+  end-pi;
+
+  dcl-s path   like(STMF_t);
+  dcl-s handle like(INTEGER_t);
+
+  path = %trim(g_dir) + '/' + %trim(name);
+
+  handle = IFS_open_file(path: IFS_OPEN_TYPE_WRITE);
+  assert((handle >= 0): 'Could not create fixture ' + %trim(path));
+
+  // IFS_write_utf8, not IFS_write. IFS_OPEN_TYPE_WRITE tags the file CCSID
+  // 1208 and opens it O_CCSID, which means "the bytes I hand you are already
+  // in the file's CCSID". IFS_write does a raw write, so job-CCSID data would
+  // be stored as EBCDIC under a UTF-8 tag and come back mangled. The _utf8
+  // variant declares its parameter ccsid(*utf8), so RPG converts at the call
+  // boundary and the bytes on disk really are UTF-8 - matching the real
+  // definition files.
+  IFS_write_utf8(handle: content);
+  IFS_close_file(handle);
+
+  return path;
+
+end-proc;
+
+dcl-proc parse_fixture;
+  dcl-pi *n like(BOOLEAN_t);
+    name    like(STMF_t) const;
+    content like(STRING_t) const;
+    doc     likeds(SCYAML_DOC_t);
+  end-pi;
+
+  return SCYAML_parse(write_fixture(name: content): doc);
+
+end-proc;
+
+//==============================================================================
+// The two required keys are read
+//==============================================================================
+
+dcl-proc test_required_keys export;
+
+  dcl-ds doc likeds(SCYAML_DOC_t);
+
+  assert(parse_fixture('minimal.yaml':
+    'start_cmd: /QOpenSys/pkgs/bin/webproxy' + LF +
+    'check_alive: 8080' + LF: doc): 'parse');
+
+  aEqual('/QOpenSys/pkgs/bin/webproxy': SCYAML_value(doc: 'start_cmd'): 'start_cmd');
+  aEqual('8080': SCYAML_value(doc: 'check_alive'): 'check_alive');
+  iEqual(2: SCYAML_key_count(doc): 'key count');
+
+end-proc;
+
+//==============================================================================
+// A file with no trailing newline still yields its last key
+//
+// The shipped mapepire.yaml has no trailing newline, and appending to it
+// without allowing for that glues the next key onto the last line.
+//==============================================================================
+
+dcl-proc test_no_trailing_newline export;
+
+  dcl-ds doc likeds(SCYAML_DOC_t);
+
+  assert(parse_fixture('no-newline.yaml':
+    'start_cmd: /usr/bin/webproxy' + LF +
+    'check_alive: 8080': doc): 'parse');
+
+  aEqual('8080': SCYAML_value(doc: 'check_alive'): 'last key without trailing LF');
+  iEqual(2: SCYAML_key_count(doc): 'key count');
+
+end-proc;
+
+//==============================================================================
+// Whole-line comments and blank lines are ignored
+//==============================================================================
+
+dcl-proc test_comments_and_blanks export;
+
+  dcl-ds doc likeds(SCYAML_DOC_t);
+
+  assert(parse_fixture('comments.yaml':
+    '# Web Proxy Service' + LF +
+    '# Generated by install.sh' + LF +
+    '' + LF +
+    'name: Web Proxy' + LF +
+    '   # indented comment' + LF +
+    'check_alive: 8080' + LF: doc): 'parse');
+
+  iEqual(2: SCYAML_key_count(doc): 'comments and blanks skipped');
+  aEqual('Web Proxy': SCYAML_value(doc: 'name'): 'name');
+
+end-proc;
+
+//==============================================================================
+// An unquoted null is an absent value, but the key is still present
+//==============================================================================
+
+dcl-proc test_null_literal export;
+
+  dcl-ds doc likeds(SCYAML_DOC_t);
+
+  assert(parse_fixture('null.yaml':
+    'start_cmd: /usr/bin/webproxy' + LF +
+    'stop_cmd: null' + LF +
+    'check_alive: 8080' + LF: doc): 'parse');
+
+  nEqual(true: SCYAML_has(doc: 'stop_cmd'): 'stop_cmd present');
+  aEqual('': SCYAML_value(doc: 'stop_cmd'): 'stop_cmd empty');
+
+end-proc;
+
+//==============================================================================
+// A quoted null is the four-character string, not an absent value
+//==============================================================================
+
+dcl-proc test_quoted_null_is_text export;
+
+  dcl-ds doc likeds(SCYAML_DOC_t);
+
+  assert(parse_fixture('quoted-null.yaml':
+    'stop_cmd: ''null''' + LF: doc): 'parse');
+
+  aEqual('null': SCYAML_value(doc: 'stop_cmd'): 'quoted null kept as text');
+
+end-proc;
+
+//==============================================================================
+// A comma-separated check_alive is one value, split later by SCDEF
+//==============================================================================
+
+dcl-proc test_multi_criteria export;
+
+  dcl-ds doc likeds(SCYAML_DOC_t);
+
+  assert(parse_fixture('multi.yaml':
+    'check_alive: webproxy,8080' + LF: doc): 'parse');
+
+  aEqual('webproxy,8080': SCYAML_value(doc: 'check_alive'): 'kept whole');
+  nEqual(false: SCYAML_is_seq(doc: 'check_alive'): 'not a sequence');
+
+end-proc;
+
+//==============================================================================
+// Booleans appear both quoted and bare in real definitions
+//==============================================================================
+
+dcl-proc test_quoted_and_bare_bool export;
+
+  dcl-ds doc likeds(SCYAML_DOC_t);
+
+  assert(parse_fixture('bools.yaml':
+    'batch_mode: ''true''' + LF +
+    'environment_is_inheriting_vars: true' + LF: doc): 'parse');
+
+  aEqual('true': SCYAML_value(doc: 'batch_mode'): 'quoted true');
+  aEqual('true': SCYAML_value(doc: 'environment_is_inheriting_vars'): 'bare true');
+
+end-proc;
+
+//==============================================================================
+// An empty inline sequence is a sequence, not a scalar
+//==============================================================================
+
+dcl-proc test_empty_flow_sequence export;
+
+  dcl-ds doc likeds(SCYAML_DOC_t);
+
+  assert(parse_fixture('empty-flow.yaml':
+    'service_dependencies: []' + LF: doc): 'parse');
+
+  nEqual(true: SCYAML_is_seq(doc: 'service_dependencies'): 'is a sequence');
+  iEqual(0: SCYAML_count(doc: 'service_dependencies'): 'no items');
+
+end-proc;
+
+//==============================================================================
+// A populated inline sequence
+//==============================================================================
+
+dcl-proc test_flow_sequence export;
+
+  dcl-ds doc likeds(SCYAML_DOC_t);
+
+  assert(parse_fixture('flow.yaml':
+    'groups: [web, autostart]' + LF: doc): 'parse');
+
+  iEqual(2: SCYAML_count(doc: 'groups'): 'two items');
+  aEqual('web': SCYAML_item(doc: 'groups': 1): 'item 1');
+  aEqual('autostart': SCYAML_item(doc: 'groups': 2): 'item 2');
+
+end-proc;
+
+//==============================================================================
+// Block sequences appear both flush left and indented in real definitions
+//==============================================================================
+
+dcl-proc test_block_sequence_flush export;
+
+  dcl-ds doc likeds(SCYAML_DOC_t);
+
+  assert(parse_fixture('seq-flush.yaml':
+    'groups:' + LF +
+    '- autostart' + LF +
+    '- web' + LF: doc): 'parse');
+
+  iEqual(2: SCYAML_count(doc: 'groups'): 'two items');
+  aEqual('autostart': SCYAML_item(doc: 'groups': 1): 'item 1');
+
+end-proc;
+
+dcl-proc test_block_sequence_indented export;
+
+  dcl-ds doc likeds(SCYAML_DOC_t);
+
+  assert(parse_fixture('seq-indent.yaml':
+    'groups:' + LF +
+    '  - web' + LF +
+    '  - backend' + LF +
+    'check_alive: 8080' + LF: doc): 'parse');
+
+  iEqual(2: SCYAML_count(doc: 'groups'): 'two items');
+  aEqual('backend': SCYAML_item(doc: 'groups': 2): 'item 2');
+  aEqual('8080': SCYAML_value(doc: 'check_alive'): 'key after sequence ends it');
+
+end-proc;
+
+//==============================================================================
+// Two sequences in one file stay separate
+//==============================================================================
+
+dcl-proc test_two_sequences export;
+
+  dcl-ds doc likeds(SCYAML_DOC_t);
+
+  assert(parse_fixture('two-seq.yaml':
+    'service_dependencies:' + LF +
+    '- jobrunner' + LF +
+    'groups:' + LF +
+    '- web' + LF +
+    '- autostart' + LF: doc): 'parse');
+
+  iEqual(1: SCYAML_count(doc: 'service_dependencies'): 'one dependency');
+  iEqual(2: SCYAML_count(doc: 'groups'): 'two groups');
+  aEqual('jobrunner': SCYAML_item(doc: 'service_dependencies': 1): 'dependency');
+  aEqual('web': SCYAML_item(doc: 'groups': 1): 'group 1');
+
+end-proc;
+
+//==============================================================================
+// A CR left by a CRLF file must not survive into the value
+//==============================================================================
+
+dcl-proc test_crlf_line_endings export;
+
+  dcl-ds doc likeds(SCYAML_DOC_t);
+
+  assert(parse_fixture('crlf.yaml':
+    'check_alive: 8080' + CRLF +
+    'batch_mode: true' + CRLF: doc): 'parse');
+
+  aEqual('8080': SCYAML_value(doc: 'check_alive'): 'no trailing CR');
+  aEqual('true': SCYAML_value(doc: 'batch_mode'): 'no trailing CR');
+
+end-proc;
+
+//==============================================================================
+// A colon inside a value is not a key separator
+//==============================================================================
+
+dcl-proc test_colon_in_value export;
+
+  dcl-ds doc likeds(SCYAML_DOC_t);
+
+  assert(parse_fixture('colon.yaml':
+    'start_cmd: /usr/bin/proxy --listen host:8080 --upstream a:b' + LF: doc): 'parse');
+
+  aEqual('/usr/bin/proxy --listen host:8080 --upstream a:b':
+         SCYAML_value(doc: 'start_cmd'): 'colons preserved');
+
+end-proc;
+
+//==============================================================================
+// A hash inside a value is preserved
+//
+// Trailing comments are deliberately not stripped: a '#' in a command string
+// is far more likely than a trailing comment, and truncating a command is the
+// worse failure.
+//==============================================================================
+
+dcl-proc test_hash_in_value_preserved export;
+
+  dcl-ds doc likeds(SCYAML_DOC_t);
+
+  assert(parse_fixture('hash.yaml':
+    'start_cmd: /usr/bin/proxy --tag #1' + LF: doc): 'parse');
+
+  aEqual('/usr/bin/proxy --tag #1':
+         SCYAML_value(doc: 'start_cmd'): 'hash preserved');
+
+end-proc;
+
+//==============================================================================
+// Quoted and bare values, and relative paths
+//==============================================================================
+
+dcl-proc test_quoted_and_bare_values export;
+
+  dcl-ds doc likeds(SCYAML_DOC_t);
+
+  assert(parse_fixture('quoting.yaml':
+    'sbmjob_opts: ''JOBQ(QUSRNOMAX)''' + LF +
+    'name: "Web Proxy"' + LF +
+    'dir: .' + LF +
+    'start_cmd: ../../bin/webproxy' + LF: doc): 'parse');
+
+  aEqual('JOBQ(QUSRNOMAX)': SCYAML_value(doc: 'sbmjob_opts'): 'single quotes stripped');
+  aEqual('Web Proxy': SCYAML_value(doc: 'name'): 'double quotes stripped');
+  aEqual('.': SCYAML_value(doc: 'dir'): 'relative dir');
+  aEqual('../../bin/webproxy': SCYAML_value(doc: 'start_cmd'): 'relative command');
+
+end-proc;
+
+//==============================================================================
+// Trailing whitespace on a line is not part of the value
+//==============================================================================
+
+dcl-proc test_trailing_whitespace export;
+
+  dcl-ds doc likeds(SCYAML_DOC_t);
+
+  assert(parse_fixture('trailing.yaml':
+    'check_alive: 8080   ' + LF: doc): 'parse');
+
+  aEqual('8080': SCYAML_value(doc: 'check_alive'): 'trailing blanks trimmed');
+
+end-proc;
+
+//==============================================================================
+// An absent key is distinguishable from an empty one
+//==============================================================================
+
+dcl-proc test_absent_key export;
+
+  dcl-ds doc likeds(SCYAML_DOC_t);
+
+  assert(parse_fixture('absent.yaml':
+    'check_alive: 8080' + LF: doc): 'parse');
+
+  nEqual(false: SCYAML_has(doc: 'log_dir'): 'absent key');
+  aEqual('': SCYAML_value(doc: 'log_dir'): 'absent value is blank');
+  iEqual(0: SCYAML_count(doc: 'log_dir'): 'absent count is zero');
+
+end-proc;
+
+//==============================================================================
+// Keys can be enumerated, so a caller can report unrecognised ones
+//==============================================================================
+
+dcl-proc test_key_enumeration export;
+
+  dcl-ds doc likeds(SCYAML_DOC_t);
+
+  assert(parse_fixture('enumerate.yaml':
+    'start_cmd: /usr/bin/webproxy' + LF +
+    'wibble: 42' + LF: doc): 'parse');
+
+  iEqual(2: SCYAML_key_count(doc): 'two keys');
+  aEqual('start_cmd': SCYAML_key_name(doc: 1): 'key 1');
+  aEqual('wibble': SCYAML_key_name(doc: 2): 'key 2 - unrecognised, still reported');
+  aEqual('': SCYAML_key_name(doc: 3): 'out of range');
+
+end-proc;
+
+//==============================================================================
+// A repeated key takes its last value
+//==============================================================================
+
+dcl-proc test_duplicate_key_last_wins export;
+
+  dcl-ds doc likeds(SCYAML_DOC_t);
+
+  assert(parse_fixture('duplicate.yaml':
+    'check_alive: 8080' + LF +
+    'check_alive: 9090' + LF: doc): 'parse');
+
+  iEqual(1: SCYAML_key_count(doc): 'one key');
+  aEqual('9090': SCYAML_value(doc: 'check_alive'): 'last wins');
+
+end-proc;
+
+//==============================================================================
+// A sequence item before any key is an error, not silently dropped
+//==============================================================================
+
+dcl-proc test_orphan_sequence_item export;
+
+  dcl-ds doc likeds(SCYAML_DOC_t);
+
+  nEqual(false: parse_fixture('orphan.yaml':
+    '- autostart' + LF: doc): 'parse fails');
+  assert((%len(SCYAML_error(doc)) > 0): 'error text set');
+
+end-proc;
+
+//==============================================================================
+// A line that is neither comment, sequence nor key is an error
+//==============================================================================
+
+dcl-proc test_unparseable_line export;
+
+  dcl-ds doc likeds(SCYAML_DOC_t);
+
+  nEqual(false: parse_fixture('bad.yaml':
+    'check_alive: 8080' + LF +
+    'this line has no colon' + LF: doc): 'parse fails');
+  assert((%len(SCYAML_error(doc)) > 0): 'error text set');
+
+end-proc;
+
+//==============================================================================
+// A missing file fails cleanly rather than returning an empty document
+//==============================================================================
+
+dcl-proc test_missing_file export;
+
+  dcl-ds doc likeds(SCYAML_DOC_t);
+
+  nEqual(false: SCYAML_parse('/tmp/rmsc-scyaml-test/does-not-exist.yaml': doc):
+         'parse fails');
+  assert((%len(SCYAML_error(doc)) > 0): 'error text set');
+
+end-proc;
+
+//==============================================================================
+// A realistic definition, end to end
+//==============================================================================
+
+dcl-proc test_full_definition export;
+
+  dcl-ds doc likeds(SCYAML_DOC_t);
+
+  assert(parse_fixture('full.yaml':
+    '# Web Proxy Service' + LF +
+    '' + LF +
+    'name: Web Proxy' + LF +
+    'dir: /QOpenSys/opt/webproxy' + LF +
+    'start_cmd: /QOpenSys/pkgs/bin/node src/server.js' + LF +
+    'stop_cmd: null' + LF +
+    'check_alive: WEBPROXY,8080' + LF +
+    'startup_wait_time: 30' + LF +
+    'batch_mode: ''true''' + LF +
+    'sbmjob_opts: JOBQ(QUSRNOMAX)' + LF +
+    'environment_vars:' + LF +
+    '- PATH=/QOpenSys/pkgs/bin:/usr/bin' + LF +
+    'service_dependencies: []' + LF +
+    'groups:' + LF +
+    '  - web' + LF +
+    '  - autostart' + LF: doc): 'parse');
+
+  aEqual('Web Proxy': SCYAML_value(doc: 'name'): 'name');
+  aEqual('/QOpenSys/pkgs/bin/node src/server.js':
+         SCYAML_value(doc: 'start_cmd'): 'start_cmd');
+  aEqual('': SCYAML_value(doc: 'stop_cmd'): 'stop_cmd null');
+  aEqual('WEBPROXY,8080': SCYAML_value(doc: 'check_alive'): 'check_alive');
+  aEqual('30': SCYAML_value(doc: 'startup_wait_time'): 'startup_wait_time');
+  aEqual('true': SCYAML_value(doc: 'batch_mode'): 'batch_mode');
+  aEqual('JOBQ(QUSRNOMAX)': SCYAML_value(doc: 'sbmjob_opts'): 'sbmjob_opts');
+  iEqual(1: SCYAML_count(doc: 'environment_vars'): 'one env var');
+  aEqual('PATH=/QOpenSys/pkgs/bin:/usr/bin':
+         SCYAML_item(doc: 'environment_vars': 1): 'env var with colons');
+  iEqual(0: SCYAML_count(doc: 'service_dependencies'): 'no dependencies');
+  iEqual(2: SCYAML_count(doc: 'groups'): 'two groups');
+  iEqual(11: SCYAML_key_count(doc): 'all keys read');
+
+end-proc;

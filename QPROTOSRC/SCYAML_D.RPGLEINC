@@ -1,0 +1,179 @@
+**free
+
+//==============================================================================
+// SCYAML_D.rpgleinc
+//   YAML reader copybook
+//
+// 29/08/2026 - RM - created
+//==============================================================================
+
+/if defined(SCYAML_D)
+/eof
+/endif
+/define SCYAML_D
+
+///
+// Include copybooks
+///
+
+/include 'include/RMTOOLS_D.rpgleinc'
+
+///
+// Constants definitions
+///
+
+// A service definition is small and flat. These caps are generous against the
+// real files: the largest observed has 10 keys and 1 sequence.
+dcl-c SCYAML_MAX_KEYS       const(32);
+dcl-c SCYAML_MAX_ITEMS      const(64);
+
+dcl-c SCYAML_KEY_SIZE       const(64);
+dcl-c SCYAML_VALUE_SIZE     const(1024);
+dcl-c SCYAML_ITEM_SIZE      const(512);
+dcl-c SCYAML_ERROR_SIZE     const(256);
+
+///
+// Template field definitions
+///
+
+dcl-s SCYAML_KEY_t   varchar(SCYAML_KEY_SIZE)   template;
+dcl-s SCYAML_VALUE_t varchar(SCYAML_VALUE_SIZE) template;
+dcl-s SCYAML_ITEM_t  varchar(SCYAML_ITEM_SIZE)  template;
+dcl-s SCYAML_ERROR_t varchar(SCYAML_ERROR_SIZE) template;
+
+///
+// A parsed key. A key is either scalar (is_seq off, value set) or a sequence
+// (is_seq on, value empty, items held separately in the document).
+///
+
+dcl-ds SCYAML_KEY_ENTRY_t qualified template inz;
+  name   like(SCYAML_KEY_t)   inz('');
+  value  like(SCYAML_VALUE_t) inz('');
+  is_seq like(BOOLEAN_t)      inz(false);
+end-ds;
+
+///
+// One sequence item, pointing back at the key it belongs to.
+//
+// Items are held in a flat list rather than nested under each key: nesting a
+// fixed array inside a fixed array of keys costs an order of magnitude more
+// storage for a shape where only one or two keys are ever sequences.
+///
+
+dcl-ds SCYAML_ITEM_ENTRY_t qualified template inz;
+  key_index like(INTEGER_t)  inz(0);
+  value     like(SCYAML_ITEM_t) inz('');
+end-ds;
+
+///
+// A parsed document.
+//
+// Declare one of these in the caller and pass it to SCYAML_parse. It is
+// self-contained - there is nothing to free.
+///
+
+dcl-ds SCYAML_DOC_t qualified template inz;
+  err        like(SCYAML_ERROR_t) inz('');
+  key_count  like(INTEGER_t) inz(0);
+  item_count like(INTEGER_t) inz(0);
+  keys  likeds(SCYAML_KEY_ENTRY_t)  dim(SCYAML_MAX_KEYS);
+  items likeds(SCYAML_ITEM_ENTRY_t) dim(SCYAML_MAX_ITEMS);
+end-ds;
+
+///
+// Parse a YAML service definition from the IFS.
+//
+// This is NOT a general YAML parser. It reads the shallow subset service
+// definitions actually use: top-level scalar keys, block sequences, inline
+// flow sequences, quoted and bare scalars, '#' comment lines, blank lines and
+// the literal null.
+//
+// Deliberately not supported, because no definition uses them and guessing
+// would corrupt command strings: nested mappings, multi-line block scalars
+// (| and >), anchors and aliases, and trailing comments after a value.
+//
+// @param path to the .yaml file
+// @param the document to populate
+// @return true if the file was read and parsed; false with doc.err set
+///
+
+dcl-pr SCYAML_parse like(BOOLEAN_t);
+  stmf like(STMF_t) const;
+  doc  likeds(SCYAML_DOC_t);
+end-pr;
+
+///
+// The parse error, or blank if the parse succeeded.
+///
+
+dcl-pr SCYAML_error like(SCYAML_ERROR_t);
+  doc likeds(SCYAML_DOC_t) const;
+end-pr;
+
+///
+// Was the key present in the file?
+//
+// Distinguishes an absent key from one present but empty, which matters for
+// applying defaults.
+///
+
+dcl-pr SCYAML_has like(BOOLEAN_t);
+  doc likeds(SCYAML_DOC_t) const;
+  key like(SCYAML_KEY_t) const;
+end-pr;
+
+///
+// The scalar value of a key, or blank if absent, empty, null or a sequence.
+///
+
+dcl-pr SCYAML_value like(SCYAML_VALUE_t);
+  doc likeds(SCYAML_DOC_t) const;
+  key like(SCYAML_KEY_t) const;
+end-pr;
+
+///
+// Is the key a sequence? True for both block and inline flow form, including
+// an empty inline sequence.
+///
+
+dcl-pr SCYAML_is_seq like(BOOLEAN_t);
+  doc likeds(SCYAML_DOC_t) const;
+  key like(SCYAML_KEY_t) const;
+end-pr;
+
+///
+// How many items the key's sequence holds. Zero for a scalar or absent key.
+///
+
+dcl-pr SCYAML_count like(INTEGER_t);
+  doc likeds(SCYAML_DOC_t) const;
+  key like(SCYAML_KEY_t) const;
+end-pr;
+
+///
+// One item of a key's sequence, 1-based. Blank if out of range.
+///
+
+dcl-pr SCYAML_item like(SCYAML_ITEM_t);
+  doc   likeds(SCYAML_DOC_t) const;
+  key   like(SCYAML_KEY_t) const;
+  index like(INTEGER_t) const;
+end-pr;
+
+///
+// How many keys the document holds.
+///
+
+dcl-pr SCYAML_key_count like(INTEGER_t);
+  doc likeds(SCYAML_DOC_t) const;
+end-pr;
+
+///
+// The name of a key by position, 1-based. Lets a caller report unrecognised
+// keys without SCYAML needing to know which keys are meaningful.
+///
+
+dcl-pr SCYAML_key_name like(SCYAML_KEY_t);
+  doc   likeds(SCYAML_DOC_t) const;
+  index like(INTEGER_t) const;
+end-pr;
