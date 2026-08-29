@@ -1,0 +1,120 @@
+**free
+
+//==============================================================================
+// SCLAUNCH_D.rpgleinc
+//   Service launch copybook
+//
+// 29/08/2026 - RM - created
+//==============================================================================
+
+/if defined(SCLAUNCH_D)
+/eof
+/endif
+/define SCLAUNCH_D
+
+/include 'SCDEF_D.rpgleinc'
+/include 'SCQRY_D.rpgleinc'
+/include 'include/RMTOOLS_D.rpgleinc'
+
+dcl-c SCLAUNCH_MAX_ENV const(48);
+
+dcl-s SCLAUNCH_CMD_t varchar(4096) template;
+dcl-s SCLAUNCH_ERR_t varchar(512)  template;
+
+///
+// The assembled environment for a service.
+//
+// Order matters and follows upstream: inherited variables first, then the
+// service's own, then the derived PORT values, then the SCOMMANDER_ metadata.
+// A later entry of the same name wins, so a service can override anything it
+// inherits.
+///
+
+dcl-ds SCLAUNCH_ENV_t qualified template inz;
+  count like(INTEGER_t) inz(0);
+  entry like(SCDEF_ENVVAR_t) dim(SCLAUNCH_MAX_ENV);
+end-ds;
+
+///
+// Assemble the environment a service will be started with.
+//
+// Exposed rather than kept private because it is worth testing on its own:
+// getting it wrong breaks anything reading $PORT, and upstream's scrunattrs.
+//
+// @param the definition
+// @param the log file the service will write to
+// @param the assembled environment
+///
+
+dcl-pr SCLAUNCH_build_env;
+  def      likeds(SCDEF_t) const;
+  log_file like(STMF_t) const;
+  env      likeds(SCLAUNCH_ENV_t);
+end-pr;
+
+///
+// The shell command used to start a non-batch service.
+//
+// Exposed for the same reason: this is the string that decides whether a
+// started service outlives RMSC, and it is far better tested than trusted.
+///
+
+dcl-pr SCLAUNCH_start_command like(SCLAUNCH_CMD_t);
+  def      likeds(SCDEF_t) const;
+  log_file like(STMF_t) const;
+end-pr;
+
+///
+// The batch job name upstream would derive: non-alphanumerics removed, then
+// truncated to ten characters. sbmjob_jobname overrides it.
+///
+
+dcl-pr SCLAUNCH_job_name like(SCDEF_OBJ_t);
+  def likeds(SCDEF_t) const;
+end-pr;
+
+///
+// Quote a value for the shell, so a space or a quote in an environment value
+// or a path cannot end the argument early.
+///
+
+dcl-pr SCLAUNCH_quote like(SCLAUNCH_CMD_t);
+  value like(SCLAUNCH_CMD_t) const;
+end-pr;
+
+///
+// Start a service, batch or not according to its definition.
+//
+// Returns once the service has been launched, NOT once it is alive - the
+// caller polls for that.
+///
+
+dcl-pr SCLAUNCH_start like(BOOLEAN_t);
+  def      likeds(SCDEF_t) const;
+  log_file like(STMF_t) const;
+  err      like(SCLAUNCH_ERR_t);
+end-pr;
+
+///
+// Run a service's own stop_cmd.
+///
+
+dcl-pr SCLAUNCH_run_stop_cmd like(BOOLEAN_t);
+  def      likeds(SCDEF_t) const;
+  log_file like(STMF_t) const;
+  err      like(SCLAUNCH_ERR_t);
+end-pr;
+
+///
+// End a job, controlled or immediate.
+//
+// Controlled first with the service's stop_wait_time as the delay; the caller
+// escalates to immediate if that times out and no stop_cmd was supplied.
+///
+
+dcl-pr SCLAUNCH_endjob like(BOOLEAN_t);
+  job_name  like(SCQRY_JOBNAME_t) const;
+  delay     like(INTEGER_t) const;
+  immediate like(BOOLEAN_t) const;
+  err       like(SCLAUNCH_ERR_t);
+end-pr;
