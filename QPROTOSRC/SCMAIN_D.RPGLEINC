@@ -1,0 +1,78 @@
+**free
+
+//==============================================================================
+// SCMAIN_D.rpgleinc
+//   Command line copybook
+//
+// 29/08/2026 - RM - created
+//==============================================================================
+
+/if defined(SCMAIN_D)
+/eof
+/endif
+/define SCMAIN_D
+
+/include 'SCDEF_D.rpgleinc'
+/include 'include/RMTOOLS_D.rpgleinc'
+
+dcl-c SCMAIN_ARGS_SIZE const(1024);
+
+dcl-s SCMAIN_ARGS_t varchar(SCMAIN_ARGS_SIZE) template;
+dcl-s SCMAIN_OP_t   varchar(16) template;
+dcl-s SCMAIN_SPEC_t varchar(256) template;
+
+// Upstream's default. A bare 'check' lists what someone configured, not the
+// several dozen host and TCP server definitions that ship with the system,
+// and consumers depend on that.
+dcl-c SCMAIN_DFT_IGNORE const('system');
+
+///
+// The parsed command line.
+///
+
+dcl-ds SCMAIN_OPTS_t qualified template inz;
+  operation like(SCMAIN_OP_t)   inz('');
+  spec      like(SCMAIN_SPEC_t) inz('');
+  verbose   like(BOOLEAN_t) inz(false);
+  quiet     like(BOOLEAN_t) inz(false);
+  colours   like(BOOLEAN_t) inz(false);
+  splf      like(BOOLEAN_t) inz(false);
+  all       like(BOOLEAN_t) inz(false);
+  ignore_globals like(BOOLEAN_t) inz(false);
+  ignore_groups  like(SCDEF_NAME_t) inz(SCMAIN_DFT_IGNORE);
+  sampletime     like(SCDEF_NAME_t) inz('1');
+  err       like(SCMAIN_ARGS_t) inz('');
+end-ds;
+
+///
+// Parse a command line.
+//
+// Exposed so the parsing can be tested without running anything: an operation
+// that quietly resolves to the wrong service, or a flag that silently does
+// nothing, is the kind of fault that only shows up in production.
+///
+
+dcl-pr SCMAIN_parse like(BOOLEAN_t);
+  args like(SCMAIN_ARGS_t) const;
+  opts likeds(SCMAIN_OPTS_t);
+end-pr;
+
+///
+// Build an ad hoc definition from a specifier that names a port, a job or a
+// program rather than a configured service.
+//
+// Returns false if the specifier is not one of those forms.
+///
+
+dcl-pr SCMAIN_adhoc like(BOOLEAN_t);
+  spec like(SCMAIN_SPEC_t) const;
+  def  likeds(SCDEF_t);
+end-pr;
+
+///
+// Run a parsed command line. Returns false with opts.err set on failure.
+///
+
+dcl-pr SCMAIN_run like(BOOLEAN_t);
+  opts likeds(SCMAIN_OPTS_t);
+end-pr;

@@ -278,9 +278,9 @@ dcl-proc test_groups export;
   assert(SCCOLL_load_dir(coll: g_dir): 'load');
   SCCOLL_groups(coll: groups);
 
-  // all, data, web, autostart - web declared twice, listed once
-  iEqual(4: groups.count: 'distinct groups');
-  aEqualV('all': groups.name(1): 'all is built in and first');
+  // data, web, autostart - web is declared twice and listed once. Built-in
+  // groups are not injected here; that is the caller's decision.
+  iEqual(3: groups.count: 'distinct groups declared');
 
   for i = 1 to groups.count;
     if groups.name(i) = 'autostart';

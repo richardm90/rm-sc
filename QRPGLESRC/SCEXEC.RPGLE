@@ -223,6 +223,9 @@ dcl-proc SCEXEC_check_all export;
     endif;
   endfor;
 
+  // Upstream ends the listing with a blank line
+  SCOUT_writeln('');
+
 end-proc;
 
 //==============================================================================
@@ -244,6 +247,8 @@ dcl-proc SCEXEC_list export;
     endif;
   endfor;
 
+  SCOUT_writeln('');
+
 end-proc;
 
 //==============================================================================
@@ -252,16 +257,70 @@ end-proc;
 
 dcl-proc SCEXEC_groups export;
   dcl-pi *n;
-    coll likeds(SCCOLL_t);
+    coll          likeds(SCCOLL_t);
+    ignore_groups like(SCDEF_NAME_t) const;
   end-pi;
 
   dcl-ds groups likeds(SCCOLL_GROUPS_t) inz(*likeds);
-  dcl-s i like(INTEGER_t);
+  dcl-ds def    likeds(SCDEF_t) inz(*likeds);
+  dcl-s i    like(INTEGER_t);
+  dcl-s j    like(INTEGER_t);
+  dcl-s k    like(INTEGER_t);
+  dcl-s seen like(BOOLEAN_t);
+  dcl-s swap like(SCDEF_NAME_t);
 
-  SCCOLL_groups(coll: groups);
+  // Groups of the services the caller can see. A group that exists only on
+  // ignored services is not something they asked about.
+  for i = 1 to SCCOLL_count(coll);
+    if not SCCOLL_get(coll: i: def) or ignored(def: ignore_groups);
+      iter;
+    endif;
+
+    for j = 1 to def.group_count;
+      seen = false;
+      for k = 1 to groups.count;
+        if groups.name(k) = def.groups(j);
+          seen = true;
+          leave;
+        endif;
+      endfor;
+      if not seen and groups.count < SCCOLL_MAX_GROUPS;
+        groups.count += 1;
+        groups.name(groups.count) = def.groups(j);
+      endif;
+    endfor;
+  endfor;
+
+  // 'system' is built in and is listed even when its members are filtered
+  // out. 'all' is built in too but upstream does not list it.
+  seen = false;
+  for k = 1 to groups.count;
+    if groups.name(k) = 'system';
+      seen = true;
+      leave;
+    endif;
+  endfor;
+  if not seen and groups.count < SCCOLL_MAX_GROUPS;
+    groups.count += 1;
+    groups.name(groups.count) = 'system';
+  endif;
+
+  // Alphabetical, as upstream lists them
+  for i = 1 to groups.count - 1;
+    for j = i + 1 to groups.count;
+      if groups.name(j) < groups.name(i);
+        swap = groups.name(i);
+        groups.name(i) = groups.name(j);
+        groups.name(j) = swap;
+      endif;
+    endfor;
+  endfor;
+
   for i = 1 to groups.count;
     SCOUT_writeln(groups.name(i));
   endfor;
+
+  SCOUT_writeln('');
 
 end-proc;
 

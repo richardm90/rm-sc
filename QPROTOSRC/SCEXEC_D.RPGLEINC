@@ -91,7 +91,8 @@ end-pr;
 ///
 
 dcl-pr SCEXEC_groups;
-  coll likeds(SCCOLL_t);
+  coll          likeds(SCCOLL_t);
+  ignore_groups like(SCDEF_NAME_t) const;
 end-pr;
 
 ///

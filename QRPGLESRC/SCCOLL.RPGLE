@@ -288,10 +288,6 @@ dcl-proc SCCOLL_groups export;
 
   clear groups;
 
-  // 'all' is built in and always present, even with no definitions
-  groups.count = 1;
-  groups.name(1) = 'all';
-
   for i = 1 to coll.count;
     if not SCCOLL_get(coll: i: def);
       iter;

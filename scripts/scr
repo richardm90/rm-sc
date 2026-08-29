@@ -1,0 +1,38 @@
+#!/QOpenSys/pkgs/bin/bash
+#
+# scr - Service Commander, RPGLE implementation
+#
+# Named scr rather than sc so both implementations stay callable side by side
+# while this one is being proven.
+#
+# Colour is decided here rather than in RMSC. Upstream decides by asking
+# whether standard output is a terminal; that question cannot be asked from
+# ILE - isatty is not exported by the C runtime, and job type is actively the
+# wrong signal, since a caller can run interactively and still pipe output to
+# something that parses it by column. The shell can answer it properly, so it
+# does, and passes the answer on.
+
+set -o pipefail
+
+RMSC_LIB="${RMSC_LIB:-RMSC}"
+ARGS_LEN=1024
+
+args="$*"
+
+# [ -t 1 ] is true only when standard output really is a terminal
+if [ -t 1 ]; then
+    args="$args --colors"
+fi
+
+# CL CALL passes a character literal at its own length, not at the length the
+# program declares. A short literal into a char(1024) parameter leaves the
+# program reading whatever happens to follow it in memory, so pad to the full
+# declared length.
+args=$(printf "%-${ARGS_LEN}s" "$args")
+
+# A single quote would end the CL literal early
+args="${args//\'/\'\'}"
+
+# No -v: it echoes the command to standard output, and anything parsing this
+# output by column position would read that line as a service.
+exec /QOpenSys/usr/bin/system -kpieO "CALL ${RMSC_LIB}/SCRUN PARM('${args}')"

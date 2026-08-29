@@ -130,7 +130,11 @@ dcl-pr SCCOLL_find like(BOOLEAN_t);
 end-pr;
 
 ///
-// Every distinct group across the collection, plus the built-in 'all'.
+// Every distinct group the definitions declare.
+//
+// Built-in groups are not included: 'all' is implicit and upstream does not
+// list it, and whether 'system' should appear depends on what the caller is
+// filtering, which is the caller's business.
 ///
 
 dcl-pr SCCOLL_groups like(INTEGER_t);

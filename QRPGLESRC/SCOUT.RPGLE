@@ -183,6 +183,10 @@ dcl-proc SCOUT_writeln export;
   // %s rather than the line itself as the format string: a service name or
   // description carrying a percent sign would otherwise be read as a
   // conversion specifier.
-  c_printf('%s' + NL: %trimr(line));
+  //
+  // The line is NOT trimmed. The check row ends with a significant trailing
+  // space, and trimming it here silently broke byte compatibility while every
+  // format test still passed - the fault was in the writer, not the format.
+  c_printf('%s' + NL: line);
 
 end-proc;
