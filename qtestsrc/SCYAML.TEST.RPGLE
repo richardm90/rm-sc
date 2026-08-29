@@ -100,7 +100,13 @@ dcl-proc remove_fixtures;
   enddo;
 
   IFS_closedir(dir);
+
+  // IFS_dltdir fails on a non-empty directory and returns nothing, so a stray
+  // non-.yaml file here would leave the directory behind with nothing said.
+  // Assert the postcondition rather than assume it.
   IFS_dltdir(g_dir);
+  assert((not IFS_isa_directory(g_dir)):
+         'Fixture directory ' + %trim(g_dir) + ' not removed');
 
 end-proc;
 
