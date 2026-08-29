@@ -53,7 +53,14 @@ Not yet done, and worth deciding on rather than assuming:
 
 1. **Do not parse definitions that are about to be filtered out.** A default `check` reads 39
    and shows 3. Skipping the ignored groups during discovery would avoid roughly 90% of the
-   parsing. It needs care: `group:` and `-a` still need everything.
+   parsing, and definition loading is where RMSC is slower than Java — so this is the largest
+   single saving available. **Scheduled for investigation after the bound-call API.**
+
+   The care is in the exceptions rather than the idea: `group:` and `-a` still need
+   everything; dependency resolution can reach an excluded service, since an ignored service
+   can be a dependency of a visible one; and `groups` derives its answer from definitions the
+   filter would drop. The risk is not being slower — it is quietly showing a different set of
+   services, so the byte-exact `check`, `list` and `groups` diffs have to be re-run.
 2. **Batch the port checks.** `check` currently issues one `NETSTAT_INFO` query per port
    criterion. One query returning all listening ports would collapse them into one.
 3. **Cache parsed definitions**, keyed on file modification time. The most complex option and
