@@ -1,0 +1,103 @@
+**free
+
+//==============================================================================
+// SCOUT_D.rpgleinc
+//   Output formatting copybook
+//
+// 29/08/2026 - RM - created
+//==============================================================================
+
+/if defined(SCOUT_D)
+/eof
+/endif
+/define SCOUT_D
+
+/include 'include/RMTOOLS_D.rpgleinc'
+
+///
+// Service status values.
+//
+// These strings are an interface, not a display choice. Consumers parse
+// 'check' output by column position and compare the status text literally.
+///
+
+dcl-c SCOUT_RUNNING     const('RUNNING');
+dcl-c SCOUT_NOT_RUNNING const('NOT RUNNING');
+dcl-c SCOUT_PARTIAL     const('PARTIAL');
+
+///
+// The 'check' row layout, which is fixed and must not drift.
+//
+//   '  ' + status padded to 18 + ' | ' + name + ' (' + description + ') '
+//
+//     1234567890123456789012345678901234567890
+//       RUNNING            | webproxy (Web Proxy)
+//     ^^                   ^
+//     two spaces           '|' at column 22
+//
+// Status occupies columns 3-20, the bar column 22, the name starts at 24.
+///
+
+dcl-c SCOUT_STATUS_WIDTH const(18);
+dcl-c SCOUT_BAR_COLUMN   const(22);
+dcl-c SCOUT_NAME_COLUMN  const(24);
+
+dcl-s SCOUT_LINE_t   varchar(1024) template;
+dcl-s SCOUT_STATUS_t varchar(20)   template;
+
+///
+// One 'check' row.
+//
+// Byte-identical to upstream. If colour is on, ANSI escapes wrap the padded
+// status so the visible columns are unchanged; with colour off - which is the
+// case whenever output is not a terminal - the row contains no escapes at all.
+///
+
+dcl-pr SCOUT_check_row like(SCOUT_LINE_t);
+  status like(SCOUT_STATUS_t) const;
+  name   like(SCOUT_LINE_t) const;
+  desc   like(SCOUT_LINE_t) const;
+end-pr;
+
+///
+// One 'list' row: 'name (description)', with no leading or trailing padding.
+///
+
+dcl-pr SCOUT_list_row like(SCOUT_LINE_t);
+  name like(SCOUT_LINE_t) const;
+  desc like(SCOUT_LINE_t) const;
+end-pr;
+
+///
+// Is standard output a terminal?
+//
+// This decides whether colour is safe. It is not a cosmetic question: a
+// consumer reading 'check' through a pipe takes the status from columns 3-20,
+// and an ANSI escape sequence lands inside that field and corrupts it.
+///
+
+dcl-pr SCOUT_is_tty like(BOOLEAN_t);
+end-pr;
+
+///
+// Turn colour on or off explicitly, for --disable-colors.
+///
+
+dcl-pr SCOUT_set_colour;
+  enabled like(BOOLEAN_t) const;
+end-pr;
+
+///
+// Is colour currently on? Defaults to SCOUT_is_tty() until set explicitly.
+///
+
+dcl-pr SCOUT_colour like(BOOLEAN_t);
+end-pr;
+
+///
+// Write a line to standard output, terminated with a newline.
+///
+
+dcl-pr SCOUT_writeln;
+  line like(SCOUT_LINE_t) const;
+end-pr;

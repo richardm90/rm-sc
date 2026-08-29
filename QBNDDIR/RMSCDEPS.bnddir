@@ -9,6 +9,11 @@
 /* The binder pulls in only the modules whose exports are actually          */
 /* referenced, so listing a module that goes unused costs nothing.          */
 /*                                                                          */
+/* Some entries are here for other entries' sake rather than ours: RMEMBSQL */
+/* needs APP_LOG and APP_ESCAPE from RMAPP01, and RMPASE needs UNIXCMDOA.   */
+/* Leaving them out fails at bind with unresolved references attributed to  */
+/* the rmtools module, not to anything in this project.                     */
+/*                                                                          */
 /* Delete first: CRTBNDDIR fails if the object exists, which would leave    */
 /* only the ADDBNDDIRE running and silently accumulate duplicate entries.   */
 !DLTOBJ OBJ(&O/&N) OBJTYPE(*BNDDIR)
@@ -26,4 +31,7 @@ ADDBNDDIRE BNDDIR(&O/&N) +
         (RMTOOLS/RMENVVAR   *MODULE) +
         (RMTOOLS/RMJOB      *MODULE) +
         (RMTOOLS/RMMSG      *MODULE) +
-        (RMTOOLS/RMEMBSQL   *MODULE) )
+        (RMTOOLS/RMEMBSQL   *MODULE) +
+        (RMTOOLS/RMAPP01    *MODULE) +
+        (RMTOOLS/UNIXCMDOA  *MODULE) +
+        (RMTOOLS/UNIXPIPER4 *MODULE) )
