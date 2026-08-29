@@ -16,8 +16,17 @@ query.
 
 ## Status
 
-**Phase 1 — YAML reader.** `SCYAML` reads service definitions; 24 test cases, 108 assertions.
-Not yet functional as a tool: no service model, no liveness checks, no operations.
+**Phase 2 — model, discovery and queries.** 70 test cases, 290 assertions.
+
+| Module | Does |
+|---|---|
+| `SCYAML` | Reads the YAML subset service definitions use |
+| `SCDEF` | Types a definition and applies upstream's defaults |
+| `SCDIRS` | Resolves the definition search path |
+| `SCCOLL` | Discovery, groups, dependency order with cycle detection |
+| `SCQRY` | Liveness and reporting queries, as embedded SQL |
+
+Not yet functional as a tool: no operations, no command line.
 
 ## Why
 

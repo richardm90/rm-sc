@@ -1,0 +1,145 @@
+**free
+
+//==============================================================================
+// SCQRY_D.rpgleinc
+//   System query copybook
+//
+// 29/08/2026 - RM - created
+//==============================================================================
+
+/if defined(SCQRY_D)
+/eof
+/endif
+/define SCQRY_D
+
+/include 'include/RMTOOLS_D.rpgleinc'
+
+dcl-c SCQRY_MAX_JOBS const(32);
+dcl-c SCQRY_MAX_SPLF const(32);
+
+// Qualified job name: number/user/name
+dcl-s SCQRY_JOBNAME_t varchar(28)  template;
+dcl-s SCQRY_TIME_t    varchar(19)  template;
+dcl-s SCQRY_SPLF_t    varchar(10)  template;
+
+///
+// A set of job names.
+///
+
+dcl-ds SCQRY_JOBS_t qualified template inz;
+  count like(INTEGER_t) inz(0);
+  name  like(SCQRY_JOBNAME_t) dim(SCQRY_MAX_JOBS);
+end-ds;
+
+///
+// Basic runtime figures for one job.
+///
+
+dcl-ds SCQRY_PERF_t qualified template inz;
+  found            like(BOOLEAN_t) inz(false);
+  elapsed_time     like(INTEGER_t) inz(0);
+  thread_count     like(INTEGER_t) inz(0);
+  temp_storage     like(INTEGER_t) inz(0);
+  cpu_percentage   packed(5:2)     inz(0);
+  disk_io_count    like(BIGINT_t)  inz(0);
+  job_start        like(SCQRY_TIME_t) inz('');
+end-ds;
+
+///
+// JVM figures, for services that run one.
+///
+
+dcl-ds SCQRY_JVM_t qualified template inz;
+  found            like(BOOLEAN_t) inz(false);
+  heap_size        like(BIGINT_t) inz(0);
+  max_heap_size    like(BIGINT_t) inz(0);
+  in_use_heap      like(BIGINT_t) inz(0);
+  gc_cycles        like(BIGINT_t) inz(0);
+end-ds;
+
+///
+// Spooled files belonging to a job.
+///
+
+dcl-ds SCQRY_SPLFS_t qualified template inz;
+  count       like(INTEGER_t) inz(0);
+  name        like(SCQRY_SPLF_t) dim(SCQRY_MAX_SPLF);
+  file_number like(INTEGER_t) dim(SCQRY_MAX_SPLF);
+end-ds;
+
+///
+// Is anything listening on the port?
+//
+// This and everything below replace a fork of db2util per query in the Java
+// implementation. Each is one statement on the job's existing connection.
+///
+
+dcl-pr SCQRY_port_listening like(BOOLEAN_t);
+  port like(INTEGER_t) const;
+end-pr;
+
+///
+// The jobs holding a listening socket on the port.
+///
+
+dcl-pr SCQRY_jobs_on_port like(INTEGER_t);
+  port like(INTEGER_t) const;
+  jobs likeds(SCQRY_JOBS_t);
+end-pr;
+
+///
+// Active jobs matching a job name, optionally qualified by subsystem.
+//
+// Filtering happens inside ACTIVE_JOB_INFO rather than in RPG: returning every
+// active job to filter it here would be far more expensive.
+///
+
+dcl-pr SCQRY_jobs_by_name like(INTEGER_t);
+  job_name  like(SCQRY_JOBNAME_t) const;
+  subsystem like(SCQRY_JOBNAME_t) const;
+  jobs      likeds(SCQRY_JOBS_t);
+end-pr;
+
+///
+// Active jobs whose main thread is running the named program.
+///
+
+dcl-pr SCQRY_jobs_by_pgm like(INTEGER_t);
+  program like(SCQRY_JOBNAME_t) const;
+  jobs    likeds(SCQRY_JOBS_t);
+end-pr;
+
+///
+// When a job entered the system.
+///
+
+dcl-pr SCQRY_job_start_time like(SCQRY_TIME_t);
+  job_name like(SCQRY_JOBNAME_t) const;
+end-pr;
+
+///
+// Runtime figures for a job.
+///
+
+dcl-pr SCQRY_job_perf like(BOOLEAN_t);
+  job_name like(SCQRY_JOBNAME_t) const;
+  perf     likeds(SCQRY_PERF_t);
+end-pr;
+
+///
+// JVM figures for a job, if it is running one.
+///
+
+dcl-pr SCQRY_jvm_info like(BOOLEAN_t);
+  job_name like(SCQRY_JOBNAME_t) const;
+  jvm      likeds(SCQRY_JVM_t);
+end-pr;
+
+///
+// Spooled files belonging to a job.
+///
+
+dcl-pr SCQRY_splfs_for_job like(INTEGER_t);
+  job_name like(SCQRY_JOBNAME_t) const;
+  splfs    likeds(SCQRY_SPLFS_t);
+end-pr;

@@ -26,4 +26,13 @@ STRPGMEXP PGMLVL(*CURRENT) SIGNATURE('RMSC 0.1.0')
   EXPORT SYMBOL(SCCOLL_find)
   EXPORT SYMBOL(SCCOLL_groups)
   EXPORT SYMBOL(SCCOLL_start_order)
+  /* SCQRY - system queries */
+  EXPORT SYMBOL(SCQRY_port_listening)
+  EXPORT SYMBOL(SCQRY_jobs_on_port)
+  EXPORT SYMBOL(SCQRY_jobs_by_name)
+  EXPORT SYMBOL(SCQRY_jobs_by_pgm)
+  EXPORT SYMBOL(SCQRY_job_start_time)
+  EXPORT SYMBOL(SCQRY_job_perf)
+  EXPORT SYMBOL(SCQRY_jvm_info)
+  EXPORT SYMBOL(SCQRY_splfs_for_job)
 ENDPGMEXP
