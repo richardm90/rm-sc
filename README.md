@@ -75,4 +75,7 @@ third parties as it stands. Publishing it is intended but not yet straightforwar
 
 ## Licence
 
-Not yet determined.
+[MIT](LICENSE).
+
+Service Commander itself is a separate project, licensed Apache-2.0. This is an independent
+reimplementation, not a fork or derivative of its source.
