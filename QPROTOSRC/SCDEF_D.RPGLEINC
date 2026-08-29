@@ -1,0 +1,174 @@
+**free
+
+//==============================================================================
+// SCDEF_D.rpgleinc
+//   Service definition model copybook
+//
+// 29/08/2026 - RM - created
+//==============================================================================
+
+/if defined(SCDEF_D)
+/eof
+/endif
+/define SCDEF_D
+
+///
+// Include copybooks
+///
+
+/include 'SCYAML_D.rpgleinc'
+/include 'include/RMTOOLS_D.rpgleinc'
+
+///
+// Constants definitions
+///
+
+dcl-c SCDEF_MAX_CRITERIA    const(8);
+dcl-c SCDEF_MAX_ENVVARS     const(24);
+dcl-c SCDEF_MAX_DEPS        const(16);
+dcl-c SCDEF_MAX_GROUPS      const(16);
+dcl-c SCDEF_MAX_UNKNOWN     const(16);
+
+// Upstream defaults
+dcl-c SCDEF_DFT_STARTUP_WAIT const(60);
+dcl-c SCDEF_DFT_STOP_WAIT    const(45);
+
+// check_alive criterion kinds
+dcl-c SCDEF_CHECK_PORT      const('PORT');
+dcl-c SCDEF_CHECK_JOB       const('JOB');
+dcl-c SCDEF_CHECK_PGM       const('PGM');
+
+///
+// Template field definitions
+///
+
+dcl-s SCDEF_NAME_t     varchar(64)   template;
+dcl-s SCDEF_FRIENDLY_t varchar(128)  template;
+dcl-s SCDEF_CMD_t      varchar(1024) template;
+dcl-s SCDEF_CRIT_t     varchar(64)   template;
+dcl-s SCDEF_ENVVAR_t   varchar(512)  template;
+dcl-s SCDEF_KIND_t     char(4)       template;
+dcl-s SCDEF_OBJ_t      varchar(10)   template;
+
+///
+// One check_alive criterion.
+//
+// Upstream accepts four forms and tells them apart by shape:
+//   8080          a port
+//   JOBNAME       a job name
+//   SBS/JOBNAME   a job name qualified by subsystem
+//   PGM-NAME      jobs running that program from the main thread
+///
+
+dcl-ds SCDEF_CRITERION_t qualified template inz;
+  kind      like(SCDEF_KIND_t) inz(*blanks);
+  raw       like(SCDEF_CRIT_t) inz('');
+  port      like(INTEGER_t)    inz(0);
+  subsystem like(SCDEF_OBJ_t)  inz('');
+  job_name  like(SCDEF_OBJ_t)  inz('');
+  program   like(SCDEF_OBJ_t)  inz('');
+end-ds;
+
+///
+// A service definition, with upstream's defaults applied.
+///
+
+dcl-ds SCDEF_t qualified template inz;
+  err          like(SCYAML_ERROR_t) inz('');
+
+  // Identity
+  short_name   like(SCDEF_NAME_t)     inz('');
+  friendly     like(SCDEF_FRIENDLY_t) inz('');
+  defined_at   like(STMF_t)           inz('');
+
+  // Commands and working directory
+  dir          like(STMF_t)     inz('');
+  start_cmd    like(SCDEF_CMD_t) inz('');
+  stop_cmd     like(SCDEF_CMD_t) inz('');
+  has_stop_cmd like(BOOLEAN_t)  inz(false);
+
+  // Timings
+  startup_wait like(INTEGER_t) inz(SCDEF_DFT_STARTUP_WAIT);
+  stop_wait    like(INTEGER_t) inz(SCDEF_DFT_STOP_WAIT);
+
+  // Batch submission
+  batch_mode     like(BOOLEAN_t)   inz(false);
+  sbmjob_jobname like(SCDEF_OBJ_t) inz('');
+  sbmjob_opts    like(SCDEF_CMD_t) inz('');
+
+  // Environment
+  inherit_vars like(BOOLEAN_t) inz(true);
+  log_dir      like(STMF_t)    inz('');
+
+  only_if_executable like(STMF_t) inz('');
+
+  // A cluster: key is parsed and rejected, never silently ignored
+  is_cluster like(BOOLEAN_t) inz(false);
+
+  criteria_count like(INTEGER_t) inz(0);
+  criteria likeds(SCDEF_CRITERION_t) dim(SCDEF_MAX_CRITERIA);
+
+  envvar_count like(INTEGER_t) inz(0);
+  envvars like(SCDEF_ENVVAR_t) dim(SCDEF_MAX_ENVVARS);
+
+  dep_count like(INTEGER_t) inz(0);
+  deps like(SCDEF_NAME_t) dim(SCDEF_MAX_DEPS);
+
+  group_count like(INTEGER_t) inz(0);
+  groups like(SCDEF_NAME_t) dim(SCDEF_MAX_GROUPS);
+
+  // Keys that are not part of the schema. Recorded, never fatal, so a new
+  // upstream key cannot stop a definition loading.
+  unknown_count like(INTEGER_t) inz(0);
+  unknown like(SCYAML_KEY_t) dim(SCDEF_MAX_UNKNOWN);
+end-ds;
+
+///
+// Load a service definition from a YAML file.
+//
+// The short name comes from the file name, as upstream does it.
+//
+// @param path to the .yaml file
+// @param the definition to populate
+// @return true on success; false with def.err set
+///
+
+dcl-pr SCDEF_load like(BOOLEAN_t);
+  stmf like(STMF_t) const;
+  def  likeds(SCDEF_t);
+end-pr;
+
+///
+// Build a definition from an already-parsed document.
+//
+// Separated from SCDEF_load so the mapping can be exercised without file I/O.
+//
+// @param the parsed document
+// @param the path it came from, for short_name and defined_at
+// @param the definition to populate
+// @return true on success; false with def.err set
+///
+
+dcl-pr SCDEF_from_doc like(BOOLEAN_t);
+  doc  likeds(SCYAML_DOC_t) const;
+  stmf like(STMF_t) const;
+  def  likeds(SCDEF_t);
+end-pr;
+
+///
+// Does the definition belong to the named group?
+///
+
+dcl-pr SCDEF_in_group like(BOOLEAN_t);
+  def   likeds(SCDEF_t) const;
+  group like(SCDEF_NAME_t) const;
+end-pr;
+
+///
+// The effective working directory: dir if given, else the directory holding
+// the definition file. Relative dir values resolve against the latter.
+///
+
+dcl-pr SCDEF_effective_dir like(STMF_t);
+  def likeds(SCDEF_t) const;
+end-pr;

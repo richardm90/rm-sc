@@ -97,3 +97,22 @@ reachable from outside it. That restriction is correct; the test just needs its 
 Reading is the mirror image: `IFS_OPEN_TYPE_READ` opens with `o_ccsid=<job ccsid>`, so the C
 runtime converts from the file's tagged CCSID on the way in. No `STRING_utf8` call is needed
 anywhere — the conversion is in the open.
+
+## Copybooks must be listed as prerequisites
+
+TOBi rebuilds a target only when a **named** prerequisite is newer. A module that lists just
+its own source will not rebuild when a copybook it includes changes:
+
+```make
+SCDEF.MODULE: SCDEF.RPGLE                       # wrong - copybook changes are invisible
+SCDEF.MODULE: SCDEF.RPGLE QPROTOSRC/SCDEF_D.RPGLEINC   # right
+```
+
+The failure mode is nasty because nothing reports an error. `makei build` says **"Nothing to
+be done for 'all'"**, which reads as "already up to date". The service program keeps the old
+record layouts while a freshly compiled caller — a test program, say, which the IBM i Testing
+extension always recompiles — uses the new ones. Fields are then read at the wrong offsets and
+come back as plausible-looking garbage: an integer reading `1077952576` is `0x40404040`, four
+EBCDIC blanks being interpreted as a number.
+
+List every copybook a module includes, including indirect ones.
