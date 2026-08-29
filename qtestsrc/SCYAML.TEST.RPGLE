@@ -24,6 +24,7 @@ ctl-opt bnddir('RMSCPGM':'RMSCDEPS');
 /include 'SCYAML_D.rpgleinc'
 /include 'include/RMIFS_D.rpgleinc'
 /include 'include/RMTOOLS_D.rpgleinc'
+/include 'include/PSDS_D.rpgleinc'
 /include QINCLUDE,TESTCASE
 
 //==============================================================================
@@ -31,6 +32,8 @@ ctl-opt bnddir('RMSCPGM':'RMSCDEPS');
 //==============================================================================
 
 dcl-s g_dir like(STMF_t);
+
+dcl-pr remove_fixtures end-pr;
 
 dcl-pr write_fixture like(STMF_t);
   name    like(STMF_t) const;
@@ -49,8 +52,55 @@ end-pr;
 
 dcl-proc setUpSuite export;
 
-  g_dir = '/tmp/rmsc-scyaml-test';
+  // Qualify the directory by current user. A fixed path under /tmp belongs to
+  // whoever runs the suite first: the directory is created 755, so a second
+  // user gets read and execute but not write, and every fixture write fails.
+  g_dir = '/tmp/rmsc-scyaml-test-' + %trim(psds.current_user);
+
+  // Harmless if it already exists from an earlier run
   IFS_crtdir(g_dir);
+
+end-proc;
+
+//==============================================================================
+// Suite tear-down
+//
+// Remove the fixtures this suite wrote, so a run leaves nothing behind and a
+// renamed fixture cannot linger and be mistaken for a current one.
+//
+// Only *.yaml is removed, and only from this suite's own per-user directory.
+//
+// NOTE when debugging a WRITE-side fault - a CCSID mismatch, a truncated
+// value - the bytes on disk are the evidence you need, and the fixture
+// content in this source is not a substitute for them. Comment out the call
+// to remove_fixtures below and re-run to keep them.
+//==============================================================================
+
+dcl-proc tearDownSuite export;
+
+  remove_fixtures();
+
+end-proc;
+
+dcl-proc remove_fixtures;
+
+  dcl-s dir      pointer;
+  dcl-s filename like(IFS_DIR_FILENAME_t);
+
+  dir = IFS_opendir(g_dir);
+  if dir = *null;
+    return;
+  endif;
+
+  dow IFS_readdir(dir: filename);
+    if %len(filename) > 5
+       and %subst(filename: %len(filename) - 4) = '.yaml';
+      IFS_remove_file(%trim(g_dir) + '/' + %trim(filename));
+    endif;
+  enddo;
+
+  IFS_closedir(dir);
+  IFS_dltdir(g_dir);
 
 end-proc;
 
@@ -70,7 +120,8 @@ dcl-proc write_fixture;
   path = %trim(g_dir) + '/' + %trim(name);
 
   handle = IFS_open_file(path: IFS_OPEN_TYPE_WRITE);
-  assert((handle >= 0): 'Could not create fixture ' + %trim(path));
+  assert((handle >= 0): 'Could not create fixture ' + %trim(path) +
+                        ' - ' + %trim(IFS_error_text()));
 
   // IFS_write_utf8, not IFS_write. IFS_OPEN_TYPE_WRITE tags the file CCSID
   // 1208 and opens it O_CCSID, which means "the bytes I hand you are already
@@ -490,7 +541,7 @@ dcl-proc test_missing_file export;
 
   dcl-ds doc likeds(SCYAML_DOC_t);
 
-  nEqual(false: SCYAML_parse('/tmp/rmsc-scyaml-test/does-not-exist.yaml': doc):
+  nEqual(false: SCYAML_parse(%trim(g_dir) + '/does-not-exist.yaml': doc):
          'parse fails');
   assert((%len(SCYAML_error(doc)) > 0): 'error text set');
 
