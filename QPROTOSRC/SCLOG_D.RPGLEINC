@@ -1,0 +1,47 @@
+**free
+
+//==============================================================================
+// SCLOG_D.rpgleinc
+//   Service log file location copybook
+//
+// 29/08/2026 - RM - created
+//==============================================================================
+
+/if defined(SCLOG_D)
+/eof
+/endif
+/define SCLOG_D
+
+/include 'SCDEF_D.rpgleinc'
+/include 'include/RMTOOLS_D.rpgleinc'
+
+// Relative to the user's home directory. Confirmed against upstream, which
+// reports it as the place to look when a log cannot be found.
+dcl-c SCLOG_DIR_REL const('.sc/logs');
+
+///
+// The log directory: the service's log_dir if it has one, else $HOME/.sc/logs.
+///
+
+dcl-pr SCLOG_dir like(STMF_t);
+  def likeds(SCDEF_t) const;
+end-pr;
+
+///
+// The log file for a service.
+///
+
+dcl-pr SCLOG_path like(STMF_t);
+  def likeds(SCDEF_t) const;
+end-pr;
+
+///
+// Create the log directory if it is missing.
+//
+// A service whose output cannot be written would otherwise fail to start for
+// a reason that has nothing to do with the service.
+///
+
+dcl-pr SCLOG_ensure_dir like(BOOLEAN_t);
+  def likeds(SCDEF_t) const;
+end-pr;

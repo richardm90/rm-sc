@@ -1,0 +1,160 @@
+**free
+
+//==============================================================================
+// SCEXEC_D.rpgleinc
+//   Service operations copybook
+//
+// 29/08/2026 - RM - created
+//==============================================================================
+
+/if defined(SCEXEC_D)
+/eof
+/endif
+/define SCEXEC_D
+
+/include 'SCCOLL_D.rpgleinc'
+/include 'SCDEF_D.rpgleinc'
+/include 'SCOUT_D.rpgleinc'
+/include 'SCQRY_D.rpgleinc'
+/include 'include/RMTOOLS_D.rpgleinc'
+
+// Poll intervals. Upstream uses 2s for start and 2.5s for stop; DLYJOB takes
+// whole seconds, so stop rounds to 3. Half a second on a poll interval makes
+// no practical difference to when a service is seen to be up or down.
+dcl-c SCEXEC_START_POLL const(2);
+dcl-c SCEXEC_STOP_POLL  const(3);
+
+dcl-s SCEXEC_ERR_t varchar(512) template;
+
+///
+// Whether a single check_alive criterion is currently satisfied.
+///
+
+dcl-pr SCEXEC_criterion_alive like(BOOLEAN_t);
+  criterion likeds(SCDEF_CRITERION_t) const;
+end-pr;
+
+///
+// A service's status: RUNNING when every criterion is satisfied, NOT RUNNING
+// when none is, PARTIAL when some are.
+//
+// PARTIAL is easy to overlook and matters: a service declaring both a job and
+// a port is half up if the job exists but nothing is listening yet.
+///
+
+dcl-pr SCEXEC_status like(SCOUT_STATUS_t);
+  def likeds(SCDEF_t) const;
+end-pr;
+
+///
+// The jobs currently satisfying a service's criteria.
+///
+
+dcl-pr SCEXEC_jobs like(INTEGER_t);
+  def  likeds(SCDEF_t) const;
+  jobs likeds(SCQRY_JOBS_t);
+end-pr;
+
+///
+// Write one 'check' row for a service.
+///
+
+dcl-pr SCEXEC_check;
+  def likeds(SCDEF_t) const;
+end-pr;
+
+///
+// Write a 'check' row for every service in the collection, skipping the
+// groups named in ignore_groups.
+//
+// The default exclusion is the 'system' group, and consumers rely on it: a
+// bare 'check' lists the services someone actually configured, not the
+// several dozen host and TCP server definitions that ship with the system.
+///
+
+dcl-pr SCEXEC_check_all;
+  coll          likeds(SCCOLL_t);
+  ignore_groups like(SCDEF_NAME_t) const;
+end-pr;
+
+///
+// Write a 'list' row for every service, same filtering as check.
+///
+
+dcl-pr SCEXEC_list;
+  coll          likeds(SCCOLL_t);
+  ignore_groups like(SCDEF_NAME_t) const;
+end-pr;
+
+///
+// Write every group name.
+///
+
+dcl-pr SCEXEC_groups;
+  coll likeds(SCCOLL_t);
+end-pr;
+
+///
+// Start a service and everything it depends on, dependencies first.
+//
+// Returns once the service is alive, or false with err set if it does not
+// come up within its startup_wait_time.
+///
+
+dcl-pr SCEXEC_start like(BOOLEAN_t);
+  coll likeds(SCCOLL_t);
+  name like(SCDEF_NAME_t) const;
+  err  like(SCEXEC_ERR_t);
+end-pr;
+
+///
+// Stop a service, and anything that depends on it first.
+//
+// kill skips the service's own stop_cmd and goes straight to ENDJOB, which is
+// the difference between the 'stop' and 'kill' operations.
+///
+
+dcl-pr SCEXEC_stop like(BOOLEAN_t);
+  coll likeds(SCCOLL_t);
+  name like(SCDEF_NAME_t) const;
+  kill like(BOOLEAN_t) const;
+  err  like(SCEXEC_ERR_t);
+end-pr;
+
+///
+// Stop then start.
+///
+
+dcl-pr SCEXEC_restart like(BOOLEAN_t);
+  coll likeds(SCCOLL_t);
+  name like(SCDEF_NAME_t) const;
+  err  like(SCEXEC_ERR_t);
+end-pr;
+
+///
+// Reporting operations. Each writes to standard output.
+///
+
+dcl-pr SCEXEC_info;
+  def likeds(SCDEF_t) const;
+end-pr;
+
+dcl-pr SCEXEC_file;
+  def likeds(SCDEF_t) const;
+end-pr;
+
+dcl-pr SCEXEC_jobinfo;
+  def likeds(SCDEF_t) const;
+end-pr;
+
+dcl-pr SCEXEC_loginfo;
+  def likeds(SCDEF_t) const;
+end-pr;
+
+dcl-pr SCEXEC_perfinfo;
+  def likeds(SCDEF_t) const;
+end-pr;
+
+dcl-pr SCEXEC_scrunattrs;
+  def likeds(SCDEF_t) const;
+end-pr;

@@ -16,7 +16,7 @@ query.
 
 ## Status
 
-**Phase 2 — model, discovery and queries.** 70 test cases, 290 assertions.
+**Phase 3 — operations.** 107 test cases, 425 assertions.
 
 | Module | Does |
 |---|---|
@@ -25,8 +25,12 @@ query.
 | `SCDIRS` | Resolves the definition search path |
 | `SCCOLL` | Discovery, groups, dependency order with cycle detection |
 | `SCQRY` | Liveness and reporting queries, as embedded SQL |
+| `SCOUT` | Output formatting, byte-identical to upstream |
+| `SCLOG` | Log file location |
+| `SCLAUNCH` | Starting, stopping, environment assembly |
+| `SCEXEC` | Status determination and the twelve operations |
 
-Not yet functional as a tool: no operations, no command line.
+Not yet usable as a tool: no command line. That is the next phase.
 
 ## Why
 
