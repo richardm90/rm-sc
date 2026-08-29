@@ -19,6 +19,7 @@ ctl-opt text('RMSC: Service definition collection');
 /include 'include/RMIFS_D.rpgleinc'
 /include 'include/RMLIST_D.rpgleinc'
 /include 'include/RMPATH_D.rpgleinc'
+/include 'include/RMSTRING_D.rpgleinc'
 /include 'include/RMTOOLS_D.rpgleinc'
 
 ///
@@ -46,17 +47,6 @@ dcl-pr in_order like(BOOLEAN_t);
   name  like(SCDEF_NAME_t) const;
 end-pr;
 
-// Lower-case without rmtools STRING_lower, which returns varchar(65535).
-// That return value is a 64KB automatic-storage temporary per call, and these
-// run once per directory entry, once per collection entry in a lookup, and
-// inside a recursive walk - enough to exhaust the job's automatic storage and
-// fail with MCH0601 rather than anything that names the cause.
-dcl-pr to_lower like(SCDEF_NAME_t);
-  value like(SCDEF_NAME_t) const;
-end-pr;
-
-dcl-c UPPER const('ABCDEFGHIJKLMNOPQRSTUVWXYZ');
-dcl-c LOWER const('abcdefghijklmnopqrstuvwxyz');
 
 //==============================================================================
 // SCCOLL_init
@@ -186,7 +176,7 @@ dcl-proc is_yaml;
 
   dcl-s lower like(IFS_DIR_FILENAME_t);
 
-  lower = %xlate(UPPER: LOWER: %trim(filename));
+  lower = STRING_lower(%trim(filename));
 
   if %len(lower) > 5 and %subst(lower: %len(lower) - 4) = '.yaml';
     return true;
@@ -267,7 +257,7 @@ dcl-proc SCCOLL_find export;
   dcl-s i    like(INTEGER_t);
   dcl-s want like(SCDEF_NAME_t);
 
-  want = to_lower(%trim(name));
+  want = STRING_lower(%trim(name));
 
   for i = 1 to coll.count;
     if SCCOLL_get(coll: i: def) and def.short_name = want;
@@ -369,7 +359,7 @@ dcl-proc visit;
   dcl-s want like(SCDEF_NAME_t);
   dcl-s i    like(INTEGER_t);
 
-  want = to_lower(%trim(name));
+  want = STRING_lower(%trim(name));
 
   // Already placed by another branch of the graph
   if in_order(order: want);
@@ -417,15 +407,6 @@ end-proc;
 //==============================================================================
 // in_order
 //==============================================================================
-
-dcl-proc to_lower;
-  dcl-pi *n like(SCDEF_NAME_t);
-    value like(SCDEF_NAME_t) const;
-  end-pi;
-
-  return %xlate(UPPER: LOWER: value);
-
-end-proc;
 
 //==============================================================================
 // in_order
