@@ -1,0 +1,4 @@
+  RUNNING            | webproxy (Web Proxy) 
+  NOT RUNNING        | jobrunner (Job Runner) 
+  PARTIAL            | cache (Cache Service) 
+  RUNNING            | apidaemon (API Daemon) 

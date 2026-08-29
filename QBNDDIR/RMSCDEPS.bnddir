@@ -1,0 +1,29 @@
+/* RMSC: rmtools dependencies, bound BY COPY.                              */
+/*                                                                          */
+/* Every entry here is a *MODULE, not a *SRVPGM. That is the whole point:   */
+/* the binder COPIES a module's code into the bound object, so RMSC carries */
+/* no runtime dependency on the RMTOOLS library and needs no library-list   */
+/* entry in the jobs that call it. A *SRVPGM entry would bind by reference  */
+/* and reintroduce exactly that dependency.                                 */
+/*                                                                          */
+/* The binder pulls in only the modules whose exports are actually          */
+/* referenced, so listing a module that goes unused costs nothing.          */
+/*                                                                          */
+/* Delete first: CRTBNDDIR fails if the object exists, which would leave    */
+/* only the ADDBNDDIRE running and silently accumulate duplicate entries.   */
+!DLTOBJ OBJ(&O/&N) OBJTYPE(*BNDDIR)
+CRTBNDDIR BNDDIR(&O/&N) +
+          TEXT('RMSC: rmtools modules, bound by copy')
+ADDBNDDIRE BNDDIR(&O/&N) +
+   OBJ( (RMTOOLS/RMSTRING01 *MODULE) +
+        (RMTOOLS/RMSTRING02 *MODULE) +
+        (RMTOOLS/RMPASE     *MODULE) +
+        (RMTOOLS/RMQCMD     *MODULE) +
+        (RMTOOLS/RMIFS      *MODULE) +
+        (RMTOOLS/RMPATH     *MODULE) +
+        (RMTOOLS/RMLIST     *MODULE) +
+        (RMTOOLS/RMSPACE    *MODULE) +
+        (RMTOOLS/RMENVVAR   *MODULE) +
+        (RMTOOLS/RMJOB      *MODULE) +
+        (RMTOOLS/RMMSG      *MODULE) +
+        (RMTOOLS/RMEMBSQL   *MODULE) )

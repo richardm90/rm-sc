@@ -1,0 +1,33 @@
+**free
+
+//==============================================================================
+// SCPING_D.rpgleinc
+//   Phase 0 build spike - definitions
+//
+// THROWAWAY. Exists only to prove the TOBi build, the cross-library
+// bind-by-copy of an rmtools module, and the RPGUnit loop. Deleted at the
+// start of Phase 1.
+//
+// 29/08/2026 - RM - created
+//==============================================================================
+
+/if defined(SCPING_D)
+/eof
+/endif
+/define SCPING_D
+
+/include 'include/RMTOOLS_D.rpgleinc'
+
+///
+// Upper-case a string by delegating to rmtools STRING_upper.
+//
+// The delegation is the point: it fails to bind unless RMSTRING01 was
+// bound by copy into the service program.
+//
+// @param the string to upper-case
+// @return the upper-cased string
+///
+
+dcl-pr SCPING_upper like(STRING_t);
+  str like(STRING_t) const;
+end-pr;

@@ -1,0 +1,12 @@
+{
+    "IBM i Testing.productLibrary": "RPGUNIT",
+    "IBM i Testing.testStubPreferences": {
+        "Test Source Directory": "qtestsrc"
+    },
+    "files.associations": {
+        "*.rpgleinc": "rpgle",
+        "*.RPGLEINC": "rpgle",
+        "*.bnd": "bnd",
+        "*.BND": "bnd"
+    }
+}

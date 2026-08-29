@@ -1,0 +1,21 @@
+{
+  "version": "0.0.1",
+  "description": "RMSC: Service Commander for IBM i, in RPGLE",
+  "objlib": "RMSC",
+  "curlib": "RMSC",
+  "includePath": [
+    "QPROTOSRC",
+    "/prj/rmtools"
+  ],
+  "preUsrlibl": [
+    "RMSC",
+    "RMSCT",
+    "RMTOOLS",
+    "RPGUNIT",
+    "QDEVTOOLS"
+  ],
+  "postUsrlibl": [],
+  "setIBMiEnvCmd": [],
+  "buildCommand": "/QOpenSys/pkgs/bin/makei build",
+  "compileCommand": "/QOpenSys/pkgs/bin/makei c -f {filename}"
+}

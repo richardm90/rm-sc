@@ -1,0 +1,15 @@
+/* RMSC: the project's own service programs, for *PGM objects to bind to.   */
+/*                                                                          */
+/* TOBi's CRTBNDRPGFLAGS has no BNDDIR parameter, so a .PGM.RPGLE cannot be  */
+/* pointed at a service program from Rules.mk - it must carry               */
+/* ctl-opt bnddir('RMSCPGM') in the source. This is the shape SCMAIN will    */
+/* use in Phase 4.                                                          */
+/*                                                                          */
+/* The entry is library-qualified (&O, not *LIBL) deliberately: an entry     */
+/* recorded as *LIBL makes activation search the caller's library list,      */
+/* which would put a library-list requirement on every job calling RMSC.     */
+!DLTOBJ OBJ(&O/&N) OBJTYPE(*BNDDIR)
+CRTBNDDIR BNDDIR(&O/&N) +
+          TEXT('RMSC: own service programs')
+ADDBNDDIRE BNDDIR(&O/&N) +
+   OBJ( (&O/SCPING *SRVPGM) )

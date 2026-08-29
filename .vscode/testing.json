@@ -1,0 +1,30 @@
+{
+    "rpgunit": {
+        "rucrtrpg": {
+            "tgtCcsid": "*JOB",
+            "dbgView": "*SOURCE",
+            "rpgPpOpt": "*LVL2",
+            "cOption": [
+                "*EVENTF"
+            ],
+            "tstPgm": "RMSCT/&SHORTNAME",
+            "incDir": [
+                "QPROTOSRC",
+                "/prj/rmtools"
+            ]
+        },
+        "rucalltst": {
+            "order": "*API",
+            "libl": "*CURRENT",
+            "jobD": "*DFT",
+            "detail": "*BASIC",
+            "output": "*ALLWAYS",
+            "rclRsc": "*NO",
+            "onFailure": "*ABORT",
+            "tstPgm": "RMSCT/&SHORTNAME"
+        }
+    },
+    "codecov": {
+        "module": []
+    }
+}

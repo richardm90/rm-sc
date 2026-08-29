@@ -1,0 +1,10 @@
+.evfevent/
+.logs/
+.env
+*.code-workspace.user
+.DS_Store
+
+# Local-only material: real captures from live systems, client notes,
+# infrastructure detail. Never committed - this repo is public.
+local/
+.deps/
