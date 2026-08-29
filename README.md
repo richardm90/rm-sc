@@ -68,6 +68,18 @@ inside the status columns and corrupt them.
 
 `fixtures/` holds reference captures in this layout for the format tests.
 
+## Autostart at IPL
+
+RMSC does **not** hook into `STRTCPSVR`. Starting services at IPL stays with the Java
+implementation, deliberately.
+
+The `*SC` TCP server hardcodes the path to the Java `sc` inside a QSYS-owned program, so
+repointing it means either modifying a program the package installed — which a package update
+would silently revert — or registering a parallel server special value. Both are possible;
+neither earns its risk. RMSC's speed advantage is worth nothing at IPL, where the work runs
+once, unattended, with nobody waiting, and the failure mode is a service not coming back after
+a restart.
+
 ## Scope
 
 Full parity with upstream **except** cluster mode and nginx `cluster.conf` generation, and
