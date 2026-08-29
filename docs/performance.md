@@ -37,15 +37,34 @@ So the JVM cold start is smaller than assumed, and the `db2util` fork is not wha
 the query time — the IBM i services themselves are. `ACTIVE_JOB_INFO` and `NETSTAT_INFO` cost
 what they cost, whether reached through a forked process or embedded SQL.
 
-## Where the real win is
+## The bound-call API, measured
 
-The one measurement that is dramatic is not in this table, because it is not a shell
-invocation at all. Every route above pays for a process, a job, and a full definition load.
-A caller already inside an ILE job — a green-screen program calling the service program
-directly — pays none of that.
+The API was expected to be dramatically faster, on the reasoning that a caller already inside
+a job pays for no process, no job and no definition load. Measured, it is faster, but the
+first version of it was not: it called `SCCOLL_load` on every call and re-read all 39
+definitions, costing **2.64s per call** — no better than running the command.
 
-That is the case the bound-call API is for, and it is where a consumer refreshing a subfile
-several times a minute would actually notice.
+Caching the definitions for the life of the activation is what makes the API worth using:
+
+| | per call |
+|---|---|
+| `SC_check_all`, reloading definitions each time | 2.64s |
+| `SC_check_all`, definitions cached | **1.78s** |
+| Java `sc check` via PASE | ~3.4s |
+
+Twenty calls in one job take 35.7s, so the marginal cost really is flat — the first call pays
+for the load, the rest do not.
+
+Live status is deliberately **not** cached. Every call re-queries the system, because that is
+the question being asked. `SC_refresh()` drops the cached definitions when a file has changed.
+
+So against today's 3.4s, the API is about **1.9x** — real, but not the order of magnitude
+predicted before measuring. The saving is not mostly the JVM: removing the process, the job
+and the definition re-read gets 3.4s down to 1.8s, and the remaining 1.8s is the IBM i
+services themselves.
+
+The stronger argument for the API is not speed. It is that the consumer stops parsing text by
+column position, and a format change stops being able to make services silently disappear.
 
 ## What would make the command line faster
 
@@ -61,8 +80,11 @@ Not yet done, and worth deciding on rather than assuming:
    can be a dependency of a visible one; and `groups` derives its answer from definitions the
    filter would drop. The risk is not being slower — it is quietly showing a different set of
    services, so the byte-exact `check`, `list` and `groups` diffs have to be re-run.
-2. **Batch the port checks.** `check` currently issues one `NETSTAT_INFO` query per port
-   criterion. One query returning all listening ports would collapse them into one.
+2. **Batch the queries.** `check` issues one query per criterion — six round trips for three
+   services with two criteria each. One `NETSTAT_INFO` returning all listening ports and one
+   `ACTIVE_JOB_INFO` returning all matching jobs, filtered in memory, would collapse those
+   into two. **Now the largest remaining cost**: after caching definitions, the whole of the
+   bound call's 1.78s is these queries.
 3. **Cache parsed definitions**, keyed on file modification time. The most complex option and
    the one most likely to be wrong in a way nobody notices.
 

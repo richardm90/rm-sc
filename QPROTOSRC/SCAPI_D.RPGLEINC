@@ -1,0 +1,150 @@
+**free
+
+//==============================================================================
+// SCAPI_D.rpgleinc
+//   Service Commander bound-call API
+//
+// This is the public interface for an ILE program that wants to manage
+// services directly, rather than by running a command and reading its output.
+//
+// A caller already inside a job pays for none of what the command line pays
+// for: no process, no job, no re-reading every service definition. That is
+// the whole point of it.
+//
+// 29/08/2026 - RM - created
+//==============================================================================
+
+/if defined(SCAPI_D)
+/eof
+/endif
+/define SCAPI_D
+
+/include 'include/RMLIST_D.rpgleinc'
+/include 'include/RMTOOLS_D.rpgleinc'
+
+///
+// Status values. Compare against these rather than against literals.
+///
+
+dcl-c SC_RUNNING     const('RUNNING');
+dcl-c SC_NOT_RUNNING const('NOT RUNNING');
+dcl-c SC_PARTIAL     const('PARTIAL');
+
+///
+// Field templates.
+//
+// The widths are deliberate: they match the structure a caller is most likely
+// to already have, so an existing subfile program can adopt this without
+// changing what it pages through.
+///
+
+dcl-s SC_NAME_t   varchar(64)  template;
+dcl-s SC_DESC_t   varchar(128) template;
+dcl-s SC_STATUS_t varchar(20)  template;
+dcl-s SC_MSG_t    varchar(512) template;
+
+///
+// One service's status.
+//
+// RRN is filled in by SC_check_all so the row can be found again with
+// LIST_get_by_rrn, which is how a subfile program addresses its rows.
+///
+
+dcl-ds SC_STATUS_ROW_t qualified template inz;
+  RRN    like(INTEGER_t)   inz(0);
+  NAME   like(SC_NAME_t)   inz('');
+  DESC   like(SC_DESC_t)   inz('');
+  STATUS like(SC_STATUS_t) inz('');
+end-ds;
+
+///
+// The status of every service, as a list.
+//
+// Returns a LIST_t the caller can page through with LIST_pos / LIST_fetch, or
+// address by row with LIST_get_by_rrn - the same handling a list built any
+// other way would get.
+//
+// Services in the ignored groups are left out. The default is the same as the
+// command line's: the 'system' group, so the answer is the services someone
+// configured rather than the several dozen that ship with the operating
+// system. Pass '' to include everything.
+//
+// @param optional comma-separated groups to leave out, default 'system'
+// @return the list
+///
+
+dcl-pr SC_check_all likeds(LIST_t);
+  ignore_groups like(SC_NAME_t) const options(*nopass);
+end-pr;
+
+///
+// Forget the loaded definitions, so the next call re-reads them.
+//
+// Definitions are read once per activation and reused - without that, each
+// call costs as much as running the command, and the API would be pointless.
+// Live status is never cached; every call re-queries the system.
+//
+// Call this after adding or editing a definition file. A long-running program
+// that never does is not wrong, it is just working from the definitions as
+// they were when it started.
+///
+
+dcl-pr SC_refresh;
+end-pr;
+
+///
+// The status of one service.
+//
+// @param the service short name
+// @param the status row, filled in
+// @return false if there is no such service
+///
+
+dcl-pr SC_check like(BOOLEAN_t);
+  name   like(SC_NAME_t) const;
+  status likeds(SC_STATUS_ROW_t);
+end-pr;
+
+///
+// Start a service, or every service in a group.
+//
+// The name takes the same forms the command line does, so 'webproxy' and
+// 'group:web' both work - a caller that already builds a 'group:' prefix does
+// not have to change how it does it.
+//
+// Dependencies are started first. Returns once the service is up, or false
+// with the reason in msg.
+///
+
+dcl-pr SC_start like(BOOLEAN_t);
+  name like(SC_NAME_t) const;
+  msg  like(SC_MSG_t);
+end-pr;
+
+///
+// Stop a service, or every service in a group. Anything depending on it is
+// stopped first.
+///
+
+dcl-pr SC_stop like(BOOLEAN_t);
+  name like(SC_NAME_t) const;
+  msg  like(SC_MSG_t);
+end-pr;
+
+///
+// Stop without running the service's own stop_cmd - straight to ENDJOB.
+///
+
+dcl-pr SC_kill like(BOOLEAN_t);
+  name like(SC_NAME_t) const;
+  msg  like(SC_MSG_t);
+end-pr;
+
+///
+// Stop then start.
+///
+
+dcl-pr SC_restart like(BOOLEAN_t);
+  name like(SC_NAME_t) const;
+  msg  like(SC_MSG_t);
+end-pr;

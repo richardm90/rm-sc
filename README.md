@@ -16,7 +16,8 @@ query.
 
 ## Status
 
-**Phase 3 — operations.** 107 test cases, 425 assertions.
+**Working.** 119 test cases, 459 assertions. `check`, `list` and `groups` are byte-identical
+to the Java implementation.
 
 | Module | Does |
 |---|---|
@@ -29,8 +30,12 @@ query.
 | `SCLOG` | Log file location |
 | `SCLAUNCH` | Starting, stopping, environment assembly |
 | `SCEXEC` | Status determination and the twelve operations |
+| `SCMAIN` | Command line parsing and dispatch |
+| `SCAPI` | Bound-call API for ILE callers |
 
-Not yet usable as a tool: no command line. That is the next phase.
+Usable three ways: the `scr` shell wrapper, the `SC` CL command, and — for an ILE caller that
+wants values rather than text to parse — the bound-call API in
+[`QPROTOSRC/SCAPI_D.RPGLEINC`](QPROTOSRC/SCAPI_D.RPGLEINC).
 
 ## Why
 
