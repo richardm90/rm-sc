@@ -23,6 +23,12 @@ ctl-opt bnddir('RMSCPGM':'RMSCDEPS');
 
 dcl-s g_dir like(STMF_t);
 
+dcl-pr aEqualV;
+  expected  varchar(512) const;
+  actual    varchar(512) const;
+  fieldName varchar(64) const;
+end-pr;
+
 dcl-pr remove_fixtures end-pr;
 
 dcl-pr load_fixture like(BOOLEAN_t);
@@ -96,6 +102,33 @@ dcl-proc load_fixture;
   IFS_close_file(handle);
 
   return SCDEF_load(path: def);
+
+end-proc;
+
+//==============================================================================
+// aEqualV - compare varying-length values
+//
+// iRPGUnit's aEqual is declared with opdesc and char(32565) options(*varsize),
+// so it takes each argument's length from the operational descriptor. For a
+// varying-length ARRAY ELEMENT inside a data structure the descriptor reports
+// the wrong length - element N is read with element N-1's length, so
+// name(2)='api' comes back as 'ap'. Scalars and procedure return values are
+// unaffected, which is why this only shows up on array subscripts.
+//
+// A plain RPG comparison has no descriptor involved and is correct. This wraps
+// it so a failure still reports both values.
+//==============================================================================
+
+dcl-proc aEqualV;
+  dcl-pi *n;
+    expected varchar(512) const;
+    actual   varchar(512) const;
+    fieldName varchar(64) const;
+  end-pi;
+
+  assert((%trimr(expected) = %trimr(actual)):
+         %trim(fieldName) + ': expected "' + %trim(expected) +
+         '" but was "' + %trim(actual) + '"');
 
 end-proc;
 
@@ -210,7 +243,7 @@ dcl-proc test_check_alive_port export;
     'check_alive: 8080' + LF: def): 'load');
 
   iEqual(1: def.criteria_count: 'one criterion');
-  aEqual(SCDEF_CHECK_PORT: def.criteria(1).kind: 'kind is PORT');
+  aEqualV(SCDEF_CHECK_PORT: def.criteria(1).kind: 'kind is PORT');
   iEqual(8080: def.criteria(1).port: 'port value');
 
 end-proc;
@@ -223,9 +256,9 @@ dcl-proc test_check_alive_job export;
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: webproxy' + LF: def): 'load');
 
-  aEqual(SCDEF_CHECK_JOB: def.criteria(1).kind: 'kind is JOB');
-  aEqual('WEBPROXY': def.criteria(1).job_name: 'job name upper-cased');
-  aEqual('': def.criteria(1).subsystem: 'no subsystem');
+  aEqualV(SCDEF_CHECK_JOB: def.criteria(1).kind: 'kind is JOB');
+  aEqualV('WEBPROXY': def.criteria(1).job_name: 'job name upper-cased');
+  aEqualV('': def.criteria(1).subsystem: 'no subsystem');
 
 end-proc;
 
@@ -237,9 +270,9 @@ dcl-proc test_check_alive_subsystem_job export;
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: QUSRWRK/WEBPROXY' + LF: def): 'load');
 
-  aEqual(SCDEF_CHECK_JOB: def.criteria(1).kind: 'kind is JOB');
-  aEqual('QUSRWRK': def.criteria(1).subsystem: 'subsystem');
-  aEqual('WEBPROXY': def.criteria(1).job_name: 'job name');
+  aEqualV(SCDEF_CHECK_JOB: def.criteria(1).kind: 'kind is JOB');
+  aEqualV('QUSRWRK': def.criteria(1).subsystem: 'subsystem');
+  aEqualV('WEBPROXY': def.criteria(1).job_name: 'job name');
 
 end-proc;
 
@@ -251,8 +284,8 @@ dcl-proc test_check_alive_program export;
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: PGM-WEBPROXY' + LF: def): 'load');
 
-  aEqual(SCDEF_CHECK_PGM: def.criteria(1).kind: 'kind is PGM');
-  aEqual('WEBPROXY': def.criteria(1).program: 'program name');
+  aEqualV(SCDEF_CHECK_PGM: def.criteria(1).kind: 'kind is PGM');
+  aEqualV('WEBPROXY': def.criteria(1).program: 'program name');
 
 end-proc;
 
@@ -269,9 +302,9 @@ dcl-proc test_check_alive_comma_separated export;
     'check_alive: webproxy,8080' + LF: def): 'load');
 
   iEqual(2: def.criteria_count: 'two criteria');
-  aEqual(SCDEF_CHECK_JOB: def.criteria(1).kind: 'first is a job');
-  aEqual('WEBPROXY': def.criteria(1).job_name: 'job name');
-  aEqual(SCDEF_CHECK_PORT: def.criteria(2).kind: 'second is a port');
+  aEqualV(SCDEF_CHECK_JOB: def.criteria(1).kind: 'first is a job');
+  aEqualV('WEBPROXY': def.criteria(1).job_name: 'job name');
+  aEqualV(SCDEF_CHECK_PORT: def.criteria(2).kind: 'second is a port');
   iEqual(8080: def.criteria(2).port: 'port');
 
 end-proc;
@@ -291,7 +324,7 @@ dcl-proc test_check_alive_sequence export;
     '- 8080' + LF: def): 'load');
 
   iEqual(2: def.criteria_count: 'two criteria');
-  aEqual('WEBPROXY': def.criteria(1).job_name: 'job name');
+  aEqualV('WEBPROXY': def.criteria(1).job_name: 'job name');
   iEqual(8080: def.criteria(2).port: 'port');
 
 end-proc;
@@ -336,9 +369,9 @@ dcl-proc test_sequences export;
   iEqual(2: def.envvar_count: 'two env vars');
   aEqual('PATH=/QOpenSys/pkgs/bin:/usr/bin': def.envvars(1): 'env var kept verbatim');
   iEqual(1: def.dep_count: 'one dependency');
-  aEqual('jobrunner': def.deps(1): 'dependency lower-cased');
+  aEqualV('jobrunner': def.deps(1): 'dependency lower-cased');
   iEqual(2: def.group_count: 'two groups');
-  aEqual('web': def.groups(1): 'group lower-cased');
+  aEqualV('web': def.groups(1): 'group lower-cased');
 
 end-proc;
 
@@ -379,7 +412,7 @@ dcl-proc test_unknown_key_is_not_fatal export;
     'some_future_key: 42' + LF: def): 'load succeeds');
 
   iEqual(1: def.unknown_count: 'one unknown key');
-  aEqual('some_future_key': def.unknown(1): 'recorded by name');
+  aEqualV('some_future_key': def.unknown(1): 'recorded by name');
 
 end-proc;
 

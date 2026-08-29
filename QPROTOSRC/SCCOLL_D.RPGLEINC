@@ -1,0 +1,159 @@
+**free
+
+//==============================================================================
+// SCCOLL_D.rpgleinc
+//   Service definition collection copybook
+//
+// 29/08/2026 - RM - created
+//==============================================================================
+
+/if defined(SCCOLL_D)
+/eof
+/endif
+/define SCCOLL_D
+
+/include 'SCDEF_D.rpgleinc'
+/include 'include/RMLIST_D.rpgleinc'
+/include 'include/RMTOOLS_D.rpgleinc'
+
+dcl-c SCCOLL_MAX_GROUPS  const(64);
+dcl-c SCCOLL_MAX_ORDER   const(64);
+
+///
+// A loaded set of service definitions.
+//
+// Definitions are held in a user space rather than an array: a definition is
+// around 20KB, and a system with forty of them would need close to a megabyte
+// of static storage.
+///
+
+dcl-ds SCCOLL_t qualified template inz;
+  list  likeds(LIST_t);
+  count like(INTEGER_t) inz(0);
+  // Definitions that failed to load. Not fatal - one bad file must not stop
+  // the rest being managed - but reported so the failure is visible.
+  bad_count like(INTEGER_t) inz(0);
+  bad_name  like(SCDEF_NAME_t)     dim(16);
+  bad_err   like(SCYAML_ERROR_t)   dim(16);
+end-ds;
+
+///
+// A resolved dependency order.
+///
+
+dcl-ds SCCOLL_ORDER_t qualified template inz;
+  count like(INTEGER_t) inz(0);
+  name  like(SCDEF_NAME_t) dim(SCCOLL_MAX_ORDER);
+  err   like(SCYAML_ERROR_t) inz('');
+end-ds;
+
+///
+// Distinct group names across a collection.
+///
+
+dcl-ds SCCOLL_GROUPS_t qualified template inz;
+  count like(INTEGER_t) inz(0);
+  name  like(SCDEF_NAME_t) dim(SCCOLL_MAX_GROUPS);
+end-ds;
+
+///
+// Initialise a collection, ready to be loaded into.
+//
+// MUST be called before SCCOLL_load_dir. RPG's likeds() copies a template's
+// subfields but NOT its inz keyword, so a caller's
+// 'dcl-ds coll likeds(SCCOLL_t);' holds uninitialised storage - varying-length
+// fields carry garbage length prefixes, and the embedded LIST_t looks like an
+// already-created list. Declaring inz(*likeds) fixes the caller's side; this
+// makes the contract explicit either way.
+//
+// SCCOLL_load calls it for you.
+///
+
+dcl-pr SCCOLL_init;
+  coll likeds(SCCOLL_t);
+end-pr;
+
+///
+// Load every definition found on the search path.
+//
+// Subdirectories are walked: upstream ships system definitions in a 'system'
+// subdirectory and common open-source ones in another, so a flat scan would
+// silently find only a fraction of what is installed.
+//
+// A definition that fails to load is recorded in the collection rather than
+// aborting the load - one malformed file must not stop the rest being managed.
+//
+// @param the collection to populate
+// @return true if the search path could be read
+///
+
+dcl-pr SCCOLL_load like(BOOLEAN_t);
+  coll likeds(SCCOLL_t);
+end-pr;
+
+///
+// Load definitions from one named directory. Used by SCCOLL_load, and useful
+// on its own for testing against a known directory.
+///
+
+dcl-pr SCCOLL_load_dir like(BOOLEAN_t);
+  coll likeds(SCCOLL_t);
+  dir  like(STMF_t) const;
+end-pr;
+
+///
+// How many definitions the collection holds.
+///
+
+dcl-pr SCCOLL_count like(INTEGER_t);
+  coll likeds(SCCOLL_t);
+end-pr;
+
+///
+// Fetch a definition by position, 1-based.
+///
+
+dcl-pr SCCOLL_get like(BOOLEAN_t);
+  coll likeds(SCCOLL_t);
+  rrn  like(INTEGER_t) const;
+  def  likeds(SCDEF_t);
+end-pr;
+
+///
+// Find a definition by short name.
+///
+
+dcl-pr SCCOLL_find like(BOOLEAN_t);
+  coll likeds(SCCOLL_t);
+  name like(SCDEF_NAME_t) const;
+  def  likeds(SCDEF_t);
+end-pr;
+
+///
+// Every distinct group across the collection, plus the built-in 'all'.
+///
+
+dcl-pr SCCOLL_groups like(INTEGER_t);
+  coll   likeds(SCCOLL_t);
+  groups likeds(SCCOLL_GROUPS_t);
+end-pr;
+
+///
+// Resolve a service and its dependencies into start order, dependencies
+// first.
+//
+// Detects cycles and reports them. Upstream recurses with no visited set and
+// overflows its stack on a cyclic definition; RMSC names the cycle instead.
+//
+// @param the collection
+// @param the service to resolve
+// @param the resulting order
+// @return true if resolved; false with order.err set on a cycle or a missing
+//           dependency
+///
+
+dcl-pr SCCOLL_start_order like(BOOLEAN_t);
+  coll  likeds(SCCOLL_t);
+  name  like(SCDEF_NAME_t) const;
+  order likeds(SCCOLL_ORDER_t);
+end-pr;

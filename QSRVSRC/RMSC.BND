@@ -14,4 +14,16 @@ STRPGMEXP PGMLVL(*CURRENT) SIGNATURE('RMSC 0.1.0')
   EXPORT SYMBOL(SCDEF_from_doc)
   EXPORT SYMBOL(SCDEF_in_group)
   EXPORT SYMBOL(SCDEF_effective_dir)
+  /* SCDIRS - definition directory resolution */
+  EXPORT SYMBOL(SCDIRS_search_path)
+  EXPORT SYMBOL(SCDIRS_home_dir)
+  /* SCCOLL - definition collection */
+  EXPORT SYMBOL(SCCOLL_init)
+  EXPORT SYMBOL(SCCOLL_load)
+  EXPORT SYMBOL(SCCOLL_load_dir)
+  EXPORT SYMBOL(SCCOLL_count)
+  EXPORT SYMBOL(SCCOLL_get)
+  EXPORT SYMBOL(SCCOLL_find)
+  EXPORT SYMBOL(SCCOLL_groups)
+  EXPORT SYMBOL(SCCOLL_start_order)
 ENDPGMEXP

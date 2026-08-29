@@ -33,6 +33,7 @@ ctl-opt bnddir('RMSCPGM':'RMSCDEPS');
 
 dcl-s g_dir like(STMF_t);
 
+
 dcl-pr remove_fixtures end-pr;
 
 dcl-pr write_fixture like(STMF_t);
@@ -153,6 +154,7 @@ dcl-proc parse_fixture;
   return SCYAML_parse(write_fixture(name: content): doc);
 
 end-proc;
+
 
 //==============================================================================
 // The two required keys are read

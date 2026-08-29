@@ -1,0 +1,55 @@
+**free
+
+//==============================================================================
+// SCDIRS_D.rpgleinc
+//   Definition directory resolution copybook
+//
+// 29/08/2026 - RM - created
+//==============================================================================
+
+/if defined(SCDIRS_D)
+/eof
+/endif
+/define SCDIRS_D
+
+/include 'include/RMTOOLS_D.rpgleinc'
+
+dcl-c SCDIRS_MAX      const(4);
+
+// Upstream's global directory. Requires *ALLOBJ to write; world readable.
+dcl-c SCDIRS_GLOBAL   const('/QOpenSys/etc/sc/services');
+
+// Relative to the user's home directory
+dcl-c SCDIRS_USER_REL const('.sc/services');
+
+dcl-ds SCDIRS_t qualified template inz;
+  count like(INTEGER_t) inz(0);
+  path  like(STMF_t) dim(SCDIRS_MAX);
+end-ds;
+
+///
+// The directories to search for service definitions, in upstream's order:
+// the global directory first, then the user's own.
+//
+// Only directories that exist are returned, so a caller can walk the list
+// without checking. A user with no ~/.sc/services simply gets one entry.
+//
+// @param the list to populate
+// @return the number of directories found
+///
+
+dcl-pr SCDIRS_search_path like(INTEGER_t);
+  dirs likeds(SCDIRS_t);
+end-pr;
+
+///
+// The current user's home directory, from QSYS2.USER_INFO.
+//
+// Upstream reads it the same way rather than trusting $HOME, which is not
+// reliably set in a batch job.
+//
+// @return the home directory, or blank if it cannot be determined
+///
+
+dcl-pr SCDIRS_home_dir like(STMF_t);
+end-pr;

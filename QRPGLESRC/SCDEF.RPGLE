@@ -25,7 +25,6 @@ ctl-opt text('RMSC: Service definition model');
 /include 'SCDEF_D.rpgleinc'
 /include 'SCYAML_D.rpgleinc'
 /include 'include/RMPATH_D.rpgleinc'
-/include 'include/RMSTRING_D.rpgleinc'
 /include 'include/RMTOOLS_D.rpgleinc'
 
 ///
@@ -60,6 +59,15 @@ dcl-pr split_commas like(BOOLEAN_t);
   def   likeds(SCDEF_t);
   value like(SCYAML_VALUE_t) const;
 end-pr;
+
+// See SCCOLL: rmtools STRING_lower returns varchar(65535), which is a 64KB
+// automatic-storage temporary on every call.
+dcl-pr to_lower like(SCDEF_NAME_t);
+  value like(SCDEF_NAME_t) const;
+end-pr;
+
+dcl-c UPPER const('ABCDEFGHIJKLMNOPQRSTUVWXYZ');
+dcl-c LOWER const('abcdefghijklmnopqrstuvwxyz');
 
 //==============================================================================
 // SCDEF_load
@@ -104,7 +112,7 @@ dcl-proc SCDEF_from_doc export;
   def.defined_at = stmf;
 
   // Upstream takes the short name from the file name, lower-cased
-  def.short_name = STRING_lower(PATH_name(stmf));
+  def.short_name = to_lower(PATH_name(stmf));
 
   // A cluster definition is rejected rather than silently half-honoured:
   // RMSC does not implement cluster mode, and quietly starting a single
@@ -168,7 +176,7 @@ dcl-proc SCDEF_from_doc export;
       return false;
     endif;
     def.dep_count += 1;
-    def.deps(def.dep_count) = STRING_lower(SCYAML_item(doc:
+    def.deps(def.dep_count) = to_lower(SCYAML_item(doc:
                                 'service_dependencies': i));
   endfor;
 
@@ -179,7 +187,7 @@ dcl-proc SCDEF_from_doc export;
       return false;
     endif;
     def.group_count += 1;
-    def.groups(def.group_count) = STRING_lower(SCYAML_item(doc: 'groups': i));
+    def.groups(def.group_count) = to_lower(SCYAML_item(doc: 'groups': i));
   endfor;
 
   // Record anything not in the schema. Not an error - see the header.
@@ -373,7 +381,7 @@ dcl-proc to_boolean;
 
   dcl-s work like(SCYAML_VALUE_t);
 
-  work = STRING_lower(%trim(value));
+  work = %xlate(UPPER: LOWER: %trim(value));
 
   if %len(work) = 0;
     return default;
@@ -426,6 +434,19 @@ end-proc;
 // is_known_key
 //==============================================================================
 
+dcl-proc to_lower;
+  dcl-pi *n like(SCDEF_NAME_t);
+    value like(SCDEF_NAME_t) const;
+  end-pi;
+
+  return %xlate(UPPER: LOWER: value);
+
+end-proc;
+
+//==============================================================================
+// is_known_key
+//==============================================================================
+
 dcl-proc is_known_key;
   dcl-pi *n like(BOOLEAN_t);
     key like(SCYAML_KEY_t) const;
@@ -470,7 +491,7 @@ dcl-proc SCDEF_in_group export;
   dcl-s i    like(INTEGER_t);
   dcl-s want like(SCDEF_NAME_t);
 
-  want = STRING_lower(%trim(group));
+  want = to_lower(%trim(group));
 
   // Every service is in 'all'
   if want = 'all';
