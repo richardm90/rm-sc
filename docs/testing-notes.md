@@ -53,3 +53,36 @@ field from `varchar` to `char`; the code had been correct all along.
 Use `aEqualV` (in each suite) for array elements. It compares with plain RPG — no descriptors —
 and still reports both values on failure. `test_varchar_array_elements` in `SCCOLL.TEST` pins
 the behaviour.
+
+## A path no test can reach is a path that does not work
+
+`SCNET` checks IPv4 first and falls through to IPv6, because a service listening on IPv6 alone
+would otherwise look stopped. The IPv6 branch was written from the documentation, reviewed, and
+**wrong**: the qualifier's address fields are declared character but must hold binary nulls to
+mean "every address", and `clear` leaves them as blanks. The API accepted that and returned an
+empty list **with no error**.
+
+It survived because nothing could observe it. Every service on a typical IBM i binds both
+address families, so the IPv4 probe always answered first and the IPv6 code never ran. The
+suite compared nine ports against the SQL path and agreed on all nine, without once executing
+the broken branch.
+
+Two changes came out of that, and the second matters more than the first:
+
+1. `SCNET_port_listening` takes an optional address family, so each branch can be asked for
+   directly rather than only reached by luck of what happens to be listening.
+2. `tools/v6listen.py` holds an **IPv6-only** socket open (`IPV6_V6ONLY`, or binding `::` takes
+   the IPv4 port too), so the fallthrough itself can be exercised against a real service.
+
+Verified with it, which is the evidence that the fallthrough works rather than merely looks
+right:
+
+| port | IPv4 | IPv6 | default |
+|---|---|---|---|
+| IPv6-only listener | 0 | 1 | **1** — via the fallthrough |
+| listens on both | 1 | 1 | 1 |
+| nothing listening | 0 | 0 | 0 |
+
+The suite covers each family directly. The fallthrough case needs the listener running, so it
+is a documented procedure rather than an automated test - which is a real gap, not a
+resolution.
