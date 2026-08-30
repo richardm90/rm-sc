@@ -20,6 +20,7 @@ ctl-opt text('RMSC: System queries');
 /include 'include/RMTOOLS_H.rpgleinc'
 
 /include 'SCQRY_D.rpgleinc'
+/include 'SCNET_D.rpgleinc'
 /include 'include/RMTOOLS_D.rpgleinc'
 
 exec sql SET OPTION COMMIT = *NONE, CLOSQLCSR = *ENDMOD, DATFMT = *ISO;
@@ -28,6 +29,10 @@ exec sql SET OPTION COMMIT = *NONE, CLOSQLCSR = *ENDMOD, DATFMT = *ISO;
 // SCQRY_port_listening
 //==============================================================================
 
+// The IBM TCP/IP list API answers this in a fraction of the time the SQL
+// service takes - measured, the difference is the SQL layer rather than the
+// enumeration. The SQL path is kept as a fallback: if the API cannot answer,
+// being slow is recoverable, and reporting a running service as down is not.
 dcl-proc SCQRY_port_listening export;
   dcl-pi *n like(BOOLEAN_t);
     port like(INTEGER_t) const;
@@ -35,6 +40,12 @@ dcl-proc SCQRY_port_listening export;
 
   dcl-s found int(10) inz(0);
   dcl-s port_l int(10);
+  dcl-s rc like(INTEGER_t);
+
+  rc = SCNET_port_listening(port);
+  if rc <> SCNET_UNAVAILABLE;
+    return (rc = SCNET_LISTENING);
+  endif;
 
   port_l = port;
 

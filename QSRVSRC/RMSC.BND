@@ -26,6 +26,9 @@ STRPGMEXP PGMLVL(*CURRENT) SIGNATURE('RMSC 0.1.0')
   EXPORT SYMBOL(SCCOLL_find)
   EXPORT SYMBOL(SCCOLL_groups)
   EXPORT SYMBOL(SCCOLL_start_order)
+  /* SCNET - network status via the TCP/IP list API */
+  EXPORT SYMBOL(SCNET_port_listening)
+  EXPORT SYMBOL(SCNET_last_error)
   /* SCQRY - system queries */
   EXPORT SYMBOL(SCQRY_port_listening)
   EXPORT SYMBOL(SCQRY_jobs_on_port)

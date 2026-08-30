@@ -1,0 +1,46 @@
+**free
+
+//==============================================================================
+// SCNET_D.rpgleinc
+//   Network status via the IBM TCP/IP list API
+//
+// 30/08/2026 - RM - created
+//==============================================================================
+
+/if defined(SCNET_D)
+/eof
+/endif
+/define SCNET_D
+
+/include 'SCYAML_D.rpgleinc'
+/include 'include/RMTOOLS_D.rpgleinc'
+
+// Tri-state, because "the API did not work" is not the same answer as "nothing
+// is listening". Reporting a service down because a system API failed would be
+// worse than being slow.
+dcl-c SCNET_NOT_LISTENING const(0);
+dcl-c SCNET_LISTENING     const(1);
+dcl-c SCNET_UNAVAILABLE   const(-1);
+
+///
+// Is anything listening on the port?
+//
+// Uses QtocLstNetCnn, which asks the TCP/IP stack directly rather than going
+// through the SQL engine. Both address families are checked: NCNN0100 is IPv4
+// only, and a service listening on IPv6 alone would otherwise look down.
+//
+// @param the port
+// @return SCNET_LISTENING, SCNET_NOT_LISTENING, or SCNET_UNAVAILABLE if the
+//           API could not answer - the caller should then fall back
+///
+
+dcl-pr SCNET_port_listening like(INTEGER_t);
+  port like(INTEGER_t) const;
+end-pr;
+
+///
+// The last API error, for diagnosis. Blank if there has not been one.
+///
+
+dcl-pr SCNET_last_error like(SCYAML_ERROR_t);
+end-pr;

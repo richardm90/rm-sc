@@ -80,12 +80,62 @@ Not yet done, and worth deciding on rather than assuming:
    can be a dependency of a visible one; and `groups` derives its answer from definitions the
    filter would drop. The risk is not being slower — it is quietly showing a different set of
    services, so the byte-exact `check`, `list` and `groups` diffs have to be re-run.
-2. **Batch the queries.** `check` issues one query per criterion — six round trips for three
-   services with two criteria each. One `NETSTAT_INFO` returning all listening ports and one
-   `ACTIVE_JOB_INFO` returning all matching jobs, filtered in memory, would collapse those
-   into two. **Now the largest remaining cost**: after caching definitions, the whole of the
-   bound call's 1.78s is these queries.
+2. ~~**Batch the queries.**~~ **Superseded.** Batching would have made the symptom smaller
+   without touching the cause. The port check was replaced with a direct system API instead —
+   see below.
 3. **Cache parsed definitions**, keyed on file modification time. The most complex option and
    the one most likely to be wrong in a way nobody notices.
 
 None of these changes behaviour, and none is needed for correctness.
+
+
+## Replacing the port check with a system API
+
+The port check was the single most expensive thing RMSC did: **376ms per call**, twice the
+cost of a job lookup, and `check` makes one per port criterion.
+
+The evidence that this was worth attacking came from measuring rather than assuming. On this
+system `QSYS2.NETSTAT_INFO` holds 88 connections, and:
+
+| | |
+|---|---|
+| Filtered count, one port | 0.42–0.53s |
+| Count of everything | 0.42–0.45s |
+| **Every row, every column** | 0.27–0.55s |
+| PASE `netstat -an`, same data, including a process fork | **0.073–0.110s** |
+
+The filter made no difference and returning everything cost no more, so the time was not the
+enumeration — it was the SQL table function layer. `QtocLstNetCnn` asks the TCP/IP stack
+directly and skips it.
+
+| `SCQRY_port_listening` | before | after |
+|---|---|---|
+| port listening | 376,464 µs | **693 µs** |
+| port not listening | 359,076 µs | **524 µs** |
+
+Around **540x**. End to end:
+
+| | before | after |
+|---|---|---|
+| `SC_check_all` (bound, definitions cached) | 1.78s | **0.76s** |
+| `scr check` (command line) | ~2.9s | ~1.8–2.0s |
+
+Two things make the result trustworthy rather than merely fast:
+
+- **It is checked against what it replaced.** `SCNET.TEST` compares the API and the SQL query
+  across nine ports. A wrong field offset would not raise anything — it would return a
+  plausible wrong answer about whether a service is running.
+- **Both address families are checked.** `NCNN0100` is IPv4 only, and a service listening on
+  IPv6 alone would otherwise look down. IPv4 is tried first because it is the common case.
+- **A failure falls back rather than lying.** `SCNET_port_listening` returns a third value for
+  "could not answer", and `SCQRY_port_listening` then uses the SQL path. Being slow is
+  recoverable; reporting a running service as down is not. That fallback earned its place
+  during development: a malformed user space name made the API return `TCP84C5` on every call,
+  and RMSC kept working correctly - just at the old speed - until the cause was found.
+
+## What is left
+
+The job lookup is now the largest cost: `ACTIVE_JOB_INFO` at about 177ms per call, three calls
+per `check` on this system, which is essentially all of the remaining 0.76s. The equivalent
+move would be `QUSLJOB`. `QtocRtvNetCnnDta` is the right API for finding which jobs hold a
+connection, which is what `stop` and `jobinfo` need, but it is not on the `check` path.

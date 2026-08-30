@@ -16,7 +16,7 @@ query.
 
 ## Status
 
-**Working.** 119 test cases, 459 assertions. `check`, `list` and `groups` are byte-identical
+**Working.** 125 test cases, 484 assertions. `check`, `list` and `groups` are byte-identical
 to the Java implementation.
 
 | Module | Does |
@@ -26,6 +26,7 @@ to the Java implementation.
 | `SCDIRS` | Resolves the definition search path |
 | `SCCOLL` | Discovery, groups, dependency order with cycle detection |
 | `SCQRY` | Liveness and reporting queries, as embedded SQL |
+| `SCNET` | Port status via the TCP/IP list API, ~540x faster than the SQL service |
 | `SCOUT` | Output formatting, byte-identical to upstream |
 | `SCLOG` | Log file location |
 | `SCLAUNCH` | Starting, stopping, environment assembly |
