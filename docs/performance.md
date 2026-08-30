@@ -127,6 +127,16 @@ Two things make the result trustworthy rather than merely fast:
   plausible wrong answer about whether a service is running.
 - **Both address families are checked.** `NCNN0100` is IPv4 only, and a service listening on
   IPv6 alone would otherwise look down. IPv4 is tried first because it is the common case.
+
+  This is also where the one real defect was. The IPv6 qualifier's address fields are declared
+  character but must hold **binary nulls** to mean "every address"; `clear` leaves them as
+  blanks. The API accepted that and returned an **empty list with no error**, so every
+  IPv6-only service would have been reported as stopped.
+
+  It survived because it was untestable: every service on this system binds both families, so
+  the IPv4 probe always answered first and the IPv6 code never ran. `SCNET_port_listening`
+  therefore takes an optional address family, and the suite asks for each one directly. A path
+  no test can reach is a path that does not work.
 - **A failure falls back rather than lying.** `SCNET_port_listening` returns a third value for
   "could not answer", and `SCQRY_port_listening` then uses the SQL path. Being slow is
   recoverable; reporting a running service as down is not. That fallback earned its place

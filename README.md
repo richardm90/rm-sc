@@ -16,7 +16,7 @@ query.
 
 ## Status
 
-**Working.** 125 test cases, 484 assertions. `check`, `list` and `groups` are byte-identical
+**Working.** 128 test cases, 492 assertions. `check`, `list` and `groups` are byte-identical
 to the Java implementation.
 
 | Module | Does |

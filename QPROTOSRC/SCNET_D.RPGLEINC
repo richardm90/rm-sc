@@ -22,6 +22,14 @@ dcl-c SCNET_NOT_LISTENING const(0);
 dcl-c SCNET_LISTENING     const(1);
 dcl-c SCNET_UNAVAILABLE   const(-1);
 
+// Address families. ANY is what callers want; the specific values exist so
+// each path can be tested on its own. Without them the IPv4 probe short
+// circuits on any system where services bind both families - which is most of
+// them - and the IPv6 path is never executed by any test.
+dcl-c SCNET_FAMILY_ANY  const(0);
+dcl-c SCNET_FAMILY_IPV4 const(4);
+dcl-c SCNET_FAMILY_IPV6 const(6);
+
 ///
 // Is anything listening on the port?
 //
@@ -35,7 +43,8 @@ dcl-c SCNET_UNAVAILABLE   const(-1);
 ///
 
 dcl-pr SCNET_port_listening like(INTEGER_t);
-  port like(INTEGER_t) const;
+  port   like(INTEGER_t) const;
+  family like(INTEGER_t) const options(*nopass);
 end-pr;
 
 ///

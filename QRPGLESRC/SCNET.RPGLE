@@ -77,10 +77,16 @@ end-pr;
 
 dcl-proc SCNET_port_listening export;
   dcl-pi *n like(INTEGER_t);
-    port like(INTEGER_t) const;
+    port   like(INTEGER_t) const;
+    family like(INTEGER_t) const options(*nopass);
   end-pi;
 
   dcl-s rc like(INTEGER_t);
+  dcl-s want like(INTEGER_t) inz(SCNET_FAMILY_ANY);
+
+  if %parms() >= 2;
+    want = family;
+  endif;
 
   g_error = '';
 
@@ -90,8 +96,16 @@ dcl-proc SCNET_port_listening export;
     g_space_ready = true;
   endif;
 
+  if want = SCNET_FAMILY_IPV6;
+    return probe(port: true);
+  endif;
+
   // IPv4 first: the common case, and finding it here skips the second call
   rc = probe(port: false);
+  if want = SCNET_FAMILY_IPV4;
+    return rc;
+  endif;
+
   if rc = SCNET_LISTENING or rc = SCNET_UNAVAILABLE;
     return rc;
   endif;
@@ -188,6 +202,15 @@ dcl-proc probe;
     q6.req_type = '*SUBSET';
     q6.port_lo  = port;
     q6.port_hi  = 0;
+
+    // The address fields must be BINARY NULLS to mean "every address". They
+    // are declared character, and clear leaves them as blanks - which the API
+    // accepts and answers with an empty list, no error. Every IPv6-only
+    // service would have looked stopped.
+    q6.addr_lo  = *ALLx'00';
+    q6.addr_hi  = *ALLx'00';
+    q6.raddr_lo = *ALLx'00';
+    q6.raddr_hi = *ALLx'00';
     QtocLstNetCnn(qualname: 'NCNN0200': q6: NCLQ0200_SIZE: 'NCLQ0200': errcode);
   else;
     clear q4;

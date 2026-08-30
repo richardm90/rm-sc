@@ -123,3 +123,55 @@ dcl-proc test_out_of_range_port export;
          'port 0 is not listening');
 
 end-proc;
+
+//==============================================================================
+// Each address family works on its own
+//
+// These exist because the default path short circuits: services here bind both
+// families, so the IPv4 probe always answers first and the IPv6 code would
+// never run. It was in fact broken - the IPv6 qualifier needs binary nulls to
+// mean "every address", and blanks give an empty list with no error - and no
+// test could have caught it without asking for that family directly.
+//==============================================================================
+
+dcl-proc test_ipv4_family_directly export;
+
+  iEqual(SCNET_LISTENING:
+         SCNET_port_listening(SSH_PORT: SCNET_FAMILY_IPV4):
+         'SSH found over IPv4');
+  iEqual(SCNET_NOT_LISTENING:
+         SCNET_port_listening(UNUSED_PORT: SCNET_FAMILY_IPV4):
+         'unused port not found over IPv4');
+
+end-proc;
+
+dcl-proc test_ipv6_family_directly export;
+
+  iEqual(SCNET_LISTENING:
+         SCNET_port_listening(SSH_PORT: SCNET_FAMILY_IPV6):
+         'SSH found over IPv6');
+  iEqual(SCNET_NOT_LISTENING:
+         SCNET_port_listening(UNUSED_PORT: SCNET_FAMILY_IPV6):
+         'unused port not found over IPv6');
+
+end-proc;
+
+//==============================================================================
+// The default finds a service on either family
+//==============================================================================
+
+dcl-proc test_any_family_agrees export;
+
+  dcl-s v4 like(INTEGER_t);
+  dcl-s v6 like(INTEGER_t);
+  dcl-s any like(INTEGER_t);
+
+  v4  = SCNET_port_listening(SSH_PORT: SCNET_FAMILY_IPV4);
+  v6  = SCNET_port_listening(SSH_PORT: SCNET_FAMILY_IPV6);
+  any = SCNET_port_listening(SSH_PORT);
+
+  assert((v4 = SCNET_LISTENING or v6 = SCNET_LISTENING):
+         'at least one family sees SSH');
+  iEqual(SCNET_LISTENING: any: 'and the default agrees');
+
+end-proc;
