@@ -61,8 +61,13 @@ dcl-proc SCDIRS_home_dir export;
 
   dcl-s home varchar(1024) inz('');
 
+  // Fall back to /home/<user> when the profile carries no home directory, as
+  // upstream does. Returning blank here is not neutral: the caller then skips
+  // the user definitions directory entirely, so user-level services would go
+  // missing with nothing said about it.
   exec sql
-    SELECT COALESCE(HOME_DIRECTORY, '')
+    SELECT COALESCE(NULLIF(TRIM(HOME_DIRECTORY), ''),
+                    '/home/' CONCAT TRIM(CURRENT_USER))
       INTO :home
       FROM QSYS2.USER_INFO
      WHERE AUTHORIZATION_NAME = CURRENT_USER;

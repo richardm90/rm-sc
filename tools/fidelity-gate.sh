@@ -58,16 +58,24 @@ STEP8_SYSTEM="${STEP8_SYSTEM:-system_admin1 system_telnet}"
 # down; the plan specifies the behaviour RMSC has:
 #   file        "Raw YAML passthrough" - and Risks relies on it: "scr file <svc>
 #               prints the raw file so the source of truth stays inspectable"
-#   perfinfo    "Improved - drops upstream's optional Python 3 + ibm_db
-#               dependency", so a narrower output is the point
 #   scrunattrs  "SCOMMANDER_* vars from the running job", which is what it emits
-INTENTIONAL="file perfinfo scrunattrs"
+INTENTIONAL="file scrunattrs"
 
 # Divergences the plan does NOT settle either way. These need a decision before
-# step 8 can be called complete - the plan describes them only as "Formatted
-# definition dump", "Active job names" and "Log paths, sizes, spooled files",
-# with no fidelity requirement stated. Byte-exactness is required for check only.
-UNDECIDED="info jobinfo loginfo"
+# step 8 can be called complete. Byte-exactness is required for check only, so
+# none of these is a correctness problem - but none is a documented choice.
+#
+#   info        plan says only "Formatted definition dump"
+#   jobinfo     plan says only "Active job names"
+#   loginfo     plan says only "Log paths, sizes, spooled files"
+#   perfinfo    the plan's "Improved - drops upstream's optional Python 3 +
+#               ibm_db dependency" is a decision about DEPENDENCIES, not about
+#               output. Dropping that dependency did not require printing less:
+#               JVM_INFO and ACTIVE_JOB_INFO are both reachable from embedded
+#               SQL. Nothing explains 12 lines where upstream prints 66, and
+#               Phase 2 asked for "every QueryUtils query as embedded SQL", so
+#               the narrower output is undocumented rather than designed.
+UNDECIDED="info jobinfo loginfo perfinfo"
 
 mkdir -p "$WORK"
 pass=0; bydesign=0; undecided_n=0; unexpected=0

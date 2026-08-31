@@ -215,13 +215,18 @@ dcl-proc SCQRY_jobs_by_pgm export;
   pgm_l = %trim(program);
 
   // FUNCTION_TYPE 'PGM' means the main thread is running that program, which
-  // is what upstream's PGM- criterion means
+  // is what upstream's PGM- criterion means.
+  //
+  // The comparison is case-insensitive because upstream's is (upper(FUNCTION)
+  // in QueryUtils), and live FUNCTION values are genuinely mixed - 'sshd' and
+  // 'jFromPASE' sit alongside 'QTOCL2TP'. Comparing raw made PGM-SSHD miss a
+  // running sshd, reporting a live service as stopped with no error.
   exec sql
     DECLARE c_pgm CURSOR FOR
     SELECT JOB_NAME
       FROM TABLE(QSYS2.ACTIVE_JOB_INFO()) X
      WHERE X.FUNCTION_TYPE = 'PGM'
-       AND TRIM(X.FUNCTION) = :pgm_l;
+       AND UPPER(TRIM(X.FUNCTION)) = UPPER(:pgm_l);
 
   exec sql OPEN c_pgm;
   if sqlcode <> 0;
@@ -261,11 +266,19 @@ dcl-proc SCQRY_job_start_time export;
 
   name_l = %trim(job_name);
 
+  // No JOB_STATUS_FILTER, matching upstream: a job that has ended still has a
+  // start time, and narrowing to *ACTIVE meant asking about one returned
+  // nothing. Inert today, because the only caller passes jobs it has just
+  // found active - but it was a departure with no reason behind it.
+  //
+  // The format string is deliberately NOT upstream's 'yyyy-MM-dd-HH24.mi.ss'.
+  // Upstream re-formats the value before printing it, so its displayed form is
+  // 'YYYY-MM-DD HH24:MI:SS' - matching its SQL here would make the output less
+  // like upstream's, not more.
   exec sql
     SELECT VARCHAR_FORMAT(JOB_ENTERED_SYSTEM_TIME, 'YYYY-MM-DD HH24:MI:SS')
       INTO :result
-      FROM TABLE(QSYS2.JOB_INFO(JOB_STATUS_FILTER => '*ACTIVE',
-                                JOB_USER_FILTER   => '*ALL')) X
+      FROM TABLE(QSYS2.JOB_INFO(JOB_USER_FILTER => '*ALL')) X
      WHERE X.JOB_NAME = :name_l
      FETCH FIRST 1 ROWS ONLY;
 
@@ -291,10 +304,23 @@ dcl-proc SCQRY_job_perf export;
     perf     likeds(SCQRY_PERF_t);
   end-pi;
 
-  dcl-s name_l varchar(28);
+  dcl-s name_l   varchar(28);
+  dcl-s simple_l varchar(28);
+  dcl-s i        like(INTEGER_t);
 
   clear perf;
   name_l = %trim(job_name);
+
+  // ACTIVE_JOB_INFO's JOB_NAME_FILTER takes the simple job name. Passing '*ALL'
+  // and filtering in the WHERE makes the table function enumerate every active
+  // job on the system to answer one lookup. Upstream filters; so does this.
+  simple_l = name_l;
+  for i = %len(name_l) downto 1;
+    if %subst(name_l: i: 1) = '/';
+      simple_l = %subst(name_l: i + 1);
+      leave;
+    endif;
+  endfor;
 
   exec sql
     SELECT COALESCE(X.ELAPSED_TIME, 0),
@@ -304,7 +330,7 @@ dcl-proc SCQRY_job_perf export;
            COALESCE(X.ELAPSED_TOTAL_DISK_IO_COUNT, 0)
       INTO :perf.elapsed_time, :perf.thread_count, :perf.temp_storage,
            :perf.cpu_percentage, :perf.disk_io_count
-      FROM TABLE(QSYS2.ACTIVE_JOB_INFO(JOB_NAME_FILTER => '*ALL')) X
+      FROM TABLE(QSYS2.ACTIVE_JOB_INFO(JOB_NAME_FILTER => :simple_l)) X
      WHERE X.JOB_NAME = :name_l
      FETCH FIRST 1 ROWS ONLY;
 
@@ -336,9 +362,9 @@ dcl-proc SCQRY_jvm_info export;
 
   exec sql
     SELECT COALESCE(CURRENT_HEAP_SIZE, 0),
-           COALESCE(MAXIMUM_HEAP_SIZE, 0),
+           COALESCE(MAX_HEAP_SIZE, 0),
            COALESCE(IN_USE_HEAP_SIZE, 0),
-           COALESCE(GARBAGE_COLLECTIONS, 0)
+           COALESCE(GC_CYCLE_NUMBER, 0)
       INTO :jvm.heap_size, :jvm.max_heap_size,
            :jvm.in_use_heap, :jvm.gc_cycles
       FROM QSYS2.JVM_INFO

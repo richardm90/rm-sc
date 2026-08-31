@@ -26,6 +26,16 @@ dcl-c UNUSED_PORT const(59417);
 // definition while the tests are running.
 dcl-c SSH_PORT const(22);
 
+// The IBM i service monitor runs a JVM, so it is the fixture for asserting that
+// jvm_info can SUCCEED rather than only that it fails politely.
+dcl-c JVM_JOB const('QSRVMON');
+
+// sshd's FUNCTION value is lower case, and the suite arrives over SSH, so its
+// jobs are running whenever this suite runs. Asking for it in upper case is the
+// case-sensitivity check.
+dcl-c PGM_LOWER const('sshd');
+dcl-c PGM_UPPER const('SSHD');
+
 dcl-pr aEqualV;
   expected  varchar(512) const;
   actual    varchar(512) const;
@@ -187,6 +197,34 @@ end-proc;
 // Job detail
 //==============================================================================
 
+//==============================================================================
+// The PGM- criterion matches regardless of case, as upstream does
+//
+// Upstream compares upper(FUNCTION) against its argument, so PGM-sshd and
+// PGM-SSHD both match. RMSC compared the raw value, making the criterion
+// case-sensitive - a definition written in the other case would silently never
+// match, and a running service would be reported as stopped.
+//
+// sshd is the fixture: its FUNCTION is lower case and the suite arrives over
+// SSH, so those jobs exist whenever this runs.
+//==============================================================================
+
+dcl-proc test_jobs_by_pgm_case_insensitive export;
+
+  dcl-ds jobs_lc likeds(SCQRY_JOBS_t) inz(*likeds);
+  dcl-ds jobs_uc likeds(SCQRY_JOBS_t) inz(*likeds);
+  dcl-s n_lc like(INTEGER_t);
+  dcl-s n_uc like(INTEGER_t);
+
+  n_lc = SCQRY_jobs_by_pgm(PGM_LOWER: jobs_lc);
+  n_uc = SCQRY_jobs_by_pgm(PGM_UPPER: jobs_uc);
+
+  assert((n_lc > 0): 'sshd jobs are running - the fixture this test needs');
+  iEqual(n_lc: n_uc:
+         'the same jobs are found whichever case the criterion is written in');
+
+end-proc;
+
 dcl-proc test_job_start_time export;
 
   dcl-ds jobs likeds(SCQRY_JOBS_t) inz(*likeds);
@@ -235,7 +273,7 @@ dcl-proc test_job_perf_absent export;
 end-proc;
 
 //==============================================================================
-// JVM and spooled files - shape only, since neither is guaranteed to exist
+// JVM and spooled files
 //==============================================================================
 
 dcl-proc test_jvm_info_absent export;
@@ -244,6 +282,44 @@ dcl-proc test_jvm_info_absent export;
 
   SCQRY_jvm_info('000000/NOBODY/NOSUCHJOB': jvm);
   nEqual(false: jvm.found: 'no JVM for a job that does not exist');
+
+end-proc;
+
+//==============================================================================
+// jvm_info must be able to SUCCEED, not only to fail politely
+//
+// This suite previously asked only what happened for a job that does not
+// exist, on the grounds that a JVM is not guaranteed to be running. That
+// passes whether the query works or is rejected outright - and it was being
+// rejected outright, on two column names that do not exist in QSYS2.JVM_INFO.
+// A procedure that can never return a row needs a test that says so.
+//==============================================================================
+
+dcl-proc test_jvm_info_present export;
+
+  dcl-ds jobs likeds(SCQRY_JOBS_t) inz(*likeds);
+  dcl-ds jvm  likeds(SCQRY_JVM_t) inz(*likeds);
+  dcl-s i     like(INTEGER_t);
+
+  // Absent fixture fails rather than passing quietly. A test whose fixture is
+  // missing proves nothing, which is exactly how the wrong columns survived.
+  assert((SCQRY_jobs_by_name(JVM_JOB: '': jobs) > 0):
+         'the ' + JVM_JOB + ' job is active - the fixture this test needs');
+
+  // Several jobs share that name and only one of them runs a JVM, so ask each
+  // in turn rather than assuming the first.
+  for i = 1 to jobs.count;
+    if SCQRY_jvm_info(jobs.name(i): jvm);
+      leave;
+    endif;
+  endfor;
+
+  nEqual(true: jvm.found:
+         'jvm_info answers for the ' + JVM_JOB + ' job that runs a JVM');
+  assert((jvm.heap_size > 0):
+         'heap size is populated, not left at zero by a rejected query');
+  assert((jvm.max_heap_size > 0):
+         'max heap size is populated - one of the two columns that was wrong');
 
 end-proc;
 
