@@ -3,7 +3,11 @@
 The premise for this project was that RMSC would be substantially faster than the Java
 implementation, for two reasons: no JVM cold start, and no `db2util` fork per SQL query.
 
-**Measured, that premise does not hold.** RMSC is faster, but by around 20%, not multiples.
+**Measured, that premise did not hold.** As first written, RMSC was faster by around 20%,
+not multiples — and *slower* at `list`. What closed the gap was not the language but replacing
+two SQL table functions with the system APIs underneath them: `scr check` is now around 1.6s
+against Java's ~3.4s. The sections below are kept in the order the work happened, because the
+measurements are what redirected it.
 
 ## The numbers
 
@@ -143,9 +147,44 @@ Two things make the result trustworthy rather than merely fast:
   during development: a malformed user space name made the API return `TCP84C5` on every call,
   and RMSC kept working correctly - just at the old speed - until the cause was found.
 
+## Replacing the job lookup with a system API
+
+With the port check dealt with, `ACTIVE_JOB_INFO` was the largest remaining cost — about
+177ms per call, three calls per `check`. `QUSLJOB` is the equivalent move, and `JOBL0100`
+carries the job name, user and number that the lookup needs.
+
+Measured end to end, twelve runs each, by rebuilding with the delegation switched off and
+back on so both routes were timed on the same system in the same state:
+
+| `scr check` | min | median | max |
+|---|---|---|---|
+| `ACTIVE_JOB_INFO` | 1.85s | 1.97s | 2.06s |
+| `QUSLJOB` | **1.43s** | **1.59s** | **1.92s** |
+
+About **0.38s**, or 19%, off the command line — roughly 125ms per lookup. Real, and the
+ranges barely overlap, but a long way short of the 540x the port change gave. The reason is
+that `QUSLJOB` builds a user space and the generic list header has to be walked, whereas
+`QtocLstNetCnn` answers a much narrower question.
+
+`SCJOB.TEST` checks the API against the SQL query it replaced — same jobs, not merely the
+same count — because a wrong offset here returns a plausible wrong answer rather than an
+error. `check`, `list` and `groups` remain byte-identical to the captured baselines.
+
+**Only the bare job-name form uses the API.** `JOBL0100` cannot filter by subsystem, so
+`SBS/JOB` still goes through SQL, and so does `PGM-`. That covers the hot path: on this
+system all three services on a default `check` use bare names, the six subsystem-qualified
+definitions are all in the `system` group, and the one `PGM-` definition is filtered out by
+`only_if_executable`.
+
+Both could move off SQL later, using `JOBL0200`'s keyed fields — **1906** subsystem
+description (qualified), **601** function name and **602** function type. That means parsing
+variable-length keyed data rather than a fixed record, for paths that are rarely exercised,
+so it is not obviously worth it.
+
 ## What is left
 
-The job lookup is now the largest cost: `ACTIVE_JOB_INFO` at about 177ms per call, three calls
-per `check` on this system, which is essentially all of the remaining 0.76s. The equivalent
-move would be `QUSLJOB`. `QtocRtvNetCnnDta` is the right API for finding which jobs hold a
-connection, which is what `stop` and `jobinfo` need, but it is not on the `check` path.
+`QtocRtvNetCnnDta` is the right API for finding which jobs hold a connection, which is what
+`stop` and `jobinfo` need, but it is not on the `check` path.
+
+Definition loading is now the dominant cost again — see "What would make the command line
+faster" above, item 1.

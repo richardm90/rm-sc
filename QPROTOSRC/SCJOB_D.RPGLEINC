@@ -1,0 +1,47 @@
+**free
+
+//==============================================================================
+// SCJOB_D.rpgleinc
+//   Active job lookup via the QUSLJOB list API
+//
+// 30/08/2026 - RM - created
+//==============================================================================
+
+/if defined(SCJOB_D)
+/eof
+/endif
+/define SCJOB_D
+
+/include 'SCQRY_D.rpgleinc'
+/include 'SCYAML_D.rpgleinc'
+/include 'include/RMTOOLS_D.rpgleinc'
+
+// Same tri-state reasoning as SCNET: "the API could not answer" is a different
+// thing from "no jobs match", and confusing the two would report a running
+// service as stopped.
+dcl-c SCJOB_UNAVAILABLE const(-1);
+
+///
+// Active jobs matching a job name.
+//
+// Uses QUSLJOB, which filters by job name itself, rather than
+// QSYS2.ACTIVE_JOB_INFO. Only the bare job name form is handled here; a
+// subsystem-qualified name needs a field this format does not carry, and the
+// caller falls back for those.
+//
+// @param the job name to match
+// @param the jobs found, as number/user/name
+// @return the count, or SCJOB_UNAVAILABLE if the API could not answer
+///
+
+dcl-pr SCJOB_by_name like(INTEGER_t);
+  job_name like(SCQRY_JOBNAME_t) const;
+  jobs     likeds(SCQRY_JOBS_t);
+end-pr;
+
+///
+// The last API error, for diagnosis. Blank if there has not been one.
+///
+
+dcl-pr SCJOB_last_error like(SCYAML_ERROR_t);
+end-pr;

@@ -1,4 +1,9 @@
 STRPGMEXP PGMLVL(*CURRENT) SIGNATURE('RMSC 0.1.0')
+  /* The signature is fixed, so the ORDER of these exports is the contract.
+     Add new exports at the END only. Inserting one shifts every export after
+     it by a position: the binder stays silent because the signature still
+     matches, and previously-compiled callers then reach the wrong procedure.
+     That shows up at runtime as RNX0115, not as a bind failure. */
   /* SCYAML - YAML reader */
   EXPORT SYMBOL(SCYAML_parse)
   EXPORT SYMBOL(SCYAML_error)
@@ -86,4 +91,8 @@ STRPGMEXP PGMLVL(*CURRENT) SIGNATURE('RMSC 0.1.0')
   EXPORT SYMBOL(SC_stop)
   EXPORT SYMBOL(SC_kill)
   EXPORT SYMBOL(SC_restart)
+  /* --- appended after 'RMSC 0.1.0' was first bound; keep appending below --- */
+  /* SCJOB - active job lookup via QUSLJOB */
+  EXPORT SYMBOL(SCJOB_by_name)
+  EXPORT SYMBOL(SCJOB_last_error)
 ENDPGMEXP

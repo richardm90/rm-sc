@@ -21,6 +21,7 @@ ctl-opt text('RMSC: System queries');
 
 /include 'SCQRY_D.rpgleinc'
 /include 'SCNET_D.rpgleinc'
+/include 'SCJOB_D.rpgleinc'
 /include 'include/RMTOOLS_D.rpgleinc'
 
 exec sql SET OPTION COMMIT = *NONE, CLOSQLCSR = *ENDMOD, DATFMT = *ISO;
@@ -122,10 +123,22 @@ dcl-proc SCQRY_jobs_by_name export;
   dcl-s name_l varchar(28);
   dcl-s sbs_l  varchar(28);
   dcl-s found  varchar(28);
+  dcl-s rc     like(INTEGER_t);
 
   clear jobs;
   name_l = %trim(job_name);
   sbs_l  = %trim(subsystem);
+
+  // QUSLJOB filters by job name itself and is far cheaper than the SQL
+  // service. It cannot filter by subsystem in this format, so the
+  // subsystem-qualified form still goes through SQL below.
+  if %len(sbs_l) = 0;
+    rc = SCJOB_by_name(name_l: jobs);
+    if rc <> SCJOB_UNAVAILABLE;
+      return rc;
+    endif;
+    clear jobs;
+  endif;
 
   if %len(sbs_l) > 0;
     exec sql

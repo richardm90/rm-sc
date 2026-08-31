@@ -16,7 +16,7 @@ query.
 
 ## Status
 
-**Working.** 137 test cases, 537 assertions across 10 suites. `check`, `list` and `groups` are byte-identical
+**Working.** 144 test cases, 578 assertions across 11 suites. `check`, `list` and `groups` are byte-identical
 to the Java implementation.
 
 | Module | Does |
@@ -27,6 +27,7 @@ to the Java implementation.
 | `SCCOLL` | Discovery, groups, dependency order with cycle detection |
 | `SCQRY` | Liveness and reporting queries, as embedded SQL |
 | `SCNET` | Port status via the TCP/IP list API, ~540x faster than the SQL service |
+| `SCJOB` | Active job lookup via `QUSLJOB`, ~125ms per call faster than the SQL service |
 | `SCOUT` | Output formatting, byte-identical to upstream |
 | `SCLOG` | Log file location |
 | `SCLAUNCH` | Starting, stopping, environment assembly |
@@ -40,14 +41,24 @@ wants values rather than text to parse — the bound-call API in
 
 ## Why
 
-`sc` is slow for two independent reasons:
+`sc` was assumed to be slow for two reasons:
 
 1. **JVM cold start** on every invocation.
 2. **`db2util` fork-per-query** — `QueryUtils.java` runs each of its 11 SQL statements by
    spawning a process and opening a fresh database connection.
 
-An ILE program removes both. The second is the larger and less obvious win: liveness checks
-become embedded SQL running in-job on a connection that is already open.
+An ILE program removes both — and measured, that bought only about 20%, with `list` actually
+*slower* than Java. Neither assumption survived contact with a stopwatch: the JVM start is
+smaller than expected, and the fork is not what dominates a liveness query. The IBM i SQL
+table functions are. Filtering `NETSTAT_INFO` to one port cost the same as returning every row
+of it, while PASE `netstat` returned the same data, process fork included, five times faster.
+
+What actually made RMSC fast was replacing those table functions with the system APIs
+underneath them — `QtocLstNetCnn` for port status, `QUSLJOB` for job lookup. `scr check` now
+runs in about 1.6s against Java's ~3.4s.
+
+The measurements, including the ones that disproved the original premise, are in
+[`docs/performance.md`](docs/performance.md).
 
 ## Compatibility
 
