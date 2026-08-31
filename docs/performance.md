@@ -15,7 +15,7 @@ system APIs underneath them.
 | **Suites** | 144 cases / 578 assertions |
 
 > Every figure here is from measurements already taken and recorded during the work. No new
-> timing runs were made to produce this document.
+> timing runs were made to produce this document. Section 9 gives the commands to re-run them.
 
 ---
 
@@ -264,6 +264,115 @@ the most complex option and the one most likely to be wrong in a way nobody noti
 One further API is identified but not needed yet. `QtocRtvNetCnnDta` is the right call for
 finding which jobs hold a connection, which is what `stop` and `jobinfo` need — but it is not
 on the `check` path, so it buys nothing against the figures above.
+
+---
+
+## 9. Reproducing these figures
+
+Set these once. The host and the deploy directory are deliberately not recorded here.
+
+```bash
+HOST=<user>@<your-ibmi>
+DEPLOY=<the deploy directory on that system>   # where the project is built
+```
+
+Everything below assumes `QIBM_MULTI_THREADED=Y`. Without it the PASE side of `sc` and `scr`
+behaves differently, and the figures are not comparable.
+
+### First: prove the output before trusting any timing
+
+A faster run that prints the wrong thing is worthless, and this has already caught one false
+result — an early "40x faster" reading turned out to be a command-not-found returning
+quickly. Always diff before timing.
+
+```bash
+for f in check list groups; do
+  ssh $HOST "export QIBM_MULTI_THREADED=Y; $DEPLOY/scripts/scr $f" > /tmp/now-$f.txt
+  diff local/baseline-$f.txt /tmp/now-$f.txt && echo "$f: byte-identical"
+done
+```
+
+The fixtures live in `local/`, which is not published. Confirm colour stays off when stdout is
+not a terminal, because ANSI escapes would corrupt the status columns:
+
+```bash
+ssh $HOST "export QIBM_MULTI_THREADED=Y; $DEPLOY/scripts/scr check | cat -A | grep -c '\^\['"
+# must print 0
+```
+
+### Java baseline
+
+```bash
+ssh $HOST "export QIBM_MULTI_THREADED=Y; TIMEFORMAT='%3R'; time /QOpenSys/pkgs/bin/sc check >/dev/null"
+```
+
+### RMSC end to end, with a distribution rather than one number
+
+The LPAR is shared, so a single run is noise. Twelve runs and a median is what the figures in
+sections 1 and 6 are built from.
+
+```bash
+ssh $HOST "
+export QIBM_MULTI_THREADED=Y
+for i in \$(seq 1 12); do
+  /usr/bin/time -p $DEPLOY/scripts/scr check 2>&1 >/dev/null | awk '/real/{print \$2}'
+done | sort -n | awk '{a[NR]=\$1} END{printf \"n=%d min=%s median=%s max=%s\n\", NR, a[1], a[int((NR+1)/2)], a[NR]}'"
+```
+
+Swap `check` for `list` to reproduce the definition-loading comparison in section 3.
+
+### Isolating one change — the A/B used in section 6
+
+Rather than comparing against a remembered number, build both routes and time them in the
+same session. `SCQRY_jobs_by_name` delegates to the API only when no subsystem is given, so
+forcing that guard false sends everything back through SQL.
+
+```bash
+# Route A - force the SQL path
+ssh $HOST "cd $DEPLOY && \
+  cp QRPGLESRC/SCQRY.SQLRPGLE /tmp/SCQRY.orig && \
+  sed -i 's|^  if %len(sbs_l) = 0;\$|  if 1 = 0;|' QRPGLESRC/SCQRY.SQLRPGLE && \
+  /QOpenSys/pkgs/bin/makei build"
+#   ... time it with the loop above ...
+
+# Route B - restore and rebuild
+ssh $HOST "cd $DEPLOY && cp /tmp/SCQRY.orig QRPGLESRC/SCQRY.SQLRPGLE && /QOpenSys/pkgs/bin/makei build"
+#   ... time it again ...
+```
+
+Re-run the byte-exact diffs after restoring, and re-run the suites: the service program is
+rebuilt twice here, and a stale test object against a changed export list fails in ways that
+look nothing like a build problem.
+
+### SQL-level diagnosis — how section 5 was argued
+
+The point of these four is that they disagree with the obvious explanation. If filtering to
+one port costs the same as counting everything, the cost is not the enumeration.
+
+```bash
+ssh $HOST "db2util -o csv \"SELECT COUNT(*) FROM QSYS2.NETSTAT_INFO WHERE LOCAL_PORT = 8076 AND TCP_STATE = 'LISTEN'\""
+ssh $HOST "db2util -o csv \"SELECT COUNT(*) FROM QSYS2.NETSTAT_INFO\""
+ssh $HOST "db2util -o csv \"SELECT * FROM QSYS2.NETSTAT_INFO\""
+ssh $HOST "export QIBM_MULTI_THREADED=Y; TIMEFORMAT='%3R'; time netstat -an >/dev/null"
+```
+
+Time each with `TIMEFORMAT='%3R'` as above. Note that `db2util` startup is included, which is
+the honest comparison against PASE `netstat` — that also pays for a process.
+
+### The per-call microsecond figures
+
+The µs figures in sections 5 and 6 — 376,464 µs to 693 µs, and 177 ms per job lookup — are
+**not reproducible from the shell**, and no command here will produce them. They came from a
+throwaway in-process harness that called the procedure in a loop inside one job and divided
+by the iteration count, which is the only way to see a single procedure's cost without the
+process, the job and the definition load swamping it. That harness was deleted rather than
+kept, on the grounds that a benchmark nobody runs is a benchmark nobody maintains.
+
+To measure a procedure again, write a `.TEST.RPGLE` suite that brackets a loop with
+`%timestamp()` and reports through an assertion message. Two constraints will bite: an
+iRPGUnit test written as `.SQLRPGLE` cannot be compiled from an SSH job, because the SQL path
+calls `CRTSQLRPGI` and that refuses a multithreaded job — submit it to batch or use the VS
+Code Test Explorer — and a plain `.RPGLE` test has no such problem.
 
 ---
 
