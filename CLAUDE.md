@@ -78,8 +78,24 @@ it fails when something regresses *and* when something is fixed without the list
 | `QRPGLESRC/` | the modules; `QPROTOSRC/` holds the matching prototype copybooks |
 | `qtestsrc/` | iRPGUnit suites, excluded from `SUBDIRS` so TOBi never builds them |
 | `docs/performance.md` | every measurement taken, and how to re-run it |
+| `docs/parity.md` | where RMSC matches upstream `sc` and where it deliberately does not |
 | `docs/testing-notes.md` | what has cost real time here — read before debugging a test |
 | `docs/tobi-binding.md` | build and binding specifics |
+
+### Say which numbering you mean
+
+Three independent schemes run in this project, and they collide on every value:
+
+| Scheme | Where | What 8 means there |
+|---|---|---|
+| **Phases** 0–7 | the plan | Phase 8 does not exist |
+| **Verification steps** 1–14 | the plan | the side-by-side operation diff |
+| **Sections** 1–10 | `docs/performance.md` | "What is not done" |
+
+Phase 0 also has its own internally numbered steps, which is why a Verification step can say
+"Phase 0 server steps 7-12" meaning something else again. Always write **"Verification step N"**
+or **"performance.md §N"** in full. A bare "step 8" or "§8" is ambiguous, and has already cost
+one round of confusion.
 
 `rmtools` is a dependency in two ways with different lifetimes: copybooks at compile time via
 `INCDIR`, and modules bound **by copy**, so `RMSC` has no runtime dependency on the `RMTOOLS`

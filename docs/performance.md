@@ -453,53 +453,15 @@ ssh $HOST "export QIBM_MULTI_THREADED=Y; $DEPLOY/scripts/scr check | cat -A | gr
 # must print 0
 ```
 
-### The full gate - every read-only operation
+### Everything else — see `parity.md`
 
-The diff above covers `check`, `list` and `groups`: the operations with captured fixtures, and
-the ones the byte-exact acceptance criterion is written against. They are 3 of the 13 operations
-RMSC accepts.
+The diff above covers `check`, `list` and `groups`, because those are what the timings in this
+document are taken against: a faster run that prints the wrong thing is worthless. They are 3 of
+the 13 operations RMSC accepts.
 
-`tools/fidelity-gate.sh` covers the rest. It runs on the box, because a per-command `ssh` round
-trip turns a full sweep into minutes:
-
-```bash
-scp tools/fidelity-gate.sh $HOST:$DEPLOY/tools/
-ssh $HOST "$DEPLOY/tools/fidelity-gate.sh"
-```
-
-Two stages, deliberately different:
-
-- **Byte-exact** - `check`, `list`, `groups`, plus a check that no ANSI escape reaches a
-  non-terminal stream, compared against the captured Java fixtures.
-- **Live differential** - `info`, `file`, `loginfo`, `jobinfo`, `scrunattrs` and `perfinfo` are
-  run through *both* implementations on the spot and compared to each other. Nothing is captured
-  for these: they embed job numbers, timestamps and storage counters that differ between any two
-  runs seconds apart, so a stored fixture would rot almost immediately. Only those values are
-  normalised - whitespace is not, because a stray blank line is exactly the class of difference
-  the gate exists to catch.
-
-`start`, `stop`, `kill` and `restart` are not gated. They change system state, and `SCLIFE.TEST`
-already covers the lifecycle against a service it creates and removes itself.
-
-The gate passes when reality matches the divergence list recorded in the script. It fails when
-something regresses **and** when something is fixed without the list being updated, so the list
-cannot quietly drift out of date.
-
-#### Recorded state, 31 August 2026
-
-| Operation | Result | Divergence |
-|---|---|---|
-| `check`, `list`, `groups` | **pass** | byte-identical to the captured fixtures |
-| `loginfo` | differs | one trailing blank line, nothing else |
-| `jobinfo` | differs | `sc` prints a header then indented jobs; RMSC one `name: job` line each |
-| `scrunattrs` | differs | different meaning - `sc` lists running jobs and their run attributes, RMSC prints the `SCOMMANDER_*` variables it sets |
-| `file` | differs | different meaning - `sc` prints the definition's *path*, RMSC prints its *contents* |
-| `info` | differs | omits the environment-variables block and the closing separator, adds a `Group:` line, resolves `Defined in:` to a different but byte-identical copy of the file, and shows a resolved working directory rather than the raw one |
-| `perfinfo` | differs | substantially incomplete - 66 lines from `sc`, 12 from RMSC |
-
-Smallest first: `loginfo` is one line, `jobinfo` is a formatting change, `perfinfo` is real work.
-None of the six is on the `check` path, so none affects any figure in this document - which is
-why they went unnoticed until the gate was widened past the three operations that are.
+The remaining operations, `tools/fidelity-gate.sh`, and the record of which differences are
+deliberate all live in **`docs/parity.md`**. None of them is on the `check` path, so none affects
+a figure here.
 
 ### Java baseline
 
@@ -579,4 +541,4 @@ Code Test Explorer — and a plain `.RPGLE` test has no such problem.
 
 All timings from a hosted IBM i 7.5 LPAR, 0.25 shared core. Figures for `check`, `list` and
 `groups` were taken only against runs whose output was verified byte-identical to the captured
-Java fixtures.
+Java fixtures. Behavioural parity beyond those three operations is recorded in `parity.md`.
