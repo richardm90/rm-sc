@@ -81,11 +81,18 @@ dcl-proc SCQRY_jobs_on_port export;
   clear jobs;
   port_l = port;
 
+  // REMOTE_PORT = 0 is the listening socket: a listener has no peer, an
+  // established connection does. Without this qualifier every client connected
+  // to the port comes back as though it were the service - and SCEXEC_jobs
+  // feeds this straight to ENDJOB on stop and kill, so over-matching here ends
+  // other people's jobs. Upstream filters the same way (QueryUtils in sc.jar:
+  // "where REMOTE_PORT = 0 and LOCAL_PORT = ?").
   exec sql
     DECLARE c_port CURSOR FOR
     SELECT DISTINCT JOB_NAME
       FROM QSYS2.NETSTAT_JOB_INFO
      WHERE LOCAL_PORT = :port_l
+       AND REMOTE_PORT = 0
        AND JOB_NAME IS NOT NULL;
 
   exec sql OPEN c_port;

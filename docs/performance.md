@@ -59,6 +59,38 @@ Three services are displayed by a default `check`. The `groups` fixture lists `s
 though `check` excludes it via the default `--ignore-groups=system`; both behaviours had to be
 reproduced exactly.
 
+### How the baselines were captured
+
+Phase 0, before a line of RMSC existed — so nothing in this project could have influenced what
+they record (`$HOST` as set in section 10):
+
+```bash
+ssh $HOST "export QIBM_MULTI_THREADED=Y; sc check"  > baseline-check.txt
+ssh $HOST "export QIBM_MULTI_THREADED=Y; sc list"   > baseline-list.txt
+ssh $HOST "export QIBM_MULTI_THREADED=Y; sc groups" > baseline-groups.txt
+ssh $HOST "export QIBM_MULTI_THREADED=Y; TIMEFORMAT='%3R'; time sc check >/dev/null"
+```
+
+| File | Captured from | What it pins |
+|---|---|---|
+| `baseline-check.txt` | `sc check` | **The format-critical one** — `\|` at column 22, three services |
+| `baseline-list.txt` | `sc list` | `name (description)` — no status, no leading spaces |
+| `baseline-groups.txt` | `sc groups` | Group names only, alphabetical, and it includes `system` |
+| `baseline-operations.txt` | `sc info`, `file`, `jobinfo`, `loginfo`, `scrunattrs` | Reference for the operations outside the byte-exact gate |
+
+Two things about these are easy to trip over later.
+
+**They were captured under whichever profile was signed on at the time.** `check`, `list` and
+`groups` carry no paths, so they stay directly comparable under any profile.
+`baseline-operations.txt` does **not** — `loginfo` prints a log directory under the capturing
+user's home, so comparing it against a run under a different profile needs that path
+normalised first. This is one reason `tools/fidelity-gate.sh` compares those operations live
+against upstream rather than against this file.
+
+**They describe *this* system.** Service names and description lengths differ elsewhere, so
+the client's equivalents must be captured separately before any rollout there — a format
+assertion derived from one machine's output proves nothing about another's.
+
 ---
 
 ## 3. The premise, tested
@@ -386,6 +418,7 @@ Set these once. The host and the deploy directory are deliberately not recorded 
 ```bash
 HOST=<user>@<your-ibmi>
 DEPLOY=<the deploy directory on that system>   # where the project is built
+BASELINE=<directory holding the captured Java output>   # section 2; not published here
 ```
 
 Everything below assumes `QIBM_MULTI_THREADED=Y`. Without it the PASE side of `sc` and `scr`
@@ -400,12 +433,20 @@ quickly. Always diff before timing.
 ```bash
 for f in check list groups; do
   ssh $HOST "export QIBM_MULTI_THREADED=Y; $DEPLOY/scripts/scr $f" > /tmp/now-$f.txt
-  diff local/baseline-$f.txt /tmp/now-$f.txt && echo "$f: byte-identical"
+  diff $BASELINE/baseline-$f.txt /tmp/now-$f.txt && echo "$f: byte-identical"
 done
 ```
 
-The fixtures live in `local/`, which is not published. Confirm colour stays off when stdout is
-not a terminal, because ANSI escapes would corrupt the status columns:
+Note *which* baselines that diffs against. `$BASELINE` holds the **real** captures described
+in section 2, taken from the live system and not published with this repository. The tracked
+`fixtures/` directory holds same-layout equivalents with invented service names, so the format
+tests can live in a public repo — they describe a different machine and will not match a live
+run. Diffing against those instead is a trap that costs an afternoon, because the output looks
+plausibly wrong rather than obviously so. `tools/fidelity-gate.sh` takes the same directory as
+its own `BASELINE`, and fails rather than skipping if it finds nothing there.
+
+Confirm colour stays off when stdout is not a terminal, because ANSI escapes would corrupt the
+status columns:
 
 ```bash
 ssh $HOST "export QIBM_MULTI_THREADED=Y; $DEPLOY/scripts/scr check | cat -A | grep -c '\^\['"

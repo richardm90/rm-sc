@@ -83,6 +83,48 @@ dcl-proc test_jobs_on_port export;
 
 end-proc;
 
+//==============================================================================
+// A port resolves to the job LISTENING on it, not to its clients
+//
+// Every job holding a socket on a port satisfies LOCAL_PORT = n. Only the
+// listener has no remote peer, so only the listener has REMOTE_PORT = 0.
+// Without that qualifier an established connection is returned as though it
+// were the service.
+//
+// SSH is the case that proves it. The suite arrives over port 22, so while it
+// runs there is a listening job AND at least one connected session held by a
+// different job. More than one job here means client connections are being
+// reported as the service.
+//
+// This is not a cosmetic difference. SCEXEC_jobs is built on this procedure,
+// and stop and kill pass its result straight to ENDJOB - so over-matching here
+// ends jobs belonging to whoever happens to be connected.
+//==============================================================================
+
+dcl-proc test_jobs_on_port_is_listener_only export;
+
+  dcl-ds jobs likeds(SCQRY_JOBS_t) inz(*likeds);
+  dcl-s n     like(INTEGER_t);
+  dcl-s i     like(INTEGER_t);
+  dcl-s names varchar(512) inz('');
+
+  n = SCQRY_jobs_on_port(SSH_PORT: jobs);
+
+  // Name every job returned, so a failure says which ones rather than only
+  // how many. Plain concatenation, not aEqual - see docs/testing-notes.md.
+  for i = 1 to jobs.count;
+    if i > 1;
+      names += ', ';
+    endif;
+    names += %trim(jobs.name(i));
+  endfor;
+
+  assert((n >= 1): 'the SSH listener is found');
+  assert((n = 1): 'port 22 must resolve to the listening job alone, but ' +
+                  %char(n) + ' were returned: ' + %trim(names));
+
+end-proc;
+
 dcl-proc test_jobs_on_unused_port export;
 
   dcl-ds jobs likeds(SCQRY_JOBS_t) inz(*likeds);

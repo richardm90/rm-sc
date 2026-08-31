@@ -127,3 +127,64 @@ Two details make it reliable rather than merely present:
   passed again. A flaky test is worse than a failing one because it teaches you to re-run
   instead of investigate. The teardown now polls until the job is actually absent and says so
   if it never is. Verified over four consecutive runs, not one.
+
+## An assertion that cannot fail is not a test
+
+`SCQRY_jobs_on_port` returned every job holding a socket on the port, not only the one
+listening on it. On port 22 that is the sshd listener plus every connected session - five jobs
+where upstream returns one.
+
+There *was* a test. It asserted the wrong thing:
+
+```rpgle
+assert((SCQRY_jobs_on_port(SSH_PORT: jobs) > 0): 'a job holds the SSH socket');
+```
+
+`> 0` is true whether the answer is one job or five, so it passed while the procedure returned
+four jobs too many. The suite reported the shape of the answer and never its value.
+
+It mattered because `SCEXEC_jobs` is built on that procedure, and `stop` and `kill` pass its
+result straight to `SCLAUNCH_endjob`. Any profile in the `QPGMR` group inherits `*JOBCTL`,
+which grants control over jobs regardless of who owns them - so `scr kill` on a port-based
+service would not have been refused for authority. It would have ended other people's
+interactive sessions successfully.
+
+The fix is one qualifier, and it is what upstream does (`QueryUtils` in `sc.jar`):
+
+```sql
+WHERE LOCAL_PORT = :port_l AND REMOTE_PORT = 0 AND JOB_NAME IS NOT NULL
+```
+
+A listening socket has no peer; an established connection does.
+
+The replacement test asserts the count rather than its sign, and names the jobs it got so a
+failure says *which* rather than only *how many*. Port 22 is the fixture that needs nothing
+installed: the suite arrives over SSH, so there is always a listener plus at least one
+connected session held by a different job.
+
+## Running a suite without VS Code
+
+The suites are normally driven by the IBM i Testing extension. Driving one from a shell takes a
+single QSH invocation - but three things mislead you on the way there.
+
+**It is the library list, not the job.** `RUCRTRPG` fails with `RNF0273 - Compiler not able to
+open the /COPY or /INCLUDE file`, because `/include QINCLUDE,TESTCASE` needs `RPGUNIT` on the
+library list. Every `/QOpenSys/usr/bin/system` call runs in *its own job*, taking the library
+list from the job description, so a `CHGLIBL` or `ADDLIBLE` in a previous call is already gone.
+QSH holds one job for the whole invocation:
+
+```bash
+qsh -c "liblist -a RPGUNIT; liblist -a RMSC; liblist -a RMSCT; liblist -a RMTOOLS;
+        system \"RUCALLTST TSTPGM(RMSCT/SCQRY) ORDER(*API) DETAIL(*BASIC) OUTPUT(*ALLWAYS)\""
+```
+
+Results arrive on stdout - no spooled file to chase. Swap `RUCALLTST` for `RUCRTRPG` with the
+parameters in `.vscode/testing.json` to compile first.
+
+**`RUCRTRPG` creates a `*SRVPGM`, not a `*PGM`.** `CHKOBJ ... OBJTYPE(*PGM)` then answers
+`CPF9801 - not found` about a build that succeeded, which reads exactly like a compile failure.
+
+**`makei build` needs none of this.** It compiles `.SQLRPGLE` in an ordinary SSH job. The note
+that `CRTSQLRPGI` refuses a multithreaded job is about `RUCRTRPG` compiling a `.SQLRPGLE`
+*test* source - a different command path - and is not a constraint on the build. Reaching for
+`SBMJOB` and `INLLIBL` to work around it costs an afternoon and fixes nothing.
