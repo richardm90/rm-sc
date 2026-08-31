@@ -26,6 +26,26 @@ about, and seven suites fail with `RNX0115` on code that did not change.
 not already settled are asked rather than assumed. Finishing a phase early, or finding one
 blocked, is still a stop: report and wait rather than rolling into the next.
 
+## Test first
+
+**Write the failing test before the fix, and watch it fail.** Not as ceremony — three defects
+here were shipped behind assertions that could not fail, and each was found only when a test
+was written that could:
+
+- `SCQRY_jobs_on_port` returned a port's clients as well as its listener for three phases,
+  behind `assert((... > 0))` — true for one job or five.
+- `SCQRY_jvm_info` was rejected by the database on every call it ever made, behind a test that
+  only asked what happened for a job that does not exist.
+- `SCNET`'s IPv6 branch was wrong from the day it was written, and no test could reach it.
+
+A red test proves the test can detect the defect. A test written afterwards proves only that it
+agrees with the code. Where a fixture is missing, **fail rather than skip** — a suite that
+passes because its fixture is absent is worse than one that fails, because it reports success.
+
+Prefer fixtures the suite can rely on rather than ones that happen to be there: port 22 and
+`sshd` are present because the suite arrived over SSH, and `SCLIFE.TEST` creates and removes the
+service it exercises.
+
 ## Build and test
 
 Both run over SSH from the deploy directory. Neither needs `SBMJOB`.
