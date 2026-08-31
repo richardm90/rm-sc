@@ -12,10 +12,11 @@ system APIs underneath them.
 | **System** | IBM i 7.5, 0.25-core shared LPAR |
 | **Baseline captured** | 29 August 2026 |
 | **Latest figures** | 30 August 2026 |
+| **Re-verified** | 31 August 2026 — section 9 |
 | **Suites** | 144 cases / 578 assertions |
 
-> Every figure here is from measurements already taken and recorded during the work. No new
-> timing runs were made to produce this document. Section 9 gives the commands to re-run them.
+> Sections 1-8 are from measurements taken and recorded during the work itself. Section 9 is an
+> independent re-run made afterwards, on 31 August 2026. Section 10 gives the commands for both.
 
 ---
 
@@ -267,7 +268,118 @@ on the `check` path, so it buys nothing against the figures above.
 
 ---
 
-## 9. Reproducing these figures
+## 9. Re-verified, 31 August 2026
+
+An independent re-run of the headline figures against the deployed build, using the commands in
+section 10. Nothing here changes a conclusion above. It establishes that they still hold, shows
+where the numbers have moved since, and retracts one observation that did not survive contact
+with a third sample.
+
+### Confirmed first
+
+| | |
+|---|---|
+| **Build under test** | `SCNET` 2026-08-30-12.19.04, `SCQRY` 14.04.16, `SCJOB` 14.17.08, bound into `RMSC.SRVPGM` — both API replacements present in the objects actually being timed |
+| **Output fidelity** | `check`, `list` and `groups` byte-identical to the captured Java fixtures |
+| **Colour** | 0 ANSI escapes with stdout not a terminal |
+
+### Three samples
+
+Twelve runs each, `QIBM_MULTI_THREADED=Y`, same LPAR.
+
+| `scr check` — RMSC | Min | Median | Max |
+|---|---|---|---|
+| Recorded, section 6 | 1.43s | **1.59s** | 1.92s |
+| Sample A | 1.53s | 1.62s | 3.05s |
+| Sample B | 1.48s | 1.645s | 1.83s |
+| Sample C | 0.86s | 1.40s | 2.34s |
+
+| `sc check` — Java | Min | Median | Max |
+|---|---|---|---|
+| Recorded, sections 2-3 | — | **~3.4s** | — |
+| Sample A | 3.70s | 3.98s | 4.46s |
+| Sample B | 3.63s | 4.115s | 17.66s |
+| Sample C | 4.05s | 4.425s | 5.23s |
+
+RMSC reproduces its recorded figure in all three samples. Java does not — it is consistently
+slower than when it was baselined on 29 August, by roughly 0.6 to 1.0s.
+
+**This matters for how the comparison is quoted.** Measured today the ratio is 2.5x to 3.2x,
+against the 2.19x in section 1. The difference is Java having got slower, not RMSC having got
+faster, so **section 1's figure remains the honest one**. A single twelve-run sample on a
+0.25-core shared LPAR moves 20% either way; no ratio quoted from one sample is worth defending.
+
+### Sample C in full
+
+Sample C interleaved the two routes so both met identical system conditions, and kept every run
+rather than a summary. It is recorded in full because the summaries are what misled the first
+attempt.
+
+| Round | `scr check` | `sc check` |
+|---|---|---|
+| 1 | 0.86 | 5.23 |
+| 2 | 1.44 | 4.48 |
+| 3 | 1.66 | 4.78 |
+| 4 | 1.38 | 4.80 |
+| 5 | 1.40 | 4.64 |
+| 6 | 1.39 | 4.86 |
+| 7 | **2.34** | 4.36 |
+| 8 | 1.40 | 4.35 |
+| 9 | 1.42 | 4.34 |
+| 10 | 1.72 | 4.37 |
+| 11 | 1.39 | 4.07 |
+| 12 | 1.37 | 4.05 |
+
+| | Min | Median | Max | Mean | Max/median |
+|---|---|---|---|---|---|
+| `scr check` | 0.86s | 1.40s | 2.34s | 1.48s | 1.67x |
+| `sc check` | 4.05s | 4.425s | 5.23s | 4.53s | 1.18x |
+
+### The decomposition holds
+
+Sample B timed `list` alongside `check`, which separates definition loading from liveness
+without needing an in-process harness:
+
+| | Median |
+|---|---|
+| `scr list` — definition loading only | 1.38s |
+| `scr check` — loading plus liveness for 3 services | 1.645s |
+| **Liveness for 3 services, by subtraction** | **~0.27s** |
+
+Against roughly 1.6s in section 4, before `QtocLstNetCnn` and `QUSLJOB`. That is the two API
+replacements showing up end to end, independently of the per-call microsecond figures in
+sections 5 and 6.
+
+It also settles section 8 with a number: definition loading is **84% of a default `check`**, and
+is the only place left with material headroom.
+
+### An observation that did not survive
+
+Samples A and B each contained one Java run several times its median — 17.66s against 4.115s in
+sample B. Two samples agreeing made it look like a property of the JVM, and it was nearly
+recorded as one: an argument that RMSC's worst case matters more than its median for a
+screen-refresh workload.
+
+Sample C, which interleaved the routes rather than running them in blocks, showed the reverse.
+Java had the *tighter* spread of the two (max/median 1.18x against RMSC's 1.67x) and the outlier
+was RMSC's 2.34s. The excursions belong to the shared LPAR and land on whichever route happens
+to be running when one occurs. No claim about relative consistency is made, and the earlier one
+is withdrawn.
+
+The methodological point is worth keeping: running two routes in separate blocks makes system
+noise look like a property of whichever route drew the bad interval. Interleave them.
+
+### Not re-verified
+
+The A/B in section 6 was **not** re-run. It requires rebuilding the service program both ways,
+and 5770-WDS is off on this system, with the ILE compiler licence at usage limit 0 under a grace
+period expiring 31 October 2026. The 19% therefore still rests on its original measurement. What
+this section establishes is narrower: the build currently deployed still performs at the figure
+that measurement produced.
+
+---
+
+## 10. Reproducing these figures
 
 Set these once. The host and the deploy directory are deliberately not recorded here.
 
@@ -300,6 +412,54 @@ ssh $HOST "export QIBM_MULTI_THREADED=Y; $DEPLOY/scripts/scr check | cat -A | gr
 # must print 0
 ```
 
+### The full gate - every read-only operation
+
+The diff above covers `check`, `list` and `groups`: the operations with captured fixtures, and
+the ones the byte-exact acceptance criterion is written against. They are 3 of the 13 operations
+RMSC accepts.
+
+`tools/fidelity-gate.sh` covers the rest. It runs on the box, because a per-command `ssh` round
+trip turns a full sweep into minutes:
+
+```bash
+scp tools/fidelity-gate.sh $HOST:$DEPLOY/tools/
+ssh $HOST "$DEPLOY/tools/fidelity-gate.sh"
+```
+
+Two stages, deliberately different:
+
+- **Byte-exact** - `check`, `list`, `groups`, plus a check that no ANSI escape reaches a
+  non-terminal stream, compared against the captured Java fixtures.
+- **Live differential** - `info`, `file`, `loginfo`, `jobinfo`, `scrunattrs` and `perfinfo` are
+  run through *both* implementations on the spot and compared to each other. Nothing is captured
+  for these: they embed job numbers, timestamps and storage counters that differ between any two
+  runs seconds apart, so a stored fixture would rot almost immediately. Only those values are
+  normalised - whitespace is not, because a stray blank line is exactly the class of difference
+  the gate exists to catch.
+
+`start`, `stop`, `kill` and `restart` are not gated. They change system state, and `SCLIFE.TEST`
+already covers the lifecycle against a service it creates and removes itself.
+
+The gate passes when reality matches the divergence list recorded in the script. It fails when
+something regresses **and** when something is fixed without the list being updated, so the list
+cannot quietly drift out of date.
+
+#### Recorded state, 31 August 2026
+
+| Operation | Result | Divergence |
+|---|---|---|
+| `check`, `list`, `groups` | **pass** | byte-identical to the captured fixtures |
+| `loginfo` | differs | one trailing blank line, nothing else |
+| `jobinfo` | differs | `sc` prints a header then indented jobs; RMSC one `name: job` line each |
+| `scrunattrs` | differs | different meaning - `sc` lists running jobs and their run attributes, RMSC prints the `SCOMMANDER_*` variables it sets |
+| `file` | differs | different meaning - `sc` prints the definition's *path*, RMSC prints its *contents* |
+| `info` | differs | omits the environment-variables block and the closing separator, adds a `Group:` line, resolves `Defined in:` to a different but byte-identical copy of the file, and shows a resolved working directory rather than the raw one |
+| `perfinfo` | differs | substantially incomplete - 66 lines from `sc`, 12 from RMSC |
+
+Smallest first: `loginfo` is one line, `jobinfo` is a formatting change, `perfinfo` is real work.
+None of the six is on the `check` path, so none affects any figure in this document - which is
+why they went unnoticed until the gate was widened past the three operations that are.
+
 ### Java baseline
 
 ```bash
@@ -316,7 +476,7 @@ ssh $HOST "
 export QIBM_MULTI_THREADED=Y
 for i in \$(seq 1 12); do
   /usr/bin/time -p $DEPLOY/scripts/scr check 2>&1 >/dev/null | awk '/real/{print \$2}'
-done | sort -n | awk '{a[NR]=\$1} END{printf \"n=%d min=%s median=%s max=%s\n\", NR, a[1], a[int((NR+1)/2)], a[NR]}'"
+done | sort -n | awk '{a[NR]=\$1} END{printf \"n=%d min=%s median=%s max=%s\n\", NR, a[1], (a[int((NR+1)/2)]+a[int(NR/2+1)])/2, a[NR]}'"
 ```
 
 Swap `check` for `list` to reproduce the definition-loading comparison in section 3.
