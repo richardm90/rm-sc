@@ -59,14 +59,15 @@ end-pr;
 //==============================================================================
 
 dcl-proc SCMAIN_parse export;
-  dcl-pi *n like(BOOLEAN_t);
+  dcl-pi *n like(INTEGER_t);
     args like(SCMAIN_ARGS_t) const;
     opts likeds(SCMAIN_OPTS_t);
   end-pi;
 
-  dcl-s rest like(SCMAIN_ARGS_t);
-  dcl-s word like(SCMAIN_ARGS_t);
-  dcl-s eq   like(INTEGER_t);
+  dcl-s rest      like(SCMAIN_ARGS_t);
+  dcl-s word      like(SCMAIN_ARGS_t);
+  dcl-s eq        like(INTEGER_t);
+  dcl-s refused   like(BOOLEAN_t) inz(false);
 
   clear opts;
   opts.ignore_groups = SCMAIN_DFT_IGNORE;
@@ -85,13 +86,23 @@ dcl-proc SCMAIN_parse export;
         opts.verbose = true;
       when word = '-q';
         opts.quiet = true;
+      // An explicit refusal, and it is final. The wrapper APPENDS --colors
+      // when stdout is a terminal, after whatever the user typed, so plain
+      // last-wins would turn colour back on every time somebody asked for it
+      // off - and a terminal is the only place anyone would ever ask, since
+      // colour is off everywhere else.
       when word = '--disable-colors' or word = '--disable-colours';
         opts.colours = false;
+        refused = true;
       // Not an upstream flag. Upstream decides by asking whether stdout is a
       // terminal; RMSC cannot ask that from ILE, so whatever CAN ask - the
-      // PASE wrapper, with [ -t 1 ] - says so explicitly.
+      // PASE wrapper, with [ -t 1 ] - says so explicitly. It states what the
+      // environment supports, which is a default, and a default does not
+      // overrule someone who said no.
       when word = '--colors' or word = '--colours';
-        opts.colours = true;
+        if not refused;
+          opts.colours = true;
+        endif;
       when word = '--splf';
         opts.splf = true;
       when word = '--ignore-globals';
@@ -112,12 +123,12 @@ dcl-proc SCMAIN_parse export;
 
       when %len(word) > 1 and %subst(word: 1: 1) = '-';
         opts.err = 'Unknown option ' + %trim(word);
-        return false;
+        return SCMAIN_EXIT_USAGE;
 
       when %len(%trim(opts.operation)) = 0;
         if not is_operation(word);
           opts.err = 'Unknown operation ' + %trim(word);
-          return false;
+          return SCMAIN_EXIT_USAGE;
         endif;
         opts.operation = STRING_lower(word);
         // status is upstream's alias for check
@@ -130,16 +141,16 @@ dcl-proc SCMAIN_parse export;
 
       other;
         opts.err = 'Unexpected argument ' + %trim(word);
-        return false;
+        return SCMAIN_EXIT_USAGE;
     endsl;
   enddo;
 
   if %len(%trim(opts.operation)) = 0;
     opts.err = 'No operation given';
-    return false;
+    return SCMAIN_EXIT_USAGE;
   endif;
 
-  return true;
+  return SCMAIN_EXIT_OK;
 
 end-proc;
 
@@ -324,7 +335,7 @@ end-proc;
 //==============================================================================
 
 dcl-proc SCMAIN_run export;
-  dcl-pi *n like(BOOLEAN_t);
+  dcl-pi *n like(INTEGER_t);
     opts likeds(SCMAIN_OPTS_t);
   end-pi;
 
@@ -335,6 +346,11 @@ dcl-proc SCMAIN_run export;
   dcl-s group like(SCDEF_NAME_t);
   dcl-s acted like(BOOLEAN_t) inz(false);
   dcl-s shown like(INTEGER_t);
+
+  // Anything the parse stage had to say has been said by now. Left in place
+  // it would be reported a second time when this stage returns, which is the
+  // doubled-message fault the status contract exists to remove.
+  opts.err = '';
 
   SCOUT_set_colour(opts.colours);
 
@@ -353,19 +369,19 @@ dcl-proc SCMAIN_run export;
   select;
     when opts.operation = 'groups';
       SCEXEC_groups(coll: opts.ignore_groups: opts.ignore_globals);
-      return true;
+      return SCMAIN_EXIT_OK;
 
     when opts.operation = 'list' and %len(%trim(opts.spec)) = 0;
       shown = SCEXEC_list(coll: opts.ignore_groups);
       warn_if_empty(shown: SCMAIN_GROUP_ALL);
-      return true;
+      return SCMAIN_EXIT_OK;
 
     // A bare 'check', which is how a caller asks for everything
     when opts.operation = 'check'
      and (%len(%trim(opts.spec)) = 0 or STRING_lower(opts.spec) = 'all');
       shown = SCEXEC_check_all(coll: opts.ignore_groups);
       warn_if_empty(shown: SCMAIN_GROUP_ALL);
-      return true;
+      return SCMAIN_EXIT_OK;
   endsl;
 
   // group:NAME applies the operation to every member
@@ -379,7 +395,7 @@ dcl-proc SCMAIN_run export;
     if opts.operation = 'list';
       shown = SCEXEC_list(coll: opts.ignore_groups: group);
       warn_if_empty(shown: group);
-      return true;
+      return SCMAIN_EXIT_OK;
     endif;
 
     for i = 1 to SCCOLL_count(coll);
@@ -427,17 +443,20 @@ dcl-proc SCMAIN_run export;
     if not acted;
       SCOUT_warnln(SCOUT_no_services_warning(group));
     endif;
-    return true;
+    return SCMAIN_EXIT_OK;
   endif;
 
   // Everything else needs one named service
   if %len(%trim(opts.spec)) = 0;
+    // Upstream treats a missing service as a USAGE failure, not a failed
+    // operation: 'sc info' with no service prints the usage line and exits
+    // 255. Measured across all ten operations that require one.
     opts.err = 'Operation ' + %trim(opts.operation) + ' needs a service';
-    return false;
+    return SCMAIN_EXIT_USAGE;
   endif;
 
   if not resolve_one(opts: coll: def);
-    return false;
+    return SCMAIN_EXIT_FAILED;
   endif;
 
   select;
@@ -446,22 +465,22 @@ dcl-proc SCMAIN_run export;
     when opts.operation = 'start';
       if not SCEXEC_start(coll: def.short_name: err);
         opts.err = err;
-        return false;
+        return SCMAIN_EXIT_FAILED;
       endif;
     when opts.operation = 'stop';
       if not SCEXEC_stop(coll: def.short_name: false: err);
         opts.err = err;
-        return false;
+        return SCMAIN_EXIT_FAILED;
       endif;
     when opts.operation = 'kill';
       if not SCEXEC_stop(coll: def.short_name: true: err);
         opts.err = err;
-        return false;
+        return SCMAIN_EXIT_FAILED;
       endif;
     when opts.operation = 'restart';
       if not SCEXEC_restart(coll: def.short_name: err);
         opts.err = err;
-        return false;
+        return SCMAIN_EXIT_FAILED;
       endif;
     when opts.operation = 'list';
       SCOUT_writeln(SCOUT_list_row(def.short_name: def.friendly));
@@ -469,7 +488,7 @@ dcl-proc SCMAIN_run export;
       run_reporting(opts: def);
   endsl;
 
-  return true;
+  return SCMAIN_EXIT_OK;
 
 end-proc;
 

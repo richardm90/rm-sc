@@ -27,6 +27,31 @@ dcl-s SCMAIN_SPEC_t varchar(256) template;
 dcl-c SCMAIN_DFT_IGNORE const('system');
 
 ///
+// Exit statuses, upstream's, returned by SCMAIN_parse and SCMAIN_run.
+//
+// The status is returned by whichever procedure knows it, rather than being
+// inferred by the caller from WHICH procedure failed. That inference used to
+// hold by coincidence - a parse failure happened to mean 255 and a run failure
+// 253 - and it cannot express a case upstream has: an unrecognised option,
+// where upstream warns and carries on with a status of 0.
+//
+// opts.err carries anything still needing to be said, and is empty when there
+// is nothing. So a status of 0 with a message means "it worked, say this",
+// and a non-zero status with a message means "it failed, say this".
+//
+// A non-zero status with NO message is reserved for a failure that has
+// already reported itself where it happened - a service the walk could not
+// check, named on stderr in its own place in the listing. **No path produces
+// that yet.** It is described here because the callers handle it, and because
+// the alternative - reporting at the end - would put the message somewhere
+// upstream does not.
+///
+
+dcl-c SCMAIN_EXIT_OK     const(0);
+dcl-c SCMAIN_EXIT_FAILED const(253);
+dcl-c SCMAIN_EXIT_USAGE  const(255);
+
+///
 // The parsed command line.
 ///
 
@@ -52,7 +77,7 @@ end-ds;
 // nothing, is the kind of fault that only shows up in production.
 ///
 
-dcl-pr SCMAIN_parse like(BOOLEAN_t);
+dcl-pr SCMAIN_parse like(INTEGER_t);
   args like(SCMAIN_ARGS_t) const;
   opts likeds(SCMAIN_OPTS_t);
 end-pr;
@@ -70,9 +95,13 @@ dcl-pr SCMAIN_adhoc like(BOOLEAN_t);
 end-pr;
 
 ///
-// Run a parsed command line. Returns false with opts.err set on failure.
+// Run a parsed command line.
+//
+// Returns an exit status - see SCMAIN_EXIT_* above - and leaves opts.err
+// holding anything the caller still needs to say. Clears opts.err on entry,
+// so a message from the parse stage is not reported twice.
 ///
 
-dcl-pr SCMAIN_run like(BOOLEAN_t);
+dcl-pr SCMAIN_run like(INTEGER_t);
   opts likeds(SCMAIN_OPTS_t);
 end-pr;

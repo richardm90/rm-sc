@@ -21,7 +21,9 @@
 // program the CL command calls" as long as no exception is signalled, so
 // exiting with a status is the whole mechanism.
 //
-// The statuses are upstream's:
+// The statuses are upstream's, and are decided by SCMAIN_parse and
+// SCMAIN_run rather than worked out here from which of them failed - see
+// SCMAIN_D for the contract:
 //
 //   255  the command line could not be understood
 //   253  it was understood and could not be carried out
@@ -43,9 +45,6 @@ ctl-opt bnddir('RMSCPGM':'RMSCDEPS':'QC2LE');
 /include 'SCOUT_D.rpgleinc'
 /include 'include/RMTOOLS_D.rpgleinc'
 
-dcl-c SCRUN_EXIT_USAGE  const(255);
-dcl-c SCRUN_EXIT_FAILED const(253);
-
 // Ends the activation group with a status. Never returns.
 dcl-pr c_exit extproc('exit');
   status int(10) value;
@@ -56,20 +55,27 @@ dcl-proc SCRUN;
     p_args char(SCMAIN_ARGS_SIZE) const;
   end-pi;
 
-  dcl-ds opts likeds(SCMAIN_OPTS_t) inz(*likeds);
+  dcl-ds opts   likeds(SCMAIN_OPTS_t) inz(*likeds);
+  dcl-s  status like(INTEGER_t);
 
-  // An argument the parser could not make sense of. Upstream calls this a
-  // usage failure and exits 255.
-  if not SCMAIN_parse(%trimr(p_args): opts);
+  // Two independent questions, and neither is inferred from the other: the
+  // status says what to exit with, opts.err says what still needs saying.
+  // A status of 0 carrying a message is a warning; a non-zero status with no
+  // message is a failure that has already reported itself.
+  status = SCMAIN_parse(%trimr(p_args): opts);
+  if opts.err <> '';
     SCOUT_warnln('sc: ' + %trim(opts.err));
-    c_exit(SCRUN_EXIT_USAGE);
+  endif;
+  if status <> SCMAIN_EXIT_OK;
+    c_exit(status);
   endif;
 
-  // Understood, but it could not be done - an unknown service, a definition
-  // that will not load. Upstream exits 253.
-  if not SCMAIN_run(opts);
+  status = SCMAIN_run(opts);
+  if opts.err <> '';
     SCOUT_warnln('sc: ' + %trim(opts.err));
-    c_exit(SCRUN_EXIT_FAILED);
+  endif;
+  if status <> SCMAIN_EXIT_OK;
+    c_exit(status);
   endif;
 
 end-proc;

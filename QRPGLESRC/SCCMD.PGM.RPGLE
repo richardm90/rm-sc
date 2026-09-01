@@ -30,7 +30,8 @@ dcl-proc SCCMD;
     p_ignore  char(64) const;
   end-pi;
 
-  dcl-ds opts likeds(SCMAIN_OPTS_t) inz(*likeds);
+  dcl-ds opts   likeds(SCMAIN_OPTS_t) inz(*likeds);
+  dcl-s  status like(INTEGER_t);
   dcl-s args like(SCMAIN_ARGS_t);
 
   // The command uses *CHECK, *START and so on; the parser takes the bare word
@@ -52,15 +53,39 @@ dcl-proc SCCMD;
     args += ' --ignore-groups=' + %trimr(p_ignore);
   endif;
 
-  if not SCMAIN_parse(args: opts);
+  // A CL caller has no exit status to read - MONMSG is the interface here -
+  // so the status is used only as a yes/no and the message is what carries.
+  // A failure that reported itself as it went leaves opts.err empty, and
+  // there is nothing left to signal but the fact of it.
+  status = SCMAIN_parse(args: opts);
+  // Said whatever there is to say, whether or not it failed - a status of 0
+  // carrying a message is a warning, and dropping it here would leave the CL
+  // command silent about something scr reports.
+  if opts.err <> '';
     SCOUT_writeln('sc: ' + %trim(opts.err));
-    throw('sc: ' + %trim(opts.err));
+  endif;
+  if status <> SCMAIN_EXIT_OK;
+    if opts.err <> '';
+      throw('sc: ' + %trim(opts.err));
+    else;
+      throw('sc: command could not be completed');
+    endif;
     return;
   endif;
 
-  if not SCMAIN_run(opts);
+  status = SCMAIN_run(opts);
+  // Said whatever there is to say, whether or not it failed - a status of 0
+  // carrying a message is a warning, and dropping it here would leave the CL
+  // command silent about something scr reports.
+  if opts.err <> '';
     SCOUT_writeln('sc: ' + %trim(opts.err));
-    throw('sc: ' + %trim(opts.err));
+  endif;
+  if status <> SCMAIN_EXIT_OK;
+    if opts.err <> '';
+      throw('sc: ' + %trim(opts.err));
+    else;
+      throw('sc: command could not be completed');
+    endif;
     return;
   endif;
 

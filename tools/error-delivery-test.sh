@@ -35,7 +35,8 @@
 # names the KIND of failure:
 #
 #   255  argument/usage - an unknown operation, no operation at all, an
-#        unrecognised option. The command could not be understood.
+#        unrecognised option, or an operation given without the service it
+#        requires. The command could not be understood.
 #   253  operational    - the command was understood and could not be carried
 #        out: an unknown service name, a definition that will not load.
 #   0    success        - and stderr silent.
@@ -85,6 +86,10 @@ DEPLOY="${DEPLOY:-$(dirname "$HERE")}"
 SCR="${SCR:-$DEPLOY/scripts/scr}"
 WORK="${WORK:-/tmp/error-delivery.$$}"
 
+# Opt-in, default off. See the state-ops-require-service case for what it runs
+# and why running it is a decision rather than a default.
+SWEEP_STATE_CHANGING="${SWEEP_STATE_CHANGING:-}"
+
 # Without this the PASE side of both implementations behaves differently, and
 # neither the exit statuses nor the stream routing are comparable.
 export QIBM_MULTI_THREADED=Y
@@ -133,7 +138,7 @@ SERVICE="${SERVICE:-$("$SCR" list 2>/dev/null | awk 'NF{print $1; exit}')}"
 
 mkdir -p "$WORK" || setup_fail "cannot create work directory $WORK"
 
-pass=0; failed=0; changed=0; refdrift=0
+pass=0; failed=0; changed=0; refdrift=0; open_n=0; stale=0
 declare -a MEASURED_EXITS=()
 
 # ---------------------------------------------------------------------------
@@ -292,6 +297,49 @@ assert_case() {
   return 1
 }
 
+# sweep_no_service TAG BASIS OPS...
+#
+# Every operation that REQUIRES a service, invoked without one. Aggregated into
+# a single row rather than one case per operation: they are ten instances of one
+# behaviour, and ten near-identical PASS lines would bury the one that broke
+# ranks. A failure names the operation and what was wrong with it, so nothing is
+# lost by the aggregation.
+sweep_no_service() {
+  local tag="$1" basis="$2"; shift 2
+  local op rc n=0 msg why bad=()
+
+  for op in "$@"; do
+    local o="$WORK/$tag.$op.out" e="$WORK/$tag.$op.err"
+    "$SCR" "$op" > "$o" 2> "$e"
+    rc=$?
+    n=$((n+1))
+    why=""
+
+    [ "$rc" -eq 255 ] || why="$why exit=$rc(wanted 255)"
+    if [ -s "$o" ]; then why="$why stdout=$(count_lines "$o")line(s)"; fi
+    if [ ! -s "$e" ]; then why="$why nothing-on-stderr"; fi
+    if grep -qE '^[A-Z]{2,4}[0-9]{4}:' "$e" 2>/dev/null; then why="$why message-id-prefix"; fi
+
+    msg=$(stderr_payload "$e")
+    if [ -n "$msg" ]; then
+      if grep -Fq -- "$msg" "$o" 2>/dev/null; then why="$why text-also-on-stdout"; fi
+      [ "$(grep -Fc -- "$msg" "$e")" -eq 1 ] || why="$why not-once-on-stderr"
+    fi
+
+    [ -n "$why" ] && bad+=("$op:$why")
+  done
+
+  if [ ${#bad[@]} -eq 0 ]; then
+    report PASS "$tag" "($basis) $n operations, all exit 255, message on stderr only"
+    pass=$((pass+1))
+    return 0
+  fi
+  report FAIL "$tag" "($basis) $((${#bad[@]})) of $n operations"
+  local b; for b in "${bad[@]}"; do printf '  %-9s %-30s   - %s\n' "" "" "$b"; done
+  failed=$((failed+1))
+  return 1
+}
+
 # confirm_upstream TAG EXPECTED_EXIT -- argv...
 # Re-measure what sc does, so the "measured" basis above stays true.
 confirm_upstream() {
@@ -341,6 +389,55 @@ assert_case no-operation measured 255 empty once --
 # Same classification as an unknown service and a different code path to it,
 # which is the point: both must land on 253, not one on 253 and one on 255.
 assert_case unloadable-definition measured 253 empty once -- check "$NOSUCH_YAML"
+
+# USAGE - an operation given without the service it requires. sc 1.7.1: 255,
+# with `Usage: sc  [options] <operation> <service>` on stderr.
+#
+# This is the single riskiest line in the change this script guards, and it is
+# the one nothing else covers. It USED to exit 255 by accident of the old design
+# - everything did - and now exits 255 by DECISION, having been reclassified
+# from operational to usage. The status did not move, so no regression test
+# built on comparing before and after can see it, and the parse-surface unit
+# suite cannot reach exit status at all. If the classification were ever revised
+# to 253 on the reasoning that "the service is missing, like an unknown service
+# is missing", nothing but this case would notice. Upstream is unambiguous that
+# it is usage: it answers with its usage line.
+#
+# If this fails on 'stdout not empty' with a WARNING line, that is finding 4 and
+# not this case's subject - see load-warning-stream in stage 3, which stages the
+# same condition deliberately. The empty-stdout assertion is kept strict here
+# anyway: a WARNING on stdout is a real defect wherever it comes from, and this
+# case has no business quietly tolerating it.
+assert_case info-no-service measured 255 empty once -- info
+
+# The same invocation across every OTHER operation that requires a service.
+# Measured identical on the box, so this is one behaviour, not ten - hence one
+# aggregated row. What it defends is that the check is not attached to
+# operations one at a time, where a new operation can quietly be added without.
+#
+# The four state-changing operations are held back to an opt-in below.
+sweep_no_service ops-require-service measured file jobinfo loginfo perfinfo scrunattrs
+
+# start, stop, restart and kill, with NO service named.
+#
+# fidelity-gate.sh excludes these operations on the grounds that a suite which
+# takes services down on whatever machine it runs on is not worth having, and
+# that reasoning holds - but it is about operations given a service to act on.
+# With no service named there is nothing to act on, and all four were measured
+# at 255 on the box before being written down here.
+#
+# They are nonetheless the four where a MISSING usage check would be worst: an
+# argument-handling slip that let `kill` through with no service named is the
+# one defect in this area that could take a system down, and the only way to
+# know it has not happened is to run it. That is a decision for whoever runs the
+# gate rather than a default, so it is opt-in - and reported when it is off,
+# never silently skipped.
+if [ -n "$SWEEP_STATE_CHANGING" ]; then
+  sweep_no_service state-ops-require-service measured start stop restart kill
+else
+  report SKIPPED state-ops-require-service \
+    "start/stop/restart/kill not run - opt in with SWEEP_STATE_CHANGING=1"
+fi
 
 # SUCCESS - sc 1.7.1: 0, and by the contract stderr is silent.
 # stdout policy is deliberately 'any': `list` prints "name (description)" with
@@ -408,7 +505,7 @@ fi
 
 echo
 # ---------------------------------------------------------------------------
-echo "== stage 3: known differences, pinned so a change to them is visible"
+echo "== stage 3: known differences and open findings, pinned so a change is visible"
 echo
 printf '  %-9s %-30s %s\n' verdict case detail
 printf '  %-9s %-30s %s\n' --------- ------------------------------ ------
@@ -438,6 +535,77 @@ assert_case badflag-pinned pinned 255 empty once -- check --badflag
 # user-visible change and should not arrive silently.
 assert_case version-pinned pinned 255 empty once -- --version
 
+# KNOWN-OPEN FINDING - a real defect, not a sanctioned difference, and not yet
+# scheduled. Reported every run; does NOT fail the gate.
+#
+# RMSC decides the missing-service case AFTER loading every definition from
+# disk, so a definition that will not load produces `WARNING: <name>: <reason>`
+# on STDOUT before the usage failure - a non-row line on the stream a
+# column-parsing consumer reads, for a command that never ran. Upstream writes
+# its load warnings to stderr.
+#
+# Why this is not simply asserted: it only appears on a system that happens to
+# hold a broken definition. A plain assertion would pass on a clean box and fail
+# on a dirty one - the machine deciding the verdict, which is the worst kind of
+# test. So the broken definition is STAGED, through SC_SERVICES_DIR, which
+# parity.md records as RMSC's counterpart to upstream's `services.dir` property
+# and as being searched last. Nothing on the system is touched: the staged
+# directory lives under $WORK and goes away with the artefacts.
+#
+# The trap in staging a fixture is that it silently fails to take effect and the
+# case then passes while testing nothing - the exact failure CLAUDE.md warns
+# about. So the case first proves the warning was produced AT ALL, on either
+# stream, and calls the fixture broken if it was not. Only then does it ask
+# which stream it landed on.
+#
+# Upstream is not run here for comparison. Its mechanism is a JVM property
+# rather than an environment variable, and setting it through JAVA_TOOL_OPTIONS
+# makes the JVM announce itself on stderr - polluting the very stream under
+# examination. The coordinator measured upstream's behaviour directly instead.
+BROKEN_DIR="$WORK/staged-services"
+BROKEN_NAME=rmsc_gate_broken
+mkdir -p "$BROKEN_DIR"
+printf 'name: %s\ncheck_alive: [unclosed\n\tbad: \x27tab and quote\n' \
+  "$BROKEN_NAME" > "$BROKEN_DIR/$BROKEN_NAME.yaml"
+
+SC_SERVICES_DIR="$BROKEN_DIR" "$SCR" info \
+  > "$WORK/load-warning.out" 2> "$WORK/load-warning.err"
+lw_rc=$?
+lw_out=$(grep -Fc -- "$BROKEN_NAME" "$WORK/load-warning.out" 2>/dev/null || true)
+lw_err=$(grep -Fc -- "$BROKEN_NAME" "$WORK/load-warning.err" 2>/dev/null || true)
+[ -z "$lw_out" ] && lw_out=0
+[ -z "$lw_err" ] && lw_err=0
+
+# Hard assertion either way: a load warning must not change the classification.
+if [ "$lw_rc" -eq 255 ]; then
+  report PASS load-warning-exit "(measured) still exit 255 with a broken definition on disk"
+  pass=$((pass+1))
+else
+  report FAIL load-warning-exit "(measured) exit $lw_rc with a broken definition on disk, wanted 255"
+  failed=$((failed+1))
+fi
+
+if [ "$lw_out" -eq 0 ] && [ "$lw_err" -eq 0 ]; then
+  # Not a pass. The staged definition never reached the loader, so the case
+  # below proved nothing at all, and saying so is the whole point.
+  report FAIL load-warning-stream \
+    "FIXTURE DID NOT TAKE: no warning about $BROKEN_NAME on either stream"
+  printf '  %-9s %-30s   - %s\n' "" "" "SC_SERVICES_DIR=$BROKEN_DIR was not read, or the file parsed cleanly"
+  printf '  %-9s %-30s   - %s\n' "" "" "this case cannot report on finding 4 until the fixture works"
+  failed=$((failed+1))
+elif [ "$lw_out" -gt 0 ]; then
+  report OPEN load-warning-stream \
+    "finding 4: load warning on STDOUT ($lw_out line(s)) for a command that never ran"
+  printf '  %-9s %-30s   - %s\n' "" "" "upstream writes load warnings to stderr; a column-parsing consumer reads this"
+  printf '  %-9s %-30s   - %s\n' "" "" "known and open - not failing the gate; artefacts: load-warning.out"
+  open_n=$((open_n+1))
+else
+  report FIXED load-warning-stream \
+    "load warning now on stderr only - finding 4 looks fixed"
+  printf '  %-9s %-30s   - %s\n' "" "" "promote this to a hard assertion and drop it from the known-open list"
+  stale=$((stale+1))
+fi
+
 echo
 # ---------------------------------------------------------------------------
 echo "== stage 4: upstream reference, re-confirmed"
@@ -452,6 +620,7 @@ confirm_upstream unknown-service       253 -- check nosuchservice
 confirm_upstream unknown-operation     255 -- wibble
 confirm_upstream no-operation          255 --
 confirm_upstream unloadable-definition 253 -- check "$NOSUCH_YAML"
+confirm_upstream info-no-service       255 -- info
 confirm_upstream list-succeeds           0 -- list
 confirm_upstream empty-group             0 -- check group:nosuchgroup
 confirm_upstream badflag-tolerated       0 -- check --badflag
@@ -472,7 +641,7 @@ else
 fi
 
 echo
-echo "pass=$pass   failed=$failed   pinned-changed=$changed   reference-drift=$refdrift"
+echo "pass=$pass   failed=$failed   pinned-changed=$changed   known-open=$open_n   reference-drift=$refdrift"
 echo "artefacts: $WORK   (.out and .err captured separately for every case)"
 
 # ---------------------------------------------------------------------------
@@ -515,10 +684,22 @@ if [ "$changed" -ne 0 ]; then
   echo "If that was intended, update this script and docs/parity.md together."
   exit 1
 fi
+if [ "$stale" -ne 0 ]; then
+  echo "KNOWN-OPEN FINDING LOOKS FIXED: $stale of them."
+  echo "This fails on purpose, the way fidelity-gate.sh fails when something starts"
+  echo "matching: a classification that can go stale unnoticed is worth nothing."
+  echo "Promote the case to a hard assertion and remove it from the known-open list."
+  exit 1
+fi
 if [ "$refdrift" -ne 0 ]; then
   echo "REFERENCE DRIFT: upstream sc no longer classifies as recorded."
   echo "The 'measured' expectations in stage 1 rest on that table - re-take it"
   echo "before trusting a pass or acting on a failure."
   exit 1
+fi
+if [ "$open_n" -ne 0 ]; then
+  echo "OK, WITH $open_n KNOWN-OPEN FINDING(S): the contract holds everywhere it is"
+  echo "settled; see the OPEN row(s) above for what is not."
+  exit 0
 fi
 echo "OK: errors go to stderr only, once, unprefixed, with a status that names the kind"
