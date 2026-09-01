@@ -443,7 +443,10 @@ in section 2, taken from the live system and not published with this repository.
 tests can live in a public repo — they describe a different machine and will not match a live
 run. Diffing against those instead is a trap that costs an afternoon, because the output looks
 plausibly wrong rather than obviously so. `tools/fidelity-gate.sh` takes the same directory as
-its own `BASELINE`, and fails rather than skipping if it finds nothing there.
+its own `BASELINE`, and **requires** it: there is no default, because the only obvious one is
+`fixtures/`, and a gate that silently diffed against invented names would report a mismatch
+that reads like a formatting defect. Unset, it explains that and exits 2 before running
+anything. Given a directory with nothing in it, it fails rather than skipping.
 
 Confirm colour stays off when stdout is not a terminal, because ANSI escapes would corrupt the
 status columns:

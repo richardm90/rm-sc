@@ -31,11 +31,18 @@ hold them to less. What the plan asks of them *additionally* is discovery parity
 Verification step 9: that `sc list` and `scr list` report the same ~39 services, proving
 subdirectory recursion, and that `sc groups` and `scr groups` agree on the group set.
 
-**That distinction leaves a real gap.** The gate diffs the default `list`, which shows the three
-services a default `check` displays — not the `-a` sweep across all ~39 that step 9 describes.
-So subdirectory recursion is not actually proven by anything that runs. Byte-exactness on three
-services is a weaker claim than the parity step 9 wants, and it is easy to mistake the green
-result for the stronger one.
+**Step 9's premise was wrong, and has been corrected.** It describes `list -a` as proving
+*subdirectory recursion*. Upstream does not recurse: `YamlServiceDefLoader.loadFromDirectory`
+skips directories outright — `if (f.isDirectory()) { continue; }` — and reaches the definitions
+shipped under `system/` and `oss_common/` by naming those two paths. RMSC recursed generally,
+which found definitions upstream cannot see. That is as much a parity defect as missing some, and
+the harder one to notice, since nothing looks absent. RMSC now reads each directory flat.
+
+**The gap step 9 points at is real even so.** `sc list -a` and `scr list -a` agree across all 36
+services on this system — checked by hand after discovery was corrected — but the gate still
+diffs the default `list`, which shows only the three services a default `check` displays. So the
+agreement is held by a manual run, not by anything that runs on its own, and it is easy to
+mistake the green result for the stronger claim.
 
 For every operation beyond those three, the standard comes from Verification step 8 in the plan:
 
@@ -75,8 +82,14 @@ into minutes.
 
 ```bash
 scp tools/fidelity-gate.sh $HOST:$DEPLOY/tools/
-ssh $HOST "$DEPLOY/tools/fidelity-gate.sh"
+ssh $HOST "BASELINE=<captures> $DEPLOY/tools/fidelity-gate.sh"
 ```
+
+`BASELINE` is required and has no default. The captured Java output is not in this repository —
+it names a live system's services — so the gate has to be told where it lives. The tracked
+`fixtures/` directory is not a substitute: it holds the same layout with invented names,
+describing a different machine, and a gate that quietly diffed against it would report a
+mismatch that reads like a formatting defect. Unset, the gate says so and exits 2.
 
 Two stages, deliberately different:
 
@@ -158,6 +171,62 @@ no definition needed" but does not say whether an existing definition should win
 Neither is client-affecting — the client uses short names and `group:` only — but the first is on
 the format-critical path.
 
+## Beyond the operations — inputs RMSC does not read
+
+Two more, found while correcting discovery. Neither is reachable from anything the gate runs
+today, because both are about what happens *before* an operation starts.
+
+**`scrc` and `SC_OPTIONS`.** Upstream reads options from `/QOpenSys/etc/sc/conf/scrc`, from
+`$HOME/.scrc`, and from the `SC_OPTIONS` environment variable, and prepends them to its argument
+list. RMSC reads none of the three. Measured against sc 1.7.1, with a bare `list` showing four
+services:
+
+| | `sc` | `scr` |
+|---|---|---|
+| `SC_OPTIONS=-a list` | 36 | 4 |
+| `list`, with `--ignore-groups=backend` in `$HOME/.scrc` | 35 | 4 |
+
+The second is worth reading twice: the count goes *up*, because an `--ignore-groups` from a
+config file replaces the default `system` exclusion rather than adding to it. So a `.scrc`
+nobody remembers writing changes which services a bare `check` shows — and changes it for
+upstream only. **Undecided**; the plan does not mention either mechanism.
+
+**`services.dir` — a custom definition directory.** Upstream takes one from the `services.dir`
+JVM system property, searched last so it overrides everything else; confirmed on 1.7.1 by
+setting it through `JAVA_TOOL_OPTIONS` and watching a definition outside every standard
+directory appear in `sc list`. ILE has no system properties, so RMSC reads `SC_SERVICES_DIR`
+instead, and honours it the same way. The concept and the search order match; the mechanism
+differs because it has to. **By design**, and recorded here because a reader comparing the two
+will otherwise find a property with no counterpart.
+
+## Beyond the operations — colour
+
+`check` output is compared with colour off, since colour is suppressed whenever stdout is not a
+terminal and every comparison here runs that way. One difference is known to hide there:
+upstream wraps a partial service's `[not running at -->…]` suffix in its warning colour, and RMSC
+leaves that text uncoloured. The status field itself is coloured by both. **Undecided**, and it
+needs a person looking at a terminal rather than a diff — no byte-exact comparison can reach it.
+
+## Corrected since this file was written
+
+The ground under several statements above has moved. What changed, so a reader is not comparing
+against a state that no longer exists:
+
+- **Discovery.** RMSC read directories recursively and let an *earlier* definition win over a
+  later one of the same name — so a global definition beat a user's copy, the opposite of what a
+  user directory is for. It now reads flat, in upstream's order, later winning.
+- **`--ignore-globals`** was parsed into a field nothing read. Making it work exposed three more
+  differences, none of them reachable before: an empty result printed nothing where upstream
+  warns on stderr and exits 0; a named empty group raised an error and exited 255; and `groups
+  --ignore-globals` listed a built-in `system` group upstream adds only when it read the globals.
+- **`-a`** now turns `--ignore-globals` back off where the argument appears, as upstream does.
+- **`list group:NAME`** printed nothing at all.
+- **`PARTIAL`** printed a bare word where upstream prints `PARTIAL (2/3)` and names the criteria
+  that are not running. This one was on the byte-exact `check` path.
+
+All are fixed and match live, on stdout, stderr and exit status. None of them was reachable by
+anything that ran, which is the argument for the fixture pack rather than a footnote to it.
+
 ## Closing Verification step 8
 
 1. Decide the four undecided operations above: fix to match upstream, or record the reason not
@@ -168,6 +237,6 @@ the format-critical path.
 4. Remove whatever is settled from the gate's `UNDECIDED` list. It will then report step 8
    complete, and fail if any of it silently changes afterwards.
 
-Separately, and not part of step 8: the gate should compare `list -a` across all ~39 services to
-satisfy Verification step 9. Today it compares the default three, so subdirectory recursion —
-the thing step 9 exists to prove — is not covered by anything that runs.
+Separately, and not part of step 8: the gate should compare `list -a` across all services, to
+hold Verification step 9's discovery parity. The two implementations agree on it today, but the
+gate compares the default three, so nothing would catch it if they stopped agreeing.

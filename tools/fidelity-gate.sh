@@ -38,8 +38,32 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SC="${SC:-/QOpenSys/pkgs/bin/sc}"
 DEPLOY="${DEPLOY:-$(dirname "$HERE")}"
 SCR="${SCR:-$DEPLOY/scripts/scr}"
-BASELINE="${BASELINE:-$DEPLOY/fixtures}"
 WORK="${WORK:-/tmp/fidelity-gate.$$}"
+
+# BASELINE has no default, deliberately. The obvious one - the tracked
+# fixtures/ directory - holds same-layout equivalents with INVENTED service
+# names, describing a different machine. A gate defaulting there would diff
+# this system's output against another system's and report a mismatch that
+# reads like a formatting defect. The real captures are not published, because
+# they record a live system's services; keep them outside the repository and
+# name the directory here.
+#
+#   BASELINE=$HOME/rm-sc-baselines ssh $HOST "$DEPLOY/tools/fidelity-gate.sh"
+#
+if [ -z "$BASELINE" ]; then
+  cat >&2 <<'MSG'
+BASELINE is not set.
+
+Set it to the directory holding the captured Java output - baseline-check.txt,
+baseline-list.txt and baseline-groups.txt. Those captures are not in this
+repository: they name a live system's services.
+
+The tracked fixtures/ directory is NOT a substitute. It holds invented names
+describing a different machine, and diffing against it fails in a way that
+looks like a formatting defect rather than a wrong baseline.
+MSG
+  exit 2
+fi
 
 export QIBM_MULTI_THREADED=Y
 
