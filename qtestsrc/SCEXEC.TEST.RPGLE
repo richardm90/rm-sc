@@ -30,6 +30,23 @@ ctl-opt bnddir('RMSCPGM':'RMSCDEPS');
 /include 'include/PSDS_D.rpgleinc'
 /include QINCLUDE,TESTCASE
 
+dcl-pr pt_dir like(STMF_t) end-pr;
+
+dcl-pr pt_load_def like(BOOLEAN_t);
+  name    like(STMF_t) const;
+  content like(STRING_t) const;
+  def     likeds(SCDEF_t);
+end-pr;
+
+dcl-pr pt_failed varchar(512);
+  ev likeds(SCEXEC_EVAL_t) const;
+  i  like(INTEGER_t) const;
+end-pr;
+
+dcl-pr pt_join varchar(512);
+  ev likeds(SCEXEC_EVAL_t) const;
+end-pr;
+
 dcl-s g_dir like(STMF_t);
 
 // SSH: the suite reaches this system over it, so it is listening
@@ -489,5 +506,468 @@ dcl-proc test_check_all_reports_how_many export;
   iEqual(0: SCEXEC_check_all(coll: 'all'):
          'nothing checked when every group is excluded');
   iEqual(n: SCEXEC_check_all(coll: ''): 'every service checked is counted');
+
+end-proc;
+
+// BLOCK 2 - paste into qtestsrc/SCEXEC.TEST.RPGLE
+//
+// Needs pt_dir and pt_load_def from Block 1 (a second copy - the suites are
+// separate programs), plus:
+//   /include 'SCEXEC_D.rpgleinc'
+//   /include 'SCDEF_D.rpgleinc'
+//   /include 'include/RMIFS_D.rpgleinc'
+//   /include 'include/RMTOOLS_D.rpgleinc'   // LF, STRING_t, BOOLEAN_t, INTEGER_t
+//   /include 'include/PSDS_D.rpgleinc'
+// and:
+//   dcl-pr pt_failed varchar(512);
+//     ev likeds(SCEXEC_EVAL_t) const;
+//     i  like(INTEGER_t) const;
+//   end-pr;
+//   dcl-pr pt_join varchar(512);
+//     ev likeds(SCEXEC_EVAL_t) const;
+//   end-pr;
+//
+// FIXTURES. Two are needed and both are free:
+//   - port 22 is listening, because the suite arrived over SSH. This is the
+//     same fixture SCQRY.TEST relies on and CLAUDE.md sanctions.
+//   - ports 55997-55999 and job NOSUCHJOB1/NOSUCHJOB3 are not running.
+// Every test below asserts its fixture rather than skipping on it, so a box
+// where SSH is on another port goes red with a message that says so instead of
+// reporting a pass it did not earn.
+//
+// NOTE the DS declarations are inz(*likeds). docs/testing-notes.md: likeds()
+// copies subfield definitions, not the template's inz keyword, and an
+// uninitialised SCEXEC_EVAL_t would carry a plausible-looking failed_count off
+// the stack.
+//==============================================================================
+
+//------------------------------------------------------------------------------
+// pt_failed - one element of eval.failed, as a procedure return value
+//
+// eval.failed is a varying-length ARRAY, and docs/testing-notes.md records
+// that aEqual reads element N with element N-1's length, so
+// aEqual('PORT:55998': ev.failed(2): ...) would compare against a truncated
+// value and pass or fail for the wrong reason. Suites work around this with a
+// local aEqualV; routing the element through a procedure RESULT removes the
+// descriptor from the picture entirely, so plain aEqual is correct here and
+// this block does not depend on whether SCEXEC.TEST defines aEqualV.
+//------------------------------------------------------------------------------
+dcl-proc pt_failed;
+  dcl-pi *n varchar(512);
+    ev likeds(SCEXEC_EVAL_t) const;
+    i  like(INTEGER_t) const;
+  end-pi;
+
+  if i < 1 or i > ev.failed_count;
+    return '*OUT-OF-RANGE*';
+  endif;
+
+  return %trimr(ev.failed(i));
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// pt_join - the failures joined the way the suffix joins them
+//
+// Captured: "PORT:55998, JOBNAME:NOSUCHJOB3" - comma, then one space, in
+// declaration order. SCOUT_not_running_suffix takes an already-joined string,
+// so no exported procedure performs the join; this helper is the test's own
+// statement of what the join must be, and asserting against it pins both the
+// ordering and the contents of eval.failed in one value.
+//------------------------------------------------------------------------------
+dcl-proc pt_join;
+  dcl-pi *n varchar(512);
+    ev likeds(SCEXEC_EVAL_t) const;
+  end-pi;
+
+  dcl-s joined varchar(512) inz('');
+  dcl-s i   like(INTEGER_t);
+
+  for i = 1 to ev.failed_count;
+    if i > 1;
+      joined += ', ';
+    endif;
+    joined += %trimr(ev.failed(i));
+  endfor;
+
+  return joined;
+
+end-proc;
+
+//==============================================================================
+// FIXTURE GUARD - port 22 is up and port 55999 is down
+//
+// Runs the two assumptions every other test in this block rests on through
+// SCEXEC_evaluate itself. If this goes red, the failures below are about the
+// box, not about the code. Asserted, never skipped: CLAUDE.md - "a suite that
+// passes because its fixture is absent is worse than one that fails".
+//==============================================================================
+
+dcl-proc test_evaluate_fixture_ports export;
+
+  dcl-ds def likeds(SCDEF_t)        inz(*likeds);
+  dcl-ds ev  likeds(SCEXEC_EVAL_t)  inz(*likeds);
+
+  assert(pt_load_def('ptup.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: 22' + LF: def): 'load');
+  SCEXEC_evaluate(def: ev);
+  aEqual('RUNNING': ev.state:
+         'FIXTURE: port 22 must be listening - this suite arrived over SSH');
+
+  clear ev;
+  clear def;              // a stale criteria_count would fake a pass
+  assert(pt_load_def('ptdown.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: 55999' + LF: def): 'load');
+  SCEXEC_evaluate(def: ev);
+  aEqual('NOT RUNNING': ev.state:
+         'FIXTURE: port 55999 must not be listening');
+
+end-proc;
+
+//==============================================================================
+// Everything alive: RUNNING, alive = total, nothing failed
+//
+// Captured for a fully running service - no suffix, so nothing is listed:
+//   RUNNING            | webproxy (Web Proxy) $
+//==============================================================================
+
+dcl-proc test_evaluate_all_alive export;
+
+  dcl-ds def likeds(SCDEF_t)       inz(*likeds);
+  dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
+
+  assert(pt_load_def('ptalive.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: 22' + LF: def): 'load');
+
+  SCEXEC_evaluate(def: ev);
+
+  aEqual('RUNNING': ev.state: 'state');
+  iEqual(1: ev.alive: 'alive');
+  iEqual(1: ev.total: 'total');
+  iEqual(0: ev.failed_count: 'nothing failed');
+
+end-proc;
+
+//==============================================================================
+// Nothing alive: NOT RUNNING, alive is zero, total still counts every criterion
+//
+// Captured:
+//   NOT RUNNING        | zzsdead (Probe dead) $
+//
+// The capture shows NO suffix on a fully stopped service, which is the
+// assertion that matters and is made in the SCOUT block. What the capture
+// cannot show is whether upstream still collected the failures internally, so
+// ev.failed_count is deliberately NOT asserted here - see the INFERRED test
+// below, which is about that and is marked as such.
+//==============================================================================
+
+dcl-proc test_evaluate_none_alive export;
+
+  dcl-ds def likeds(SCDEF_t)       inz(*likeds);
+  dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
+
+  assert(pt_load_def('ptdead.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: 55999,NOSUCHJOB1' + LF: def): 'load');
+
+  SCEXEC_evaluate(def: ev);
+
+  aEqual('NOT RUNNING': ev.state: 'state');
+  iEqual(0: ev.alive: 'alive');
+  iEqual(2: ev.total: 'total counts every criterion, not just the failed ones');
+
+end-proc;
+
+//==============================================================================
+// INFERRED - a fully stopped service still collects its failures
+//
+// Nothing in the captures shows this: upstream prints no suffix for
+// NOT RUNNING, so the list is invisible either way. It is asserted because a
+// procedure named "evaluate" that populates failed only in the PARTIAL case is
+// a trap for the next caller, and because leaving it unasserted would let the
+// array hold whatever the previous evaluation left in it.
+//
+// If the fix deliberately leaves failed empty for NOT RUNNING, change this
+// test to assert failed_count = 0 and say why in the comment. Either answer is
+// defensible; an unstated one is not.
+//==============================================================================
+
+dcl-proc test_evaluate_none_alive_lists_failures export;
+
+  dcl-ds def likeds(SCDEF_t)       inz(*likeds);
+  dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
+
+  assert(pt_load_def('ptdead2.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: 55999,NOSUCHJOB1' + LF: def): 'load');
+
+  SCEXEC_evaluate(def: ev);
+
+  iEqual(2: ev.failed_count: 'both criteria recorded as failed');
+  aEqual('PORT:55999, JOBNAME:NOSUCHJOB1': pt_join(ev): 'failures, joined');
+
+end-proc;
+
+//==============================================================================
+// One of two alive: PARTIAL, counts 1 and 2, the dead one listed
+//
+// Captured:
+//   PARTIAL (1/2)      | zzsport (Probe zzsport) [not running at -->PORT:55999]
+//
+// alive is the count of criteria that ARE running - the capture's zzsport has
+// two criteria, one of which answers, and shows (1/2). A (dead/total) reading
+// would have shown (1/2) here too, which is why the three-criterion test below
+// exists: (1/3) and (2/3) tell the two apart.
+//==============================================================================
+
+dcl-proc test_evaluate_partial_one_of_two export;
+
+  dcl-ds def likeds(SCDEF_t)       inz(*likeds);
+  dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
+
+  assert(pt_load_def('ptpart2.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: 22,55999' + LF: def): 'load');
+
+  SCEXEC_evaluate(def: ev);
+
+  aEqual('PARTIAL': ev.state: 'state');
+  iEqual(1: ev.alive: 'one alive');
+  iEqual(2: ev.total: 'of two');
+  iEqual(1: ev.failed_count: 'one failure listed');
+  aEqual('PORT:55999': pt_failed(ev: 1): 'the failure is the dead port');
+
+end-proc;
+
+//==============================================================================
+// One of three alive: the counts are (alive/total), not (dead/total)
+//
+// Captured:
+//   PARTIAL (1/3)      | zzstwo (Probe two) [not running at -->PORT:55998, JOBNAME:NOSUCHJOB3]
+//
+// Two failures are listed against a first number of 1, so the first number
+// counts what IS running. This fixture mirrors that shape exactly: one live
+// criterion, then a dead port and a dead job name, in that declared order.
+//==============================================================================
+
+dcl-proc test_evaluate_partial_counts_alive_not_dead export;
+
+  dcl-ds def likeds(SCDEF_t)       inz(*likeds);
+  dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
+
+  assert(pt_load_def('ptpart3.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: 22,55998,NOSUCHJOB3' + LF: def): 'load');
+
+  SCEXEC_evaluate(def: ev);
+
+  aEqual('PARTIAL': ev.state: 'state');
+  iEqual(1: ev.alive: 'the first number is the count that ARE running');
+  iEqual(3: ev.total: 'the second is every criterion');
+  iEqual(2: ev.failed_count: 'two failures');
+
+end-proc;
+
+//==============================================================================
+// Several failures keep declaration order and join with ", "
+//
+// Captured:
+//   ... [not running at -->PORT:55998, JOBNAME:NOSUCHJOB3]
+//
+// Comma, then exactly one space, and PORT:55998 before JOBNAME:NOSUCHJOB3 -
+// which is the order they are declared in, not alphabetical (J < P) and not
+// grouped by type. The same fixture is loaded a second time here with the
+// order of the two dead criteria swapped, so a passing result cannot be an
+// accident of a stable sort.
+//==============================================================================
+
+dcl-proc test_evaluate_failures_join_in_declared_order export;
+
+  dcl-ds def likeds(SCDEF_t)       inz(*likeds);
+  dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
+
+  assert(pt_load_def('ptorder1.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: 22,55998,NOSUCHJOB3' + LF: def): 'load');
+
+  SCEXEC_evaluate(def: ev);
+
+  aEqual('PORT:55998':         pt_failed(ev: 1): 'first failure');
+  aEqual('JOBNAME:NOSUCHJOB3': pt_failed(ev: 2): 'second failure');
+  aEqual('PORT:55998, JOBNAME:NOSUCHJOB3': pt_join(ev):
+         'joined with comma and one space, in declaration order');
+
+  // The same two, declared the other way round
+  clear ev;
+  clear def;
+  assert(pt_load_def('ptorder2.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: NOSUCHJOB3,22,55998' + LF: def): 'load');
+
+  SCEXEC_evaluate(def: ev);
+
+  aEqual('JOBNAME:NOSUCHJOB3, PORT:55998': pt_join(ev):
+         'order follows the definition, not the type or the alphabet');
+
+end-proc;
+
+//==============================================================================
+// Only one of many alive
+//
+// The narrowest case the counts have to survive: four criteria, one answering.
+// Upstream's widest captured count is (2/3); this asks the same question one
+// step further out, and is where an off-by-one between alive, total and
+// failed_count shows up as 1 + 3 <> 4.
+//==============================================================================
+
+dcl-proc test_evaluate_one_of_four export;
+
+  dcl-ds def likeds(SCDEF_t)       inz(*likeds);
+  dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
+
+  assert(pt_load_def('ptpart4.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: 22,55997,55998,NOSUCHJOB3' + LF: def): 'load');
+
+  SCEXEC_evaluate(def: ev);
+
+  aEqual('PARTIAL': ev.state: 'state');
+  iEqual(1: ev.alive: 'alive');
+  iEqual(4: ev.total: 'total');
+  iEqual(3: ev.failed_count: 'failed_count');
+  iEqual(ev.total: ev.alive + ev.failed_count:
+         'alive + failed accounts for every criterion');
+  aEqual('PORT:55997, PORT:55998, JOBNAME:NOSUCHJOB3': pt_join(ev):
+         'all three failures, in order');
+
+end-proc;
+
+//==============================================================================
+// SCEXEC_status is UNCHANGED - it still returns the bare word
+//
+// SCAPI exposes it to bound callers who compare against a constant
+// SC_PARTIAL of 'PARTIAL'. If the counts leak into this return value, those
+// callers stop matching and nothing tells them: the comparison simply goes
+// false. This test exists to fail loudly if the fix is made in the wrong
+// place.
+//
+// Literals, not the SCOUT_* constants, on purpose: a change that redefined
+// the constant would be invisible to a test written in terms of it.
+//==============================================================================
+
+dcl-proc test_status_still_returns_bare_words export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+
+  assert(pt_load_def('ptstat1.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: 22' + LF: def): 'load');
+  aEqual('RUNNING': SCEXEC_status(def): 'running');
+
+  clear def;
+  assert(pt_load_def('ptstat2.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: 55999' + LF: def): 'load');
+  aEqual('NOT RUNNING': SCEXEC_status(def): 'not running');
+
+  clear def;
+  assert(pt_load_def('ptstat3.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: 22,55999' + LF: def): 'load');
+  aEqual('PARTIAL': SCEXEC_status(def):
+         'still the bare word - SC_PARTIAL in SCAPI compares against it');
+
+end-proc;
+
+//==============================================================================
+// One evaluation, one set of answers
+//
+// SCEXEC_evaluate exists so the status and the failure list come from the SAME
+// pass over the criteria. Two separate passes would disagree whenever a
+// service changes state between them, and the row would then show a count that
+// contradicts its own list. Asserting that evaluate and status agree is the
+// closest a test can get to that from outside.
+//==============================================================================
+
+dcl-proc test_evaluate_agrees_with_status export;
+
+  dcl-ds def likeds(SCDEF_t)       inz(*likeds);
+  dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
+
+  assert(pt_load_def('ptagree.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: 22,55999' + LF: def): 'load');
+
+  SCEXEC_evaluate(def: ev);
+
+  aEqual(%trimr(SCEXEC_status(def)): %trimr(ev.state):
+         'evaluate and status describe the same service the same way');
+
+end-proc;
+
+//==============================================================================
+// A second copy of Block 1's fixture helpers: the suites are separate bound
+// programs, so each needs its own.
+//==============================================================================
+
+//------------------------------------------------------------------------------
+// pt_dir - a per-user fixture directory, created on demand
+//
+// Created lazily rather than in setUpSuite so this block can be pasted in
+// without editing the suite's existing set-up. Qualified by user because a
+// fixed /tmp path belongs to whoever runs the suite first and is created 755,
+// so a second user gets read and execute but not write.
+//------------------------------------------------------------------------------
+dcl-proc pt_dir;
+  dcl-pi *n like(STMF_t);
+  end-pi;
+
+  dcl-s d like(STMF_t);
+
+  d = '/tmp/rmsc-partial-test-' + %trim(psds.current_user);
+  IFS_crtdir(d);          // harmless if it already exists
+
+  return d;
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// pt_load_def - write a definition, load it, and remove it again
+//
+// The fixture is deleted as soon as SCDEF_load has read it, so no test in this
+// block leaves state behind and none can depend on a file another test wrote.
+// That matters: the suites run under ORDER(*API), not source order.
+//
+// It asserts rather than returns on a write failure - a suite that cannot
+// create its fixture must go red, not quietly test nothing.
+//------------------------------------------------------------------------------
+dcl-proc pt_load_def;
+  dcl-pi *n like(BOOLEAN_t);
+    name    like(STMF_t) const;
+    content like(STRING_t) const;
+    def     likeds(SCDEF_t);
+  end-pi;
+
+  dcl-s path   like(STMF_t);
+  dcl-s handle like(INTEGER_t);
+  dcl-s ok     like(BOOLEAN_t);
+
+  path = %trim(pt_dir()) + '/' + %trim(name);
+
+  handle = IFS_open_file(path: IFS_OPEN_TYPE_WRITE);
+  assert((handle >= 0): 'Could not create fixture ' + %trim(path) +
+                        ' - ' + %trim(IFS_error_text()));
+  IFS_write_utf8(handle: content);
+  IFS_close_file(handle);
+
+  ok = SCDEF_load(path: def);
+
+  IFS_remove_file(path);
+  IFS_dltdir(pt_dir());   // fails harmlessly if anything else is in there
+
+  return ok;
 
 end-proc;

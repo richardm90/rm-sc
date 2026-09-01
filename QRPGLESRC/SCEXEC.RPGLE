@@ -77,28 +77,14 @@ dcl-proc SCEXEC_status export;
     def likeds(SCDEF_t) const;
   end-pi;
 
-  dcl-s i     like(INTEGER_t);
-  dcl-s alive like(INTEGER_t) inz(0);
+  dcl-ds ev likeds(SCEXEC_EVAL_t) inz(*likeds);
 
-  // A definition with no criteria cannot be checked, so it cannot be running
-  if def.criteria_count = 0;
-    return SCOUT_NOT_RUNNING;
-  endif;
+  // The bare word, and only the bare word. SCAPI hands this to consumers
+  // comparing against SC_PARTIAL, so the counts upstream shows in a check row
+  // are added when the row is rendered, not here.
+  SCEXEC_evaluate(def: ev);
 
-  for i = 1 to def.criteria_count;
-    if SCEXEC_criterion_alive(def.criteria(i));
-      alive += 1;
-    endif;
-  endfor;
-
-  select;
-    when alive = 0;
-      return SCOUT_NOT_RUNNING;
-    when alive = def.criteria_count;
-      return SCOUT_RUNNING;
-    other;
-      return SCOUT_PARTIAL;
-  endsl;
+  return ev.state;
 
 end-proc;
 
@@ -163,8 +149,19 @@ dcl-proc SCEXEC_check export;
     def likeds(SCDEF_t) const;
   end-pi;
 
-  SCOUT_writeln(SCOUT_check_row(SCEXEC_status(def):
-                                def.short_name: def.friendly));
+  dcl-ds ev likeds(SCEXEC_EVAL_t) inz(*likeds);
+
+  SCEXEC_evaluate(def: ev);
+
+  // Only a partial service carries counts and a list of what is not running.
+  // RUNNING and NOT RUNNING rows are exactly what they have always been.
+  if ev.state = SCOUT_PARTIAL;
+    SCOUT_writeln(SCOUT_check_row(SCOUT_partial_status(ev.alive: ev.total):
+                                  def.short_name: def.friendly:
+                                  SCOUT_not_running_suffix(ev.failed_text)));
+  else;
+    SCOUT_writeln(SCOUT_check_row(ev.state: def.short_name: def.friendly));
+  endif;
 
 end-proc;
 
@@ -812,5 +809,48 @@ dcl-proc SCEXEC_scrunattrs export;
       SCOUT_writeln(%trim(def.short_name) + ': ' + %trim(env.entry(i)));
     endif;
   endfor;
+
+end-proc;
+
+//==============================================================================
+// SCEXEC_evaluate
+//==============================================================================
+
+dcl-proc SCEXEC_evaluate export;
+  dcl-pi *n;
+    def likeds(SCDEF_t) const;
+    ev  likeds(SCEXEC_EVAL_t);
+  end-pi;
+
+  dcl-s i like(INTEGER_t);
+
+  clear ev;
+  ev.total = def.criteria_count;
+
+  // Each criterion is probed exactly once. They are live port and job
+  // lookups, and check runs them for every service on the system.
+  for i = 1 to def.criteria_count;
+    if SCEXEC_criterion_alive(def.criteria(i));
+      ev.alive += 1;
+      iter;
+    endif;
+
+    ev.failed_count += 1;
+    ev.failed(ev.failed_count) = SCDEF_criterion_text(def.criteria(i));
+    if ev.failed_count > 1;
+      ev.failed_text += ', ';
+    endif;
+    ev.failed_text += %trim(ev.failed(ev.failed_count));
+  endfor;
+
+  select;
+    // A definition with no criteria cannot be checked, so it cannot be running
+    when def.criteria_count = 0 or ev.alive = 0;
+      ev.state = SCOUT_NOT_RUNNING;
+    when ev.alive = def.criteria_count;
+      ev.state = SCOUT_RUNNING;
+    other;
+      ev.state = SCOUT_PARTIAL;
+  endsl;
 
 end-proc;

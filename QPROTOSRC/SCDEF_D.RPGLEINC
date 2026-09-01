@@ -172,3 +172,21 @@ end-pr;
 dcl-pr SCDEF_effective_dir like(STMF_t);
   def likeds(SCDEF_t) const;
 end-pr;
+
+///
+// One criterion, rendered the way upstream names it when reporting which
+// criteria are not running:
+//
+//   a port           -> 'PORT:55999'
+//   anything else    -> 'JOBNAME:' + the criterion text, upper-cased
+//
+// Upper-cased because upstream folds the criterion as it parses it, so the
+// suffix never shows the case anyone wrote - confirmed against sc 1.7.1 with
+// lower-case job, SBS/JOB and PGM- definitions. The SBS/JOB slash form and the
+// PGM- prefix are part of the job name, not types of their own; there is no
+// 'PGM:' rendering.
+///
+
+dcl-pr SCDEF_criterion_text like(SCDEF_NAME_t);
+  criterion likeds(SCDEF_CRITERION_t) const;
+end-pr;

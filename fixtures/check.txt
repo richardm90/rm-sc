@@ -1,4 +1,4 @@
   RUNNING            | webproxy (Web Proxy) 
   NOT RUNNING        | jobrunner (Job Runner) 
-  PARTIAL            | cache (Cache Service) 
+  PARTIAL (1/2)      | cache (Cache Service) [not running at -->PORT:11211]
   RUNNING            | apidaemon (API Daemon) 

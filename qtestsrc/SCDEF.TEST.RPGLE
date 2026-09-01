@@ -21,6 +21,14 @@ ctl-opt bnddir('RMSCPGM':'RMSCDEPS');
 /include 'include/PSDS_D.rpgleinc'
 /include QINCLUDE,TESTCASE
 
+dcl-pr pt_dir like(STMF_t) end-pr;
+
+dcl-pr pt_load_def like(BOOLEAN_t);
+  name    like(STMF_t) const;
+  content like(STRING_t) const;
+  def     likeds(SCDEF_t);
+end-pr;
+
 dcl-s g_dir like(STMF_t);
 
 dcl-pr aEqualV;
@@ -519,5 +527,239 @@ dcl-proc test_effective_dir_absent export;
 
   aEqual(%trim(g_dir): SCDEF_effective_dir(def):
          'no dir means the definition file directory');
+
+end-proc;
+
+// BLOCK 1 - paste into qtestsrc/SCDEF.TEST.RPGLE
+//
+// Needs, at the top of that suite:
+//   /include 'SCDEF_D.rpgleinc'
+//   /include 'include/RMIFS_D.rpgleinc'
+//   /include 'include/RMTOOLS_D.rpgleinc'   // LF, STRING_t, BOOLEAN_t, INTEGER_t
+//   /include 'include/PSDS_D.rpgleinc'
+// and these prototypes in the global declarations:
+//
+//   dcl-pr pt_dir like(STMF_t) end-pr;
+//   dcl-pr pt_load_def like(BOOLEAN_t);
+//     name    like(STMF_t) const;
+//     content like(STRING_t) const;
+//     def     likeds(SCDEF_t);
+//   end-pr;
+//==============================================================================
+
+//------------------------------------------------------------------------------
+// pt_dir - a per-user fixture directory, created on demand
+//
+// Created lazily rather than in setUpSuite so this block can be pasted in
+// without editing the suite's existing set-up. Qualified by user because a
+// fixed /tmp path belongs to whoever runs the suite first and is created 755,
+// so a second user gets read and execute but not write.
+//------------------------------------------------------------------------------
+dcl-proc pt_dir;
+  dcl-pi *n like(STMF_t);
+  end-pi;
+
+  dcl-s d like(STMF_t);
+
+  d = '/tmp/rmsc-partial-test-' + %trim(psds.current_user);
+  IFS_crtdir(d);          // harmless if it already exists
+
+  return d;
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// pt_load_def - write a definition, load it, and remove it again
+//
+// The fixture is deleted as soon as SCDEF_load has read it, so no test in this
+// block leaves state behind and none can depend on a file another test wrote.
+// That matters: the suites run under ORDER(*API), not source order.
+//
+// It asserts rather than returns on a write failure - a suite that cannot
+// create its fixture must go red, not quietly test nothing.
+//------------------------------------------------------------------------------
+dcl-proc pt_load_def;
+  dcl-pi *n like(BOOLEAN_t);
+    name    like(STMF_t) const;
+    content like(STRING_t) const;
+    def     likeds(SCDEF_t);
+  end-pi;
+
+  dcl-s path   like(STMF_t);
+  dcl-s handle like(INTEGER_t);
+  dcl-s ok     like(BOOLEAN_t);
+
+  path = %trim(pt_dir()) + '/' + %trim(name);
+
+  handle = IFS_open_file(path: IFS_OPEN_TYPE_WRITE);
+  assert((handle >= 0): 'Could not create fixture ' + %trim(path) +
+                        ' - ' + %trim(IFS_error_text()));
+  IFS_write_utf8(handle: content);
+  IFS_close_file(handle);
+
+  ok = SCDEF_load(path: def);
+
+  IFS_remove_file(path);
+  IFS_dltdir(pt_dir());   // fails harmlessly if anything else is in there
+
+  return ok;
+
+end-proc;
+
+//==============================================================================
+// A port criterion renders PORT:<n>
+//
+// Captured:
+//   PARTIAL (1/2)      | zzsport (Probe zzsport) [not running at -->PORT:55999]
+//
+// so the port number carries no leading zeros, no padding, and the type name
+// is the bare word PORT.
+//
+// aEqual, not aEqualV: SCDEF_criterion_text returns a value, and
+// docs/testing-notes.md records that aEqual's operational descriptors are
+// correct for procedure return values and wrong only for varying-length
+// ARRAY ELEMENTS. Nothing in this block compares an array element directly.
+//==============================================================================
+
+dcl-proc test_criterion_text_port export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+
+  assert(pt_load_def('ptport.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: 55999' + LF: def): 'load');
+
+  iEqual(1: def.criteria_count: 'one criterion');
+  aEqual('PORT:55999': SCDEF_criterion_text(def.criteria(1)): 'port criterion');
+
+end-proc;
+
+//==============================================================================
+// A plain job name renders JOBNAME:<raw text>
+//
+// Captured:
+//   PARTIAL (1/2)      | zzsjob (Probe zzsjob) [not running at -->JOBNAME:NOSUCHJOB1]
+//==============================================================================
+
+dcl-proc test_criterion_text_job_name export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+
+  assert(pt_load_def('ptjob.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: NOSUCHJOB1' + LF: def): 'load');
+
+  iEqual(1: def.criteria_count: 'one criterion');
+  aEqual('JOBNAME:NOSUCHJOB1': SCDEF_criterion_text(def.criteria(1)):
+         'job name criterion');
+
+end-proc;
+
+//==============================================================================
+// The SBS/JOB form is part of the job name, not a type of its own
+//
+// Captured:
+//   PARTIAL (1/2)      | zzssbs (Probe zzssbs) [not running at -->JOBNAME:QUSRWRK/NOSUCHJOB2]
+//
+// The slash form is still JOBNAME:, and the subsystem qualifier survives
+// intact. There is no SBS: type upstream, and splitting the value on the
+// slash would be a divergence.
+//==============================================================================
+
+dcl-proc test_criterion_text_sbs_job export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+
+  assert(pt_load_def('ptsbs.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: QUSRWRK/NOSUCHJOB2' + LF: def): 'load');
+
+  iEqual(1: def.criteria_count: 'one criterion');
+  aEqual('JOBNAME:QUSRWRK/NOSUCHJOB2': SCDEF_criterion_text(def.criteria(1)):
+         'SBS/JOB criterion keeps the slash form under JOBNAME:');
+
+end-proc;
+
+//==============================================================================
+// The PGM- prefix is part of the job name too - there is no PGM: type
+//
+// Captured:
+//   PARTIAL (1/2)      | zzspgm (Probe zzspgm) [not running at -->JOBNAME:PGM-NOSUCHPGM]
+//
+// This is the one most likely to be got wrong, because RMSC treats PGM- as a
+// distinct kind of liveness check internally (SCQRY_jobs_by_pgm). Upstream
+// does not name it separately in the suffix: it prints the raw criterion text,
+// prefix included, after JOBNAME:.
+//==============================================================================
+
+dcl-proc test_criterion_text_pgm_prefix export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+
+  assert(pt_load_def('ptpgm.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: PGM-NOSUCHPGM' + LF: def): 'load');
+
+  iEqual(1: def.criteria_count: 'one criterion');
+  aEqual('JOBNAME:PGM-NOSUCHPGM': SCDEF_criterion_text(def.criteria(1)):
+         'PGM- criterion is rendered as a job name, prefix and all');
+
+end-proc;
+
+//==============================================================================
+// Several criteria render individually, in declaration order
+//
+// Captured:
+//   PARTIAL (1/3)      | zzstwo (Probe two) [not running at -->PORT:55998, JOBNAME:NOSUCHJOB3]
+//
+// The declared order is what the suffix shows, so criterion N must render as
+// itself and not as its neighbour. Each subscript is passed to
+// SCDEF_criterion_text and the RESULT compared, so nothing here trips the
+// aEqual array-element descriptor bug.
+//==============================================================================
+
+dcl-proc test_criterion_text_each_of_several export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+
+  assert(pt_load_def('ptmulti.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: 55997,55998,NOSUCHJOB3' + LF: def): 'load');
+
+  iEqual(3: def.criteria_count: 'three criteria');
+  aEqual('PORT:55997':          SCDEF_criterion_text(def.criteria(1)): 'first');
+  aEqual('PORT:55998':          SCDEF_criterion_text(def.criteria(2)): 'second');
+  aEqual('JOBNAME:NOSUCHJOB3':  SCDEF_criterion_text(def.criteria(3)): 'third');
+
+end-proc;
+
+//==============================================================================
+// INFERRED - the criterion text is reproduced in the case it was written in
+//
+// Every job name in the captures was already upper case, so none of them
+// showed what happens to a lower-case one. Probed on the box afterwards:
+//
+//   check_alive: lowercasejob     -> [not running at -->JOBNAME:LOWERCASEJOB]
+//   check_alive: qusrwrk/lowjob   -> [not running at -->JOBNAME:QUSRWRK/LOWJOB]
+//   check_alive: pgm-lowpgm       -> [not running at -->JOBNAME:PGM-LOWPGM]
+//   check_alive: '  PADDED  '     -> [not running at -->JOBNAME:PADDED]
+//
+// Upstream upper-cases and trims the criterion as it parses it, so the suffix
+// never shows the case anyone wrote. SCDEF stores the raw text trimmed but NOT
+// folded - it upper-cases only the split-out subsystem and job_name fields -
+// so rendering straight from raw would diverge on any lower-case definition,
+// and nothing on this box defines one.
+//==============================================================================
+
+dcl-proc test_criterion_text_upper_cases_job export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+
+  assert(pt_load_def('ptcase.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: PGM-nosuchpgm' + LF: def): 'load');
+
+  aEqual('JOBNAME:PGM-NOSUCHPGM': SCDEF_criterion_text(def.criteria(1)):
+         'criterion text is upper-cased, as upstream renders it');
 
 end-proc;

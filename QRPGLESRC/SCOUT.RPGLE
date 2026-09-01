@@ -80,10 +80,12 @@ dcl-proc SCOUT_check_row export;
     status like(SCOUT_STATUS_t) const;
     name   like(SCOUT_LINE_t) const;
     desc   like(SCOUT_LINE_t) const;
+    suffix like(SCOUT_LINE_t) const options(*nopass);
   end-pi;
 
   dcl-s padded like(SCOUT_LINE_t);
   dcl-s field  like(SCOUT_LINE_t);
+  dcl-s row    like(SCOUT_LINE_t);
 
   // Left-justified in a fixed-width field. %trimr then explicit padding, so a
   // status longer than the field widens the row rather than being cut - a
@@ -99,8 +101,16 @@ dcl-proc SCOUT_check_row export;
     field = padded;
   endif;
 
-  return '  ' + field + ' | ' + %trim(name) +
-         ' (' + %trim(desc) + ') ';
+  row = '  ' + field + ' | ' + %trim(name) + ' (' + %trim(desc) + ') ';
+
+  // Appended AFTER the trailing space, so the row itself is byte-for-byte
+  // what it has always been and only a partial service's line ends with ']'.
+  if %parms() >= 4 and %addr(suffix) <> *null
+     and %len(%trim(suffix)) > 0;
+    row += %trim(suffix);
+  endif;
+
+  return row;
 
 end-proc;
 
@@ -230,5 +240,32 @@ dcl-proc SCOUT_no_services_warning export;
 
   // Upstream's wording, verbatim, quotes included
   return 'WARNING: No services are found in group ''' + %trim(group) + '''';
+
+end-proc;
+
+//==============================================================================
+// SCOUT_partial_status
+//==============================================================================
+
+dcl-proc SCOUT_partial_status export;
+  dcl-pi *n like(SCOUT_STATUS_t);
+    alive like(INTEGER_t) const;
+    total like(INTEGER_t) const;
+  end-pi;
+
+  return SCOUT_PARTIAL + ' (' + %char(alive) + '/' + %char(total) + ')';
+
+end-proc;
+
+//==============================================================================
+// SCOUT_not_running_suffix
+//==============================================================================
+
+dcl-proc SCOUT_not_running_suffix export;
+  dcl-pi *n like(SCOUT_LINE_t);
+    joined like(SCOUT_LINE_t) const;
+  end-pi;
+
+  return '[not running at -->' + %trim(joined) + ']';
 
 end-proc;

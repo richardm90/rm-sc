@@ -172,3 +172,43 @@ end-pr;
 dcl-pr SCEXEC_scrunattrs;
   def likeds(SCDEF_t) const;
 end-pr;
+
+///
+// Everything determining a service's status yields, rather than the label
+// alone.
+//
+// SCEXEC_status answers the question the bound-call API asks - is it up - and
+// must keep answering it in exactly those words, because SCAPI hands its
+// result to consumers comparing against SC_PARTIAL. Displaying a row needs
+// more: upstream reports 'PARTIAL (1/2)' and names the criteria that are not
+// running. That is presentation built on the same evaluation, not a second
+// evaluation - the criteria are live port and job lookups, and check runs them
+// for every service.
+///
+
+dcl-ds SCEXEC_EVAL_t qualified template inz;
+  state        like(SCOUT_STATUS_t) inz('');
+  alive        like(INTEGER_t) inz(0);
+  total        like(INTEGER_t) inz(0);
+  failed_count like(INTEGER_t) inz(0);
+  failed       like(SCDEF_NAME_t) dim(SCDEF_MAX_CRITERIA);
+  failed_text  like(SCOUT_LINE_t) inz('');
+end-ds;
+
+///
+// Evaluate a service once, probing each criterion exactly once.
+//
+// failed and failed_text are populated whenever criteria are not running,
+// including when NONE is - upstream prints no suffix for a stopped service,
+// so this is not visible in its output, but withholding the information from
+// a caller that asked for an evaluation would be arbitrary.
+//
+// @param the definition to evaluate
+// @param the result, cleared on entry. Named ev, not eval: EVAL is an
+//   operation code, and a parameter called eval is parsed as one.
+///
+
+dcl-pr SCEXEC_evaluate;
+  def likeds(SCDEF_t) const;
+  ev  likeds(SCEXEC_EVAL_t);
+end-pr;

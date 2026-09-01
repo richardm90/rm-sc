@@ -57,6 +57,7 @@ dcl-pr SCOUT_check_row like(SCOUT_LINE_t);
   status like(SCOUT_STATUS_t) const;
   name   like(SCOUT_LINE_t) const;
   desc   like(SCOUT_LINE_t) const;
+  suffix like(SCOUT_LINE_t) const options(*nopass);
 end-pr;
 
 ///
@@ -130,4 +131,28 @@ end-pr;
 
 dcl-pr SCOUT_no_services_warning like(SCOUT_LINE_t);
   group like(SCOUT_LINE_t) const;
+end-pr;
+
+///
+// Upstream's status text for a partially-running service: 'PARTIAL (1/2)',
+// the counts being alive over total.
+///
+
+dcl-pr SCOUT_partial_status like(SCOUT_STATUS_t);
+  alive like(INTEGER_t) const;
+  total like(INTEGER_t) const;
+end-pr;
+
+///
+// Upstream's trailing note naming the criteria that are not running:
+//
+//   [not running at -->PORT:55998, JOBNAME:NOSUCHJOB3]
+//
+// Takes the criteria already joined with ', '. It is appended to a check row
+// AFTER that row's trailing space, so the row itself is unchanged and the line
+// simply ends with ']' instead.
+///
+
+dcl-pr SCOUT_not_running_suffix like(SCOUT_LINE_t);
+  joined like(SCOUT_LINE_t) const;
 end-pr;

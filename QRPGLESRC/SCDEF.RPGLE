@@ -521,3 +521,24 @@ dcl-proc SCDEF_effective_dir export;
   return %trim(base) + '/' + %trim(def.dir);
 
 end-proc;
+
+//==============================================================================
+// SCDEF_criterion_text
+//==============================================================================
+
+dcl-proc SCDEF_criterion_text export;
+  dcl-pi *n like(SCDEF_NAME_t);
+    criterion likeds(SCDEF_CRITERION_t) const;
+  end-pi;
+
+  if criterion.kind = SCDEF_CHECK_PORT;
+    return 'PORT:' + %char(criterion.port);
+  endif;
+
+  // Everything else is a job name to upstream, including the SBS/JOB slash
+  // form and the PGM- prefix - there is no PGM: rendering. Built from raw
+  // rather than the split-out fields so those forms survive intact, and
+  // upper-cased because upstream folds the criterion as it parses it.
+  return 'JOBNAME:' + STRING_upper(%trim(criterion.raw));
+
+end-proc;

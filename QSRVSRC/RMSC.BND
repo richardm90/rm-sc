@@ -98,4 +98,9 @@ STRPGMEXP PGMLVL(*CURRENT) SIGNATURE('RMSC 0.1.0')
   /* SCOUT - warnings on standard error */
   EXPORT SYMBOL(SCOUT_warnln)
   EXPORT SYMBOL(SCOUT_no_services_warning)
+  /* PARTIAL rows - counts, and the criteria that are not running */
+  EXPORT SYMBOL(SCDEF_criterion_text)
+  EXPORT SYMBOL(SCEXEC_evaluate)
+  EXPORT SYMBOL(SCOUT_partial_status)
+  EXPORT SYMBOL(SCOUT_not_running_suffix)
 ENDPGMEXP
