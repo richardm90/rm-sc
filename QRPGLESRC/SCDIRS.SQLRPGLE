@@ -17,7 +17,13 @@ ctl-opt text('RMSC: Definition directory resolution');
 
 /include 'SCDIRS_D.rpgleinc'
 /include 'include/RMIFS_D.rpgleinc'
+/include 'include/RMENVVAR_D.rpgleinc'
 /include 'include/RMTOOLS_D.rpgleinc'
+
+dcl-pr add_dir;
+  dirs likeds(SCDIRS_t);
+  path like(STMF_t) const;
+end-pr;
 
 //==============================================================================
 // SCDIRS_search_path
@@ -26,29 +32,64 @@ ctl-opt text('RMSC: Definition directory resolution');
 dcl-proc SCDIRS_search_path export;
   dcl-pi *n like(INTEGER_t);
     dirs likeds(SCDIRS_t);
+    ignore_globals like(BOOLEAN_t) const options(*nopass);
   end-pi;
 
-  dcl-s home like(STMF_t);
-  dcl-s user_dir like(STMF_t);
+  dcl-s home  like(STMF_t);
+  dcl-s skip  like(BOOLEAN_t) inz(false);
 
   clear dirs;
 
-  // Global first, matching upstream's search order
-  if IFS_isa_directory(SCDIRS_GLOBAL);
-    dirs.count += 1;
-    dirs.path(dirs.count) = SCDIRS_GLOBAL;
+  if %parms() >= 2 and %addr(ignore_globals) <> *null;
+    skip = ignore_globals;
+  endif;
+
+  // The two subdirectories are named rather than found. Upstream's loader
+  // skips subdirectories - 'if (f.isDirectory()) { continue; }' - and reaches
+  // the definitions it ships under system/ and oss_common/ by naming those
+  // paths. Walking the tree instead would report anything anyone ever left
+  // below this directory as a service, which upstream would never see.
+  if not skip;
+    add_dir(dirs: SCDIRS_GLOBAL);
+    add_dir(dirs: SCDIRS_GLOBAL + '/' + SCDIRS_SYS_REL);
+    add_dir(dirs: SCDIRS_GLOBAL + '/' + SCDIRS_OSS_REL);
   endif;
 
   home = SCDIRS_home_dir();
   if %len(%trim(home)) > 0;
-    user_dir = %trim(home) + '/' + SCDIRS_USER_REL;
-    if IFS_isa_directory(user_dir);
-      dirs.count += 1;
-      dirs.path(dirs.count) = user_dir;
-    endif;
+    add_dir(dirs: %trim(home) + '/' + SCDIRS_USER_REL);
   endif;
 
+  // Last, so it can override everything else, which is the point of it
+  add_dir(dirs: %trim(ENVVAR_get(SCDIRS_CUSTOM_ENV)));
+
   return dirs.count;
+
+end-proc;
+
+//==============================================================================
+// add_dir
+//   Append a directory, if it exists and there is room
+//==============================================================================
+
+dcl-proc add_dir;
+  dcl-pi *n;
+    dirs likeds(SCDIRS_t);
+    path like(STMF_t) const;
+  end-pi;
+
+  if %len(%trim(path)) = 0 or dirs.count >= SCDIRS_MAX;
+    return;
+  endif;
+
+  // Callers walk the list without checking, so a path that cannot be opened
+  // must never reach them
+  if not IFS_isa_directory(path);
+    return;
+  endif;
+
+  dirs.count += 1;
+  dirs.path(dirs.count) = path;
 
 end-proc;
 

@@ -37,6 +37,16 @@ dcl-pr c_printf extproc('printf');
   arg1 pointer value options(*string: *nopass);
 end-pr;
 
+// Warnings go to a descriptor rather than through printf, because printf
+// writes to standard output and that is precisely where they must not go.
+dcl-pr c_write int(10) extproc('write');
+  fd    int(10) value;
+  buf   pointer value;
+  bytes uns(10) value;
+end-pr;
+
+dcl-c STDERR_FD const(2);
+
 // EBCDIC newline as the C runtime writes it to stdout here
 dcl-c NL const(x'25');
 
@@ -188,5 +198,37 @@ dcl-proc SCOUT_writeln export;
   // space, and trimming it here silently broke byte compatibility while every
   // format test still passed - the fault was in the writer, not the format.
   c_printf('%s' + NL: line);
+
+end-proc;
+
+//==============================================================================
+// SCOUT_warnln
+//   Write a line to standard error
+//==============================================================================
+
+dcl-proc SCOUT_warnln export;
+  dcl-pi *n;
+    line like(SCOUT_LINE_t) const;
+  end-pi;
+
+  dcl-s buf like(SCOUT_LINE_t);
+
+  buf = line + NL;
+  c_write(STDERR_FD: %addr(buf: *data): %len(buf));
+
+end-proc;
+
+//==============================================================================
+// SCOUT_no_services_warning
+//   Upstream's wording for an operation that matched nothing
+//==============================================================================
+
+dcl-proc SCOUT_no_services_warning export;
+  dcl-pi *n like(SCOUT_LINE_t);
+    group like(SCOUT_LINE_t) const;
+  end-pi;
+
+  // Upstream's wording, verbatim, quotes included
+  return 'WARNING: No services are found in group ''' + %trim(group) + '''';
 
 end-proc;

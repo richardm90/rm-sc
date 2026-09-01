@@ -14,13 +14,24 @@
 
 /include 'include/RMTOOLS_D.rpgleinc'
 
-dcl-c SCDIRS_MAX      const(4);
+// Global, global/system, global/oss_common, the user's own, and the custom
+// directory when one is configured.
+dcl-c SCDIRS_MAX      const(5);
 
 // Upstream's global directory. Requires *ALLOBJ to write; world readable.
 dcl-c SCDIRS_GLOBAL   const('/QOpenSys/etc/sc/services');
 
+// Upstream names these two rather than walking the tree, and reads nothing
+// else below the global directory.
+dcl-c SCDIRS_SYS_REL  const('system');
+dcl-c SCDIRS_OSS_REL  const('oss_common');
+
 // Relative to the user's home directory
 dcl-c SCDIRS_USER_REL const('.sc/services');
+
+// Upstream takes its custom directory from the 'services.dir' JVM system
+// property. ILE has no system properties, so RMSC reads the environment.
+dcl-c SCDIRS_CUSTOM_ENV const('SC_SERVICES_DIR');
 
 dcl-ds SCDIRS_t qualified template inz;
   count like(INTEGER_t) inz(0);
@@ -29,17 +40,33 @@ end-ds;
 
 ///
 // The directories to search for service definitions, in upstream's order:
-// the global directory first, then the user's own.
+//
+//   /QOpenSys/etc/sc/services
+//   /QOpenSys/etc/sc/services/system
+//   /QOpenSys/etc/sc/services/oss_common
+//   $HOME/.sc/services
+//   the custom directory named by SC_SERVICES_DIR, if one is
+//
+// The order is the contract, not a convenience: definitions are merged in
+// this sequence and a later one replaces an earlier one of the same name,
+// which is what lets a user's copy override the global copy.
+//
+// The three global entries are named, not discovered. Upstream reads nothing
+// else below the global directory - its loader skips subdirectories outright
+// - so a scan that walked the tree would report services upstream cannot see.
 //
 // Only directories that exist are returned, so a caller can walk the list
-// without checking. A user with no ~/.sc/services simply gets one entry.
+// without checking.
 //
 // @param the list to populate
+// @param optional, true to skip the three global directories, as
+//   --ignore-globals does. The user and custom directories are still read.
 // @return the number of directories found
 ///
 
 dcl-pr SCDIRS_search_path like(INTEGER_t);
   dirs likeds(SCDIRS_t);
+  ignore_globals like(BOOLEAN_t) const options(*nopass);
 end-pr;
 
 ///

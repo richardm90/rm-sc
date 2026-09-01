@@ -101,3 +101,33 @@ end-pr;
 dcl-pr SCOUT_writeln;
   line like(SCOUT_LINE_t) const;
 end-pr;
+
+///
+// Write a line to standard ERROR, terminated with a newline.
+//
+// Upstream routes its warnings to stderr, so anything parsing stdout by
+// column position never sees them. A warning written to stdout would be read
+// as a service row and dropped, or worse, misread.
+///
+
+dcl-pr SCOUT_warnln;
+  line like(SCOUT_LINE_t) const;
+end-pr;
+
+///
+// Upstream's warning for an operation that matched no services.
+//
+// Emitted for 'check' and 'list' - not 'groups' - whenever the set they would
+// act on comes out empty, whether because a named group has no members,
+// because the collection itself is empty, or because the group exclusions
+// removed everything. A bare operation reports the implicit group, 'all'.
+//
+// The text is upstream's, verbatim, including the single quotes.
+//
+// @param the group name to report
+// @return the warning line, without a trailing newline
+///
+
+dcl-pr SCOUT_no_services_warning like(SCOUT_LINE_t);
+  group like(SCOUT_LINE_t) const;
+end-pr;

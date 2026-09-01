@@ -107,11 +107,22 @@ dcl-proc setUpSuite export;
   y = 'check_alive: 9999' + LF;
   write_file(%trim(g_dir) + '/broken.yaml': y);
 
-  // In a subdirectory - upstream ships system definitions this way, so a
-  // flat scan would find only a fraction of what is installed
+  // In a subdirectory, which must NOT be walked. Upstream's
+  // YamlServiceDefLoader.loadFromDirectory skips them outright -
+  // 'if (f.isDirectory()) { continue; }' - and reaches the definitions it
+  // ships under system/ and oss_common/ by naming those two paths, not by
+  // recursing. A scan that recurses finds definitions upstream never sees.
   y = 'start_cmd: /usr/bin/nested' + LF;
   y += 'check_alive: 8095' + LF;
   write_file(%trim(g_sub) + '/nested.yaml': y);
+
+  // The same short name as g_dir/db.yaml, in the directory loaded second.
+  // Upstream merges each directory with putAll, so the later one wins - that
+  // is what makes a user's copy of a service override the global copy.
+  y = 'name: Overriding DB' + LF;
+  y += 'start_cmd: /usr/bin/db-override' + LF;
+  y += 'check_alive: 8081' + LF;
+  write_file(%trim(g_sub) + '/db.yaml': y);
 
 end-proc;
 
@@ -202,7 +213,12 @@ dcl-proc aEqualV;
 end-proc;
 
 //==============================================================================
-// Discovery walks subdirectories and accepts both extensions
+// Discovery reads one directory flat and accepts both extensions
+//
+// Flat, not recursive, because that is what upstream does. A directory it
+// would never look in is a directory RMSC must not report services from:
+// finding MORE than upstream is as much a parity defect as finding fewer,
+// and it is the harder one to notice, since nothing looks missing.
 //==============================================================================
 
 dcl-proc test_discovery export;
@@ -213,15 +229,40 @@ dcl-proc test_discovery export;
   SCCOLL_init(coll);
   assert(SCCOLL_load_dir(coll: g_dir): 'load');
 
-  // db api web cyc1 cyc2 orphan cache nested - broken and notes.txt excluded
-  iEqual(8: SCCOLL_count(coll): 'definitions found');
+  // db api web cyc1 cyc2 orphan cache - broken, notes.txt and the
+  // subdirectory's nested.yaml all excluded
+  iEqual(7: SCCOLL_count(coll): 'definitions found');
 
-  nEqual(true: SCCOLL_find(coll: 'nested': def):
-         'subdirectory walked');
+  nEqual(false: SCCOLL_find(coll: 'nested': def):
+         'subdirectory NOT walked');
   nEqual(true: SCCOLL_find(coll: 'cache': def):
          '.yml accepted as well as .yaml');
   nEqual(false: SCCOLL_find(coll: 'notes': def):
          'non-YAML file ignored');
+
+end-proc;
+
+//==============================================================================
+// A later directory's definition replaces an earlier one of the same name
+//
+// Upstream loads global, system, oss_common, the user's directory and then
+// the custom one, merging each with putAll, so the LAST one loaded wins.
+// A user's copy of a service overriding the global copy is the entire point
+// of having a user directory, and getting this backwards is invisible until
+// two directories happen to define the same name.
+//==============================================================================
+
+dcl-proc test_later_directory_overrides export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t) inz(*likeds);
+
+  SCCOLL_init(coll);
+  assert(SCCOLL_load_dir(coll: g_dir): 'first directory loaded');
+  assert(SCCOLL_load_dir(coll: g_sub): 'second directory loaded');
+
+  nEqual(true: SCCOLL_find(coll: 'db': def): 'db found');
+  aEqualV('Overriding DB': def.friendly: 'later definition wins');
 
 end-proc;
 

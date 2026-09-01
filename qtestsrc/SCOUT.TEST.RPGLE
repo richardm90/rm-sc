@@ -266,6 +266,30 @@ dcl-proc test_list_row export;
 end-proc;
 
 //==============================================================================
+// The empty-result warning is upstream's text, verbatim
+//
+// Captured from the installed sc 1.7.1:
+//   $ sc check group:nosuchgroup
+//   WARNING: No services are found in group 'nosuchgroup'   (on stderr, rc 0)
+//   $ sc check --ignore-globals
+//   WARNING: No services are found in group 'all'           (on stderr, rc 0)
+//
+// A bare check or list reports the implicit group as 'all'. RMSC printed
+// nothing at all in the first case and raised an error with different wording
+// in the second, which nothing could see until --ignore-globals started
+// working and a collection could be empty.
+//==============================================================================
+
+dcl-proc test_no_services_warning export;
+
+  aEqualV('WARNING: No services are found in group ''all''':
+          SCOUT_no_services_warning('all'): 'implicit group');
+  aEqualV('WARNING: No services are found in group ''nosuchgroup''':
+          SCOUT_no_services_warning('nosuchgroup'): 'named group');
+
+end-proc;
+
+//==============================================================================
 // Colour defaults to whether standard output is a terminal
 //
 // This is what keeps escapes out of piped output, which is the only reason a

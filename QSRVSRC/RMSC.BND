@@ -95,4 +95,7 @@ STRPGMEXP PGMLVL(*CURRENT) SIGNATURE('RMSC 0.1.0')
   /* SCJOB - active job lookup via QUSLJOB */
   EXPORT SYMBOL(SCJOB_by_name)
   EXPORT SYMBOL(SCJOB_last_error)
+  /* SCOUT - warnings on standard error */
+  EXPORT SYMBOL(SCOUT_warnln)
+  EXPORT SYMBOL(SCOUT_no_services_warning)
 ENDPGMEXP

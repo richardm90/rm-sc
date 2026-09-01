@@ -26,8 +26,17 @@ ctl-opt text('RMSC: Command line');
 /include 'include/RMSTRING_D.rpgleinc'
 /include 'include/RMTOOLS_D.rpgleinc'
 
+// The group a bare operation implicitly acts on, and the name upstream uses
+// when it reports that the operation matched nothing.
+dcl-c SCMAIN_GROUP_ALL const('all');
+
 dcl-pr next_token like(SCMAIN_ARGS_t);
   rest like(SCMAIN_ARGS_t);
+end-pr;
+
+dcl-pr warn_if_empty;
+  shown like(INTEGER_t) const;
+  group like(SCDEF_NAME_t) const;
 end-pr;
 
 dcl-pr is_operation like(BOOLEAN_t);
@@ -87,8 +96,15 @@ dcl-proc SCMAIN_parse export;
         opts.splf = true;
       when word = '--ignore-globals';
         opts.ignore_globals = true;
+      // Applied here rather than after the loop, because upstream applies it
+      // where it appears: it clears the group exclusions AND turns
+      // --ignore-globals back off, so '--ignore-globals --all' loads globals
+      // and '--all --ignore-globals' does not. Deferring it to the end makes
+      // the two forms behave the same, and only one of them is right.
       when word = '-a' or word = '--all';
         opts.all = true;
+        opts.ignore_globals = false;
+        opts.ignore_groups = '';
       when %len(word) > 16 and %subst(word: 1: 16) = '--ignore-groups=';
         opts.ignore_groups = %subst(word: 17);
       when %len(word) > 13 and %subst(word: 1: 13) = '--sampletime=';
@@ -121,11 +137,6 @@ dcl-proc SCMAIN_parse export;
   if %len(%trim(opts.operation)) = 0;
     opts.err = 'No operation given';
     return false;
-  endif;
-
-  // -a overrides the group exclusions, as upstream does
-  if opts.all;
-    opts.ignore_groups = '';
   endif;
 
   return true;
@@ -250,6 +261,29 @@ dcl-proc SCMAIN_adhoc export;
 end-proc;
 
 //==============================================================================
+// warn_if_empty
+//   Upstream's warning when an operation displayed nothing
+//
+// Emitted on standard error, and the operation still succeeds. Matching
+// nothing is not a failure - it is an empty group, an empty collection, or
+// exclusions that removed everything, and upstream treats all three the same.
+//==============================================================================
+
+dcl-proc warn_if_empty;
+  dcl-pi *n;
+    shown like(INTEGER_t) const;
+    group like(SCDEF_NAME_t) const;
+  end-pi;
+
+  if shown > 0;
+    return;
+  endif;
+
+  SCOUT_warnln(SCOUT_no_services_warning(group));
+
+end-proc;
+
+//==============================================================================
 // resolve_one
 //   Find the single service a specifier names
 //==============================================================================
@@ -300,10 +334,11 @@ dcl-proc SCMAIN_run export;
   dcl-s i     like(INTEGER_t);
   dcl-s group like(SCDEF_NAME_t);
   dcl-s acted like(BOOLEAN_t) inz(false);
+  dcl-s shown like(INTEGER_t);
 
   SCOUT_set_colour(opts.colours);
 
-  SCCOLL_load(coll);
+  SCCOLL_load(coll: opts.ignore_globals);
 
   // A definition that failed to load is reported but does not stop the rest
   // being managed. Under -q it is suppressed, which is what quiet is for.
@@ -317,23 +352,36 @@ dcl-proc SCMAIN_run export;
   // Operations over the whole collection
   select;
     when opts.operation = 'groups';
-      SCEXEC_groups(coll: opts.ignore_groups);
+      SCEXEC_groups(coll: opts.ignore_groups: opts.ignore_globals);
       return true;
 
     when opts.operation = 'list' and %len(%trim(opts.spec)) = 0;
-      SCEXEC_list(coll: opts.ignore_groups);
+      shown = SCEXEC_list(coll: opts.ignore_groups);
+      warn_if_empty(shown: SCMAIN_GROUP_ALL);
       return true;
 
     // A bare 'check', which is how a caller asks for everything
     when opts.operation = 'check'
      and (%len(%trim(opts.spec)) = 0 or STRING_lower(opts.spec) = 'all');
-      SCEXEC_check_all(coll: opts.ignore_groups);
+      shown = SCEXEC_check_all(coll: opts.ignore_groups);
+      warn_if_empty(shown: SCMAIN_GROUP_ALL);
       return true;
   endsl;
 
   // group:NAME applies the operation to every member
   if %len(opts.spec) > 6 and STRING_lower(%subst(opts.spec: 1: 6)) = 'group:';
     group = STRING_lower(%subst(opts.spec: 7));
+
+    // Listing a group is the whole-collection listing restricted to it, not a
+    // per-service dispatch. Routed here because the loop below has no case
+    // for it: every member was visited and none was printed, so 'list
+    // group:NAME' produced nothing at all.
+    if opts.operation = 'list';
+      shown = SCEXEC_list(coll: opts.ignore_groups: group);
+      warn_if_empty(shown: group);
+      return true;
+    endif;
+
     for i = 1 to SCCOLL_count(coll);
       if not SCCOLL_get(coll: i: def) or not SCDEF_in_group(def: group);
         iter;
@@ -363,9 +411,21 @@ dcl-proc SCMAIN_run export;
       endsl;
     endfor;
 
+    // check closes its output with a blank line here just as it does over the
+    // whole collection. Confirmed against sc 1.7.1 for both a populated group
+    // and an empty one; the state-changing operations are left alone, since
+    // nothing has been checked about them. list never reaches this point -
+    // SCEXEC_list writes its own trailing blank line.
+    if opts.operation = 'check';
+      SCOUT_writeln('');
+    endif;
+
+    // Upstream warns and exits 0 here rather than failing: an empty group is
+    // not an error, it is a group with nothing in it. RMSC raised an error
+    // with different wording and a non-zero status, which a caller checking
+    // the exit code would read as a failure to do the work.
     if not acted;
-      opts.err = 'No services in group ' + %trim(group);
-      return false;
+      SCOUT_warnln(SCOUT_no_services_warning(group));
     endif;
     return true;
   endif;

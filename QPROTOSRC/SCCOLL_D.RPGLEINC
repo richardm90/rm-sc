@@ -76,24 +76,30 @@ end-pr;
 ///
 // Load every definition found on the search path.
 //
-// Subdirectories are walked: upstream ships system definitions in a 'system'
-// subdirectory and common open-source ones in another, so a flat scan would
-// silently find only a fraction of what is installed.
+// The definitions upstream ships under 'system' and 'oss_common' are reached
+// because SCDIRS_search_path names those directories, not by walking the tree.
 //
 // A definition that fails to load is recorded in the collection rather than
 // aborting the load - one malformed file must not stop the rest being managed.
 //
 // @param the collection to populate
+// @param optional, true to skip the global directories (--ignore-globals)
 // @return true if the search path could be read
 ///
 
 dcl-pr SCCOLL_load like(BOOLEAN_t);
   coll likeds(SCCOLL_t);
+  ignore_globals like(BOOLEAN_t) const options(*nopass);
 end-pr;
 
 ///
 // Load definitions from one named directory. Used by SCCOLL_load, and useful
 // on its own for testing against a known directory.
+//
+// One directory, flat. Subdirectories are skipped, as upstream skips them.
+//
+// Called more than once, later definitions replace earlier ones of the same
+// name - the merge order that lets a user's copy override the global copy.
 ///
 
 dcl-pr SCCOLL_load_dir like(BOOLEAN_t);

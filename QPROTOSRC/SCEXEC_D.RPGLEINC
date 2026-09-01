@@ -72,7 +72,9 @@ end-pr;
 // several dozen host and TCP server definitions that ship with the system.
 ///
 
-dcl-pr SCEXEC_check_all;
+// Returns how many services it displayed, so the caller can tell an empty
+// result from a populated one and warn as upstream does.
+dcl-pr SCEXEC_check_all like(INTEGER_t);
   coll          likeds(SCCOLL_t);
   ignore_groups like(SCDEF_NAME_t) const;
 end-pr;
@@ -81,18 +83,29 @@ end-pr;
 // Write a 'list' row for every service, same filtering as check.
 ///
 
-dcl-pr SCEXEC_list;
+// Returns how many services it listed, as SCEXEC_check_all does.
+//
+// Given only_group, lists just that group's members - the complement of
+// ignore_groups, and what 'list group:NAME' needs. An explicitly named group
+// wins over the exclusions, so ignore_groups is not applied as well.
+dcl-pr SCEXEC_list like(INTEGER_t);
   coll          likeds(SCCOLL_t);
   ignore_groups like(SCDEF_NAME_t) const;
+  only_group    like(SCDEF_NAME_t) const options(*nopass);
 end-pr;
 
 ///
 // Write every group name.
+//
+// 'system' is built in and is listed even when every one of its members has
+// been filtered out - but NOT when the global directories were skipped, since
+// upstream only adds the built-in entry when it read them.
 ///
 
 dcl-pr SCEXEC_groups;
-  coll          likeds(SCCOLL_t);
-  ignore_groups like(SCDEF_NAME_t) const;
+  coll           likeds(SCCOLL_t);
+  ignore_groups  like(SCDEF_NAME_t) const;
+  ignore_globals like(BOOLEAN_t) const options(*nopass);
 end-pr;
 
 ///

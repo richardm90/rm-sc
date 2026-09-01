@@ -35,6 +35,11 @@ dcl-pr record_bad;
   def  likeds(SCDEF_t) const;
 end-pr;
 
+dcl-pr find_rrn like(INTEGER_t);
+  coll likeds(SCCOLL_t);
+  name like(SCDEF_NAME_t) const;
+end-pr;
+
 dcl-pr visit like(BOOLEAN_t);
   coll  likeds(SCCOLL_t);
   name  like(SCDEF_NAME_t) const;
@@ -72,15 +77,21 @@ end-proc;
 dcl-proc SCCOLL_load export;
   dcl-pi *n like(BOOLEAN_t);
     coll likeds(SCCOLL_t);
+    ignore_globals like(BOOLEAN_t) const options(*nopass);
   end-pi;
 
   dcl-ds dirs likeds(SCDIRS_t);
   dcl-ds def  likeds(SCDEF_t);
   dcl-s i     like(INTEGER_t);
+  dcl-s skip  like(BOOLEAN_t) inz(false);
 
   SCCOLL_init(coll);
 
-  if SCDIRS_search_path(dirs) = 0;
+  if %parms() >= 2 and %addr(ignore_globals) <> *null;
+    skip = ignore_globals;
+  endif;
+
+  if SCDIRS_search_path(dirs: skip) = 0;
     // No definition directory at all is a legitimate state, not an error:
     // a system with no services configured has nothing to manage.
     return true;
@@ -96,7 +107,7 @@ end-proc;
 
 //==============================================================================
 // SCCOLL_load_dir
-//   Load one directory, recursing into subdirectories
+//   Load one directory, flat
 //==============================================================================
 
 dcl-proc SCCOLL_load_dir export;
@@ -108,8 +119,8 @@ dcl-proc SCCOLL_load_dir export;
   dcl-s handle   pointer;
   dcl-s filename like(IFS_DIR_FILENAME_t);
   dcl-s path     like(STMF_t);
+  dcl-s rrn      like(INTEGER_t);
   dcl-ds def     likeds(SCDEF_t);
-  dcl-ds existing likeds(SCDEF_t);
 
   handle = IFS_opendir(dir);
   if handle = *null;
@@ -125,8 +136,13 @@ dcl-proc SCCOLL_load_dir export;
 
     path = %trim(dir) + '/' + %trim(filename);
 
+    // Skipped, not walked. Upstream's loader does the same
+    // - 'if (f.isDirectory()) { continue; }' - and reaches the definitions
+    // it ships under system/ and oss_common/ because the search path names
+    // those directories. Recursing here would report services upstream
+    // cannot see, which is as much a parity defect as missing some, and the
+    // harder one to notice because nothing looks absent.
     if IFS_isa_directory(path);
-      SCCOLL_load_dir(coll: path);
       iter;
     endif;
 
@@ -148,10 +164,14 @@ dcl-proc SCCOLL_load_dir export;
       iter;
     endif;
 
-    // The global directory is searched before the user's own, and a user
-    // definition of the same name replaces the global one rather than
-    // duplicating it.
-    if SCCOLL_find(coll: def.short_name: existing);
+    // Directories are merged in search-path order, and a definition read
+    // later REPLACES one of the same name read earlier - upstream merges
+    // each directory with putAll. Skipping the later one instead would let
+    // the global copy win, which is the opposite of what a user directory
+    // is for, and is invisible until two directories define the same name.
+    rrn = find_rrn(coll: def.short_name);
+    if rrn > 0;
+      LIST_update_by_rrn(coll.list: rrn: %addr(def));
       iter;
     endif;
 
@@ -207,6 +227,37 @@ dcl-proc record_bad;
   coll.bad_count += 1;
   coll.bad_name(coll.bad_count) = def.short_name;
   coll.bad_err(coll.bad_count)  = def.err;
+
+end-proc;
+
+//==============================================================================
+// find_rrn
+//   The row a definition of this name occupies, or zero
+//
+// SCCOLL_find answers whether one is there; a replacement needs to know
+// where, so the later definition can take the earlier one's place rather
+// than being appended alongside it.
+//==============================================================================
+
+dcl-proc find_rrn;
+  dcl-pi *n like(INTEGER_t);
+    coll likeds(SCCOLL_t);
+    name like(SCDEF_NAME_t) const;
+  end-pi;
+
+  dcl-ds def  likeds(SCDEF_t);
+  dcl-s  i    like(INTEGER_t);
+  dcl-s  want like(SCDEF_NAME_t);
+
+  want = STRING_lower(%trim(name));
+
+  for i = 1 to coll.count;
+    if SCCOLL_get(coll: i: def) and def.short_name = want;
+      return i;
+    endif;
+  endfor;
+
+  return 0;
 
 end-proc;
 

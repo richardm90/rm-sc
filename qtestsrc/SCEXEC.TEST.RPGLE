@@ -381,3 +381,113 @@ dcl-proc test_group_exclusion export;
   nEqual(true: SCDEF_in_group(def: 'all'): 'and in all, as everything is');
 
 end-proc;
+
+//==============================================================================
+// list and check report how many services they displayed
+//
+// Upstream warns - on stderr, exiting 0 - whenever an operation matches
+// nothing:
+//
+//   WARNING: No services are found in group 'all'
+//
+// It does so in three situations that look different and are the same: a
+// named group with no members, a collection that is empty, and group
+// exclusions that removed everything. The caller can only tell which happened
+// if the operation says how many services it actually displayed, so both
+// report a count.
+//
+// The exclusion case is the one worth pinning here. Every definition belongs
+// to the implicit group 'all', so excluding 'all' empties a collection that
+// is not itself empty - the case a count of the collection would get wrong.
+//==============================================================================
+
+dcl-proc test_list_reports_how_many export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t) inz(*likeds);
+  dcl-s  n    like(INTEGER_t);
+
+  // Put the fixtures there rather than relying on files another test
+  // happened to leave behind: under ORDER(*API) this suite's tests do not run
+  // in source order, so a count taken from whatever is lying in the directory
+  // is a count of which tests ran first.
+  assert(load_def('counted1.yaml':
+    'start_cmd: /usr/bin/x' + LF + 'check_alive: 55990' + LF: def): 'fixture 1');
+  assert(load_def('counted2.yaml':
+    'start_cmd: /usr/bin/x' + LF + 'check_alive: 55991' + LF: def): 'fixture 2');
+
+  SCCOLL_init(coll);
+  assert(SCCOLL_load_dir(coll: g_dir): 'fixtures loaded');
+
+  n = SCCOLL_count(coll);
+  assert((n > 0): 'fixture directory is not empty');
+
+  iEqual(n: SCEXEC_list(coll: ''): 'every service listed is counted');
+  iEqual(0: SCEXEC_list(coll: 'all'):
+         'nothing listed when every group is excluded');
+
+end-proc;
+
+//==============================================================================
+// list can be restricted to one group
+//
+// 'sc list group:backend' lists that group's members. RMSC printed nothing at
+// all: its group branch routes anything that is not check or a state change
+// to run_reporting, which has no list case, so every service was visited and
+// none was printed. Nothing caught it because no test and no gate ever passed
+// a group specifier to list.
+//
+// The named group wins over --ignore-groups, so the exclusions are not
+// applied on top: asking for a group you also excluded is asking for it.
+//==============================================================================
+
+dcl-proc test_list_restricted_to_a_group export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t) inz(*likeds);
+
+  assert(load_def('ingroup1.yaml':
+    'start_cmd: /usr/bin/x' + LF + 'check_alive: 55994' + LF +
+    'groups:' + LF + '- listgrp' + LF: def): 'fixture in the group');
+  assert(load_def('ingroup2.yaml':
+    'start_cmd: /usr/bin/x' + LF + 'check_alive: 55995' + LF +
+    'groups:' + LF + '- listgrp' + LF: def): 'second in the group');
+  assert(load_def('outgroup.yaml':
+    'start_cmd: /usr/bin/x' + LF + 'check_alive: 55996' + LF +
+    'groups:' + LF + '- othergrp' + LF: def): 'fixture outside it');
+
+  SCCOLL_init(coll);
+  assert(SCCOLL_load_dir(coll: g_dir): 'fixtures loaded');
+
+  iEqual(2: SCEXEC_list(coll: '': 'listgrp'):
+         'only the group members are listed');
+  iEqual(0: SCEXEC_list(coll: '': 'nosuchgroup'):
+         'an empty group lists nothing');
+  iEqual(2: SCEXEC_list(coll: 'listgrp': 'listgrp'):
+         'the named group wins over the exclusions');
+
+end-proc;
+
+dcl-proc test_check_all_reports_how_many export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t) inz(*likeds);
+  dcl-s  n    like(INTEGER_t);
+
+  // As above: this test's fixtures are this test's responsibility
+  assert(load_def('checked1.yaml':
+    'start_cmd: /usr/bin/x' + LF + 'check_alive: 55992' + LF: def): 'fixture 1');
+  assert(load_def('checked2.yaml':
+    'start_cmd: /usr/bin/x' + LF + 'check_alive: 55993' + LF: def): 'fixture 2');
+
+  SCCOLL_init(coll);
+  assert(SCCOLL_load_dir(coll: g_dir): 'fixtures loaded');
+
+  n = SCCOLL_count(coll);
+  assert((n > 0): 'fixture directory is not empty');
+
+  iEqual(0: SCEXEC_check_all(coll: 'all'):
+         'nothing checked when every group is excluded');
+  iEqual(n: SCEXEC_check_all(coll: ''): 'every service checked is counted');
+
+end-proc;
