@@ -341,16 +341,160 @@ end-proc;
 // The deprecated spelling still works
 //==============================================================================
 
-dcl-proc test_check_alive_criteria_alias export;
+//==============================================================================
+// check_alive_criteria is a VALUE COMPANION, not an alias
+//
+// The plan called it "a deprecated upstream alias, accepted". It is not.
+// Upstream uses it only when check_alive names a *type*, and then it supplies
+// that type's value. Measured against sc 1.7.1:
+//
+//   check_alive: port     + check_alive_criteria: 22        -> PORT:22
+//   check_alive: jobname  + check_alive_criteria: QP0ZSPWP  -> JOBNAME:QP0ZSPWP
+//   check_alive: port     (no criteria)                     -> JOBNAME:PORT
+//   check_alive: wibble   + check_alive_criteria: 22        -> JOBNAME:WIBBLE
+//   check_alive: 22       + check_alive_criteria: 99999     -> PORT:22
+//   check_alive_criteria: 22   (no check_alive)             -> file discarded
+//
+// So the type form applies only when BOTH keys are present and the first names
+// a type. Reading the second as a fallback spelling of the first - which is
+// what RMSC did - turns 'check_alive: port' into a search for a job called
+// PORT, and a running service reports NOT RUNNING with no error anywhere.
+//==============================================================================
+
+dcl-proc test_criteria_companion_port export;
 
   dcl-ds def likeds(SCDEF_t);
 
-  assert(load_fixture('alias.yaml':
+  assert(load_fixture('companion_port.yaml':
     'start_cmd: /usr/bin/webproxy' + LF +
+    'check_alive: port' + LF +
     'check_alive_criteria: 8080' + LF: def): 'load');
 
-  iEqual(1: def.criteria_count: 'alias accepted');
-  iEqual(8080: def.criteria(1).port: 'port');
+  iEqual(1: def.criteria_count: 'one criterion, not two');
+  aEqualV(SCDEF_CHECK_PORT: def.criteria(1).kind: 'kind is PORT, not JOB');
+  iEqual(8080: def.criteria(1).port: 'value comes from check_alive_criteria');
+
+end-proc;
+
+dcl-proc test_criteria_companion_jobname export;
+
+  dcl-ds def likeds(SCDEF_t);
+
+  assert(load_fixture('companion_job.yaml':
+    'start_cmd: /usr/bin/webproxy' + LF +
+    'check_alive: jobname' + LF +
+    'check_alive_criteria: MYJOB' + LF: def): 'load');
+
+  iEqual(1: def.criteria_count: 'one criterion');
+  aEqualV(SCDEF_CHECK_JOB: def.criteria(1).kind: 'kind is JOB');
+  aEqualV('MYJOB': def.criteria(1).job_name: 'job name from the companion');
+
+end-proc;
+
+//==============================================================================
+// The type wins over the shape of the value
+//
+// 'jobname' with a numeric value stays a job name. Anything that decided the
+// kind by looking at the value would call 12345 a port, and then check the
+// wrong thing entirely - the same failure as the alias reading, one layer down.
+//==============================================================================
+
+dcl-proc test_criteria_companion_type_beats_shape export;
+
+  dcl-ds def likeds(SCDEF_t);
+
+  assert(load_fixture('companion_numjob.yaml':
+    'start_cmd: /usr/bin/webproxy' + LF +
+    'check_alive: jobname' + LF +
+    'check_alive_criteria: 12345' + LF: def): 'load');
+
+  aEqualV(SCDEF_CHECK_JOB: def.criteria(1).kind:
+          'a numeric job name is still a job name');
+  aEqualV('12345': def.criteria(1).job_name: 'job name kept verbatim');
+
+end-proc;
+
+//==============================================================================
+// The type name is matched without regard to case
+//==============================================================================
+
+dcl-proc test_criteria_companion_type_case export;
+
+  dcl-ds def likeds(SCDEF_t);
+
+  assert(load_fixture('companion_upper.yaml':
+    'start_cmd: /usr/bin/webproxy' + LF +
+    'check_alive: PORT' + LF +
+    'check_alive_criteria: 8080' + LF: def): 'load');
+  aEqualV(SCDEF_CHECK_PORT: def.criteria(1).kind: 'PORT');
+
+  assert(load_fixture('companion_mixed.yaml':
+    'start_cmd: /usr/bin/webproxy' + LF +
+    'check_alive: Port' + LF +
+    'check_alive_criteria: 8080' + LF: def): 'load');
+  aEqualV(SCDEF_CHECK_PORT: def.criteria(1).kind: 'Port');
+
+end-proc;
+
+//==============================================================================
+// Without the companion, a type name is just a job name
+//
+// 'check_alive: port' on its own does NOT invalidate the file upstream, and
+// does not mean port either. It means a job called PORT.
+//==============================================================================
+
+dcl-proc test_criteria_companion_absent export;
+
+  dcl-ds def likeds(SCDEF_t);
+
+  assert(load_fixture('companion_none.yaml':
+    'start_cmd: /usr/bin/webproxy' + LF +
+    'check_alive: port' + LF: def): 'load');
+
+  iEqual(1: def.criteria_count: 'one criterion');
+  aEqualV(SCDEF_CHECK_JOB: def.criteria(1).kind: 'a job called PORT');
+  aEqualV('PORT': def.criteria(1).job_name: 'the word itself');
+
+end-proc;
+
+//==============================================================================
+// A check_alive that is not a type name ignores the companion
+//==============================================================================
+
+dcl-proc test_criteria_companion_not_a_type export;
+
+  dcl-ds def likeds(SCDEF_t);
+
+  assert(load_fixture('companion_value.yaml':
+    'start_cmd: /usr/bin/webproxy' + LF +
+    'check_alive: 8080' + LF +
+    'check_alive_criteria: 9999' + LF: def): 'load');
+
+  iEqual(1: def.criteria_count: 'the companion adds nothing');
+  aEqualV(SCDEF_CHECK_PORT: def.criteria(1).kind: 'kind from check_alive');
+  iEqual(8080: def.criteria(1).port: 'value from check_alive, not the companion');
+
+end-proc;
+
+//==============================================================================
+// The companion alone is not a definition
+//
+// check_alive is required. Upstream discards a file carrying only
+// check_alive_criteria, with two warning lines on stderr; RMSC accepted it as
+// though the key were an alias, which is where the misreading started.
+//==============================================================================
+
+dcl-proc test_criteria_companion_alone_is_invalid export;
+
+  dcl-ds def likeds(SCDEF_t);
+
+  nEqual(false: load_fixture('companion_alone.yaml':
+    'start_cmd: /usr/bin/webproxy' + LF +
+    'check_alive_criteria: 8080' + LF: def):
+    'a file with no check_alive does not load');
+
+  assert((%scan('check_alive': def.err) > 0):
+         'and says which key is missing');
 
 end-proc;
 
@@ -763,3 +907,197 @@ dcl-proc test_criterion_text_upper_cases_job export;
          'criterion text is upper-cased, as upstream renders it');
 
 end-proc;
+
+//##############################################################################
+//##                                                                          ##
+//##  BLOCK C - paste into qtestsrc/SCDEF.TEST.RPGLE                          ##
+//##                                                                          ##
+//##############################################################################
+//
+// Two small things the message depends on. They are in SCDEF because
+// SCDEF_criterion_text is, and because part 1 of the proposal is a change to
+// what SCDEF_load stores.
+//
+// REUSES load_fixture, already in that suite.
+//==============================================================================
+
+//==============================================================================
+// The text survives the load, and no number is invented
+//
+// MEASURED indirectly and strongly: sc info prints "Check-alive conditions:
+// PORT:abc" for this definition and exits 0. So upstream keeps the text, and
+// has no number for it.
+//
+// .port is asserted 0 rather than left unasserted because a load that quietly
+// stored SOME number would make the criterion look usable to any code that
+// checks the field instead of the text - which is how a wrong port gets
+// probed with nothing to say so.
+//==============================================================================
+
+dcl-proc test_unusable_port_keeps_its_text export;
+
+  dcl-ds def likeds(SCDEF_t);
+
+  assert(load_fixture('badport.yaml':
+    'name: ZZ bad' + LF +
+    'start_cmd: /usr/bin/webproxy' + LF +
+    'check_alive: port' + LF +
+    'check_alive_criteria: abc' + LF: def):
+    'the definition loads - sc list and sc info are unaffected by one');
+
+  iEqual(1: def.criteria_count: 'one criterion');
+  aEqualV(SCDEF_CHECK_PORT: def.criteria(1).kind:
+          'still a PORT criterion - the type came from check_alive, not ' +
+          'from the shape of the value');
+  aEqualV('abc': def.criteria(1).raw: 'the text is kept as written');
+  iEqual(0: def.criteria(1).port: 'and no number was invented for it');
+
+end-proc;
+
+//==============================================================================
+// SCDEF_criterion_text renders the criterion's TEXT - always
+//
+// MEASURED against sc 1.7.1, 'check_alive: port' with each value, read back
+// through sc info:
+//
+//   criteria=08080   ->  PORT:08080
+//   criteria=8080    ->  PORT:8080
+//   criteria= 8080   ->  PORT:8080
+//   criteria=-1      ->  PORT:-1
+//   criteria=abc     ->  PORT:abc
+//
+// THE RULE IS "ITS TEXT, ALWAYS", not "its text when it cannot be parsed".
+// An earlier version of this test had the second rule and expected
+// PORT:8080 from 08080. That rule fitted every piece of evidence available
+// at the time - PORT:abc has no number to print, so both rules explain it -
+// and was still wrong. 08080 is the input that tells them apart, because it
+// is the only one where the text and the number differ while both exist.
+//
+// The distinction is not academic. Under the wrong rule an implementation
+// renders from .port whenever .port is set, which is correct for every value
+// anybody would normally write and wrong for a leading zero, a value that
+// only appears in somebody's YAML months later. Stating the rule as it
+// actually is stops the next person reasoning from a rule that merely fits.
+//
+// A CONSEQUENCE WORTH KNOWING: rendering reads .raw, so a criterion BUILT IN
+// CODE rather than parsed renders as 'PORT:' with nothing after it unless
+// whoever builds it sets .raw. The ad-hoc 'port:445' specifier is the path
+// where that would show, and docs/parity.md already records ad-hoc naming as
+// a live difference on the byte-exact check path - so it is worth a look
+// while this is being implemented. It is not asserted here because this
+// suite tests what SCDEF_load produces, and nothing in it builds a criterion
+// by hand.
+//
+// aEqual and not aEqualV: SCDEF_criterion_text returns a value, and a
+// procedure result carries a correct operational descriptor - the array
+// element problem in docs/testing-notes.md does not arise.
+//==============================================================================
+
+dcl-proc test_criterion_text_unusable_port export;
+
+  dcl-ds def likeds(SCDEF_t);
+
+  assert(load_fixture('badporttext.yaml':
+    'start_cmd: /usr/bin/webproxy' + LF +
+    'check_alive: port' + LF +
+    'check_alive_criteria: abc' + LF: def): 'load');
+  aEqual('PORT:abc': SCDEF_criterion_text(def.criteria(1)):
+         'an unusable port renders its text - there is no number to render');
+
+  assert(load_fixture('goodporttext.yaml':
+    'start_cmd: /usr/bin/webproxy' + LF +
+    'check_alive: port' + LF +
+    'check_alive_criteria: 55999' + LF: def): 'load');
+  aEqual('PORT:55999': SCDEF_criterion_text(def.criteria(1)):
+         'a usable one is unchanged - this is the captured form');
+
+  assert(load_fixture('zeroporttext.yaml':
+    'start_cmd: /usr/bin/webproxy' + LF +
+    'check_alive: port' + LF +
+    'check_alive_criteria: 08080' + LF: def): 'load');
+  aEqual('PORT:08080': SCDEF_criterion_text(def.criteria(1)):
+         'MEASURED - the leading zero survives, so it is the text being ' +
+         'rendered and not the parsed number');
+
+  assert(load_fixture('negporttext.yaml':
+    'start_cmd: /usr/bin/webproxy' + LF +
+    'check_alive: port' + LF +
+    'check_alive_criteria: -1' + LF: def): 'load');
+  aEqual('PORT:-1': SCDEF_criterion_text(def.criteria(1)):
+         'MEASURED - and the sign survives too');
+
+  assert(load_fixture('spaceporttext.yaml':
+    'start_cmd: /usr/bin/webproxy' + LF +
+    'check_alive: port' + LF +
+    'check_alive_criteria:  8080' + LF: def): 'load');
+  aEqual('PORT:8080': SCDEF_criterion_text(def.criteria(1)):
+         'MEASURED - surrounding space does NOT survive. Note this is an ' +
+         'unquoted scalar, which YAML trims before RMSC sees it, so it ' +
+         'does not by itself prove the store trims as well');
+
+end-proc;
+
+//##############################################################################
+//##                                                                          ##
+//##  WHAT NO TEST ABOVE CAN COVER                                            ##
+//##                                                                          ##
+//##############################################################################
+//
+// Four parts of the measured behaviour are outside the ILE job, and iRPGUnit
+// runs inside one. They need cases in tools/error-delivery-test.sh, which
+// exists for precisely this - "exit status and stdout/stderr routing only
+// exist OUTSIDE the ILE job... No assertion in this file is reachable from
+// RPG."
+//
+// Not written here, as asked. What they need:
+//
+// 1. A FIXTURE, which none of the existing cases needs. Every case in that
+//    script today drives whatever is already installed; this one needs a
+//    definition written into a directory both implementations read, used, and
+//    removed again - with the removal in a trap so an interrupted run does
+//    not leave a broken definition behind for everybody's 'sc check'. It has
+//    to be invented-named (the repo is public) and it has to be visible to a
+//    DEFAULT check, so no groups. Two more alongside it, sorting before and
+//    after it, so "the walk continued" is observable.
+//
+// 2. STREAM AND COUNT, per the script's existing method - stdout and stderr
+//    to SEPARATE files, never 2>&1:
+//      - stderr holds EXACTLY ONE line for the bad service, with NO message-id
+//        prefix. stderr_payload() already strips one, which is what catches
+//        the CPF9897 duplication this script was written for.
+//      - stdout holds NO row naming the bad service, and DOES hold a row for
+//        each of the other two. The CHECK_ROW pattern is already there.
+//      - Both implementations, compared to each other: the message text is
+//        MEASURED here, unlike every other case in that script, so this is
+//        one of the few places the wording can legitimately be diffed rather
+//        than only its shape.
+//
+// 3. POSITION. The stderr line falls in the bad service's SORT POSITION in
+//    the walk, which no in-job test can see because the two streams are
+//    interleaved only once they leave the job. It needs the two streams
+//    merged in order - the one place 2>&1 is correct, and it deserves a
+//    comment saying why, since the script's header forbids it everywhere
+//    else - and then the merged output compared line for line against
+//    upstream's.
+//
+// 4. EXIT STATUS AND THE MISSING BLANK LINE.
+//      - 253, the script's "operational" class, for a bare check with a bad
+//        service present, and 253 again for 'check <badservice>' named
+//        directly, where stdout is completely EMPTY.
+//      - The trailing blank line that ends every check is ABSENT when this
+//        happens. That one needs care: the script's BLANK_LINE exemption
+//        exists because a check matching nothing prints a blank line and
+//        nothing else, and its comment warns explicitly against tightening
+//        it. This is the opposite assertion - a blank that must NOT be there
+//        - and it should be written as a byte comparison of the whole stdout
+//        against upstream's, not as a rule about blank lines, or the two
+//        expectations will collide.
+//      - Both re-confirmed against sc 1.7.1 in the script's stage 4, so the
+//        253 does not go stale underneath the expectation.
+//
+// One more, for tools/fidelity-gate.sh rather than the error script: its
+// byte-exact 'check' stage never sees a bad definition, because it runs
+// against what is installed. If the fixture above is made reusable, the gate
+// can diff a full check WITH a bad service present - which is the only test
+// that would catch the row, the message, the ordering and the missing blank
+// line all at once, in the form the consumer actually receives them.

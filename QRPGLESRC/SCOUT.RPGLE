@@ -269,3 +269,20 @@ dcl-proc SCOUT_not_running_suffix export;
   return '[not running at -->' + %trim(joined) + ']';
 
 end-proc;
+
+//==============================================================================
+// SCOUT_invalid_criteria
+//   Upstream's wording for a criterion that cannot be used
+//==============================================================================
+
+dcl-proc SCOUT_invalid_criteria export;
+  dcl-pi *n like(SCOUT_LINE_t);
+    friendly  like(SCOUT_LINE_t) const;
+    criterion like(SCOUT_LINE_t) const;
+  end-pi;
+
+  // Upstream's wording, verbatim, quotes included
+  return 'Invalid data for port number or job name criteria for service ''' +
+         %trim(friendly) + ''': ' + %trim(criterion);
+
+end-proc;

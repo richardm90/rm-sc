@@ -190,3 +190,18 @@ end-pr;
 dcl-pr SCDEF_criterion_text like(SCDEF_NAME_t);
   criterion likeds(SCDEF_CRITERION_t) const;
 end-pr;
+
+///
+// Can this criterion be used to look for anything at all?
+//
+// False only for a port whose text is not a number - 'check_alive: port' with
+// 'abc'. A job name of any length or shape is usable, measured: upstream
+// accepts a 27-character one and simply reports the service NOT RUNNING.
+//
+// Usability is a property of the definition's text, not of the machine, so it
+// can be settled without asking the system anything.
+///
+
+dcl-pr SCDEF_criterion_usable like(BOOLEAN_t);
+  criterion likeds(SCDEF_CRITERION_t) const;
+end-pr;

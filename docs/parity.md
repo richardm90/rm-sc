@@ -207,6 +207,38 @@ upstream wraps a partial service's `[not running at -->…]` suffix in its warni
 leaves that text uncoloured. The status field itself is coloured by both. **Undecided**, and it
 needs a person looking at a terminal rather than a diff — no byte-exact comparison can reach it.
 
+## Beyond the operations — how YAML types a scalar
+
+A criterion's value is rendered by whatever the **YAML reader** made of it, not by anything
+either implementation decides afterwards. Upstream's reader follows YAML 1.1, measured against
+sc 1.7.1 with `check_alive: port` and the value as `check_alive_criteria`:
+
+| written | renders as | why |
+|---|---|---|
+| `022` | `PORT:18` | a leading zero means octal |
+| `0755` | `PORT:493` | octal again |
+| `'022'` | `PORT:022` | quoted, so it stays a string |
+| `08080` | `PORT:08080` | invalid octal, so it stays a string |
+| `1_000` | `PORT:1000` | YAML 1.1 digit separator |
+| `+8080` | `PORT:8080` | typed as an integer, so the sign is gone |
+
+The two ways of writing a criterion also disagree with each other: plain `check_alive: 08080`
+renders `PORT:8080`, where the type-and-value form renders `PORT:08080` — the first parses the
+string and prints the number, the second prints what the reader produced.
+
+RMSC's `SCYAML` does none of this. It reads a scalar as text, so `check_alive: 022` means port
+22 here and port 18 upstream.
+
+**Not being chased, deliberately.** Matching it means implementing YAML 1.1 scalar typing —
+octal, digit separators, sign handling — so that a definition reading `022` is understood as 18.
+That is a large change to the parser whose entire value is agreeing with upstream about
+definitions nobody writes on purpose, and every one of them is a service that would fail to
+start either way, since port 18 is not where anybody's service is listening. Recorded here so
+the difference is known rather than discovered.
+
+Worth knowing if a definition ever does carry one: quoting the value (`'022'`) makes both
+implementations treat it as text, and is the portable way to write it.
+
 ## Corrected since this file was written
 
 The ground under several statements above has moved. What changed, so a reader is not comparing

@@ -156,3 +156,23 @@ end-pr;
 dcl-pr SCOUT_not_running_suffix like(SCOUT_LINE_t);
   joined like(SCOUT_LINE_t) const;
 end-pr;
+
+///
+// Upstream's complaint about a criterion it cannot use:
+//
+//   Invalid data for port number or job name criteria for service 'ZZ bad': PORT:abc
+//
+// The service is named by its FRIENDLY name, not its short name - which is
+// the opposite of a check row, where "zzbad (ZZ bad)" leads with the short
+// one. Written to standard error, in the service's own place in the walk, in
+// place of the row it would otherwise have printed.
+//
+// @param the service's friendly name
+// @param the criterion, rendered - see SCDEF_criterion_text
+// @return the line, without a trailing newline
+///
+
+dcl-pr SCOUT_invalid_criteria like(SCOUT_LINE_t);
+  friendly  like(SCOUT_LINE_t) const;
+  criterion like(SCOUT_LINE_t) const;
+end-pr;

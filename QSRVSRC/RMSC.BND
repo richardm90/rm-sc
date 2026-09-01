@@ -103,4 +103,7 @@ STRPGMEXP PGMLVL(*CURRENT) SIGNATURE('RMSC 0.1.0')
   EXPORT SYMBOL(SCEXEC_evaluate)
   EXPORT SYMBOL(SCOUT_partial_status)
   EXPORT SYMBOL(SCOUT_not_running_suffix)
+  /* A criterion that cannot be used, as opposed to one that is not satisfied */
+  EXPORT SYMBOL(SCOUT_invalid_criteria)
+  EXPORT SYMBOL(SCDEF_criterion_usable)
 ENDPGMEXP

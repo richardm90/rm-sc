@@ -84,6 +84,15 @@ dcl-proc SCEXEC_status export;
   // are added when the row is rendered, not here.
   SCEXEC_evaluate(def: ev);
 
+  // A service whose criteria cannot be used is reported stopped rather than
+  // with a blank status. ev.state is deliberately blank in that case so a
+  // caller cannot mistake it for a real answer, but this procedure's whole
+  // contract is that it returns one of the three words - SCAPI compares its
+  // result against a constant, and would match nothing at all.
+  if ev.unusable_count > 0;
+    return SCOUT_NOT_RUNNING;
+  endif;
+
   return ev.state;
 
 end-proc;
@@ -146,12 +155,28 @@ end-proc;
 
 dcl-proc SCEXEC_check export;
   dcl-pi *n;
-    def likeds(SCDEF_t) const;
+    def      likeds(SCDEF_t) const;
+    unusable like(BOOLEAN_t) options(*nopass);
   end-pi;
 
   dcl-ds ev likeds(SCEXEC_EVAL_t) inz(*likeds);
 
+  if %parms() >= 2 and %addr(unusable) <> *null;
+    unusable = false;
+  endif;
+
   SCEXEC_evaluate(def: ev);
+
+  // No row at all for a service that cannot be checked - upstream prints the
+  // complaint on standard error, in this service's own place in the walk, and
+  // carries on with the rest.
+  if ev.unusable_count > 0;
+    SCOUT_warnln(SCOUT_invalid_criteria(def.friendly: ev.unusable_text));
+    if %parms() >= 2 and %addr(unusable) <> *null;
+      unusable = true;
+    endif;
+    return;
+  endif;
 
   // Only a partial service carries counts and a list of what is not running.
   // RUNNING and NOT RUNNING rows are exactly what they have always been.
@@ -209,21 +234,36 @@ dcl-proc SCEXEC_check_all export;
   dcl-pi *n like(INTEGER_t);
     coll          likeds(SCCOLL_t);
     ignore_groups like(SCDEF_NAME_t) const;
+    unusable      like(INTEGER_t) options(*nopass);
   end-pi;
 
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
-  dcl-s i like(INTEGER_t);
+  dcl-s i     like(INTEGER_t);
   dcl-s shown like(INTEGER_t) inz(0);
+  dcl-s wrong like(INTEGER_t) inz(0);
+  dcl-s bad   like(BOOLEAN_t) inz(false);
 
   for i = 1 to SCCOLL_count(coll);
     if SCCOLL_get(coll: i: def) and not ignored(def: ignore_groups);
-      SCEXEC_check(def);
-      shown += 1;
+      SCEXEC_check(def: bad);
+      if bad;
+        wrong += 1;
+      else;
+        shown += 1;
+      endif;
     endif;
   endfor;
 
-  // Upstream ends the listing with a blank line
-  SCOUT_writeln('');
+  // Upstream ends the listing with a blank line - but not when a service
+  // could not be checked. Measured: a bare check with one bad definition
+  // present ends on the last row, with no blank after it.
+  if wrong = 0;
+    SCOUT_writeln('');
+  endif;
+
+  if %parms() >= 3 and %addr(unusable) <> *null;
+    unusable = wrong;
+  endif;
 
   return shown;
 
@@ -825,6 +865,28 @@ dcl-proc SCEXEC_evaluate export;
   dcl-s i like(INTEGER_t);
 
   clear ev;
+
+  // Settled before anything is probed. Usability is a property of the text,
+  // not of the machine, so a definition naming a port that is not a number
+  // asks the system nothing at all - and every count stays zero, rather than
+  // holding a half-finished answer that reads like a real one.
+  for i = 1 to def.criteria_count;
+    if not SCDEF_criterion_usable(def.criteria(i));
+      ev.unusable_count += 1;
+      if ev.unusable_index = 0;
+        ev.unusable_index = i;
+        ev.unusable_text  = SCDEF_criterion_text(def.criteria(i));
+      endif;
+    endif;
+  endfor;
+
+  if ev.unusable_count > 0;
+    // state is left BLANK deliberately - see SCEXEC_D. A caller that reads it
+    // without reading unusable_count gets something obviously wrong instead of
+    // a plausible NOT RUNNING.
+    return;
+  endif;
+
   ev.total = def.criteria_count;
 
   // Each criterion is probed exactly once. They are live port and job

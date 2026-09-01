@@ -740,3 +740,138 @@ dcl-proc test_check_row_status_exactly_18 export;
   aEqual('zzsedge': %subst(row: 24: 7): 'name still starts at column 24');
 
 end-proc;
+
+//##############################################################################
+//##                                                                          ##
+//##  BLOCK B - paste into qtestsrc/SCOUT.TEST.RPGLE                          ##
+//##                                                                          ##
+//##############################################################################
+//
+// The message itself. It is rendering, so it belongs beside
+// SCOUT_not_running_suffix and SCOUT_no_services_warning rather than in
+// SCEXEC - and for the same reason those are there: it is byte-exact
+// upstream text, and pure formatting tests are deterministic on any box.
+//
+// PROPOSED, matching SCOUT_no_services_warning's shape:
+//
+//   dcl-pr SCOUT_invalid_criteria like(SCOUT_LINE_t);
+//     friendly  like(SCDEF_NAME_t) const;   // the FRIENDLY name
+//     criterion like(SCDEF_NAME_t) const;   // 'PORT:abc', already rendered
+//   end-pr;
+//
+// Exported at the END of RMSC.BND's list. CLAUDE.md: the signature pins the
+// ORDER, so an export inserted in the middle silently rebinds every caller
+// after it.
+//
+// REUSES aEqualExact and aEqualV, already in that suite.
+//==============================================================================
+
+//==============================================================================
+// The message is upstream's, character for character
+//
+// MEASURED from sc 1.7.1, on stderr:
+//
+//   Invalid data for port number or job name criteria for service 'ZZ bad': PORT:abc
+//
+// Single quotes round the name, a colon and one space before the criterion,
+// and the criterion in the same PORT:value form SCDEF_criterion_text already
+// produces. "port number or job name" is upstream's wording and stays even
+// though only a port can produce this - measured: a 27-character job name is
+// accepted without complaint.
+//
+// aEqualExact rather than aEqual, so a trailing blank is a difference. The
+// captured line shows none. If it turns out upstream emits one - stderr was
+// not captured through cat -A - this assertion is where to add it, and
+// tools/error-delivery-test.sh should gain the same expectation.
+//==============================================================================
+
+dcl-proc test_invalid_criteria_message export;
+
+  aEqualExact('Invalid data for port number or job name criteria for ' +
+              'service ''ZZ bad'': PORT:abc':
+              SCOUT_invalid_criteria('ZZ bad': 'PORT:abc'):
+              'the measured line, byte for byte');
+
+end-proc;
+
+//==============================================================================
+// It names the service by its FRIENDLY name
+//
+// MEASURED: the definition is zzbad and the message says 'ZZ bad'. Worth its
+// own test because every other place RMSC names a service in a listing uses
+// the short name first - the check row is "zzbad (ZZ bad)" - so an
+// implementation that reached for def.short_name would look right and read
+// wrong.
+//
+// The second case is the one that catches it: a name where the two differ in
+// a way no substring match could confuse.
+//==============================================================================
+
+dcl-proc test_invalid_criteria_uses_the_friendly_name export;
+
+  aEqualExact('Invalid data for port number or job name criteria for ' +
+              'service ''Z last'': PORT:xyz':
+              SCOUT_invalid_criteria('Z last': 'PORT:xyz'):
+              'friendly name, not the short name');
+
+  assert((%scan('zzzlast': SCOUT_invalid_criteria('Z last': 'PORT:xyz')) = 0):
+         'the short name appears nowhere in it');
+
+end-proc;
+
+//==============================================================================
+// The criterion passes through unaltered
+//
+// The same contract SCOUT_not_running_suffix has and for the same reason: the
+// rendering happened before this procedure was called, and re-spacing or
+// re-casing it here would put two renderings of the same criterion in the
+// codebase that could drift apart.
+//
+// The JOBNAME cases cannot be produced by anything today - only a port can be
+// unusable - and are here anyway, because the message's own wording says job
+// names and a later change that made one unusable should not have to touch
+// this procedure.
+//==============================================================================
+
+dcl-proc test_invalid_criteria_passes_the_criterion_through export;
+
+  aEqualExact('Invalid data for port number or job name criteria for ' +
+              'service ''ZZ x'': PORT:12ab':
+              SCOUT_invalid_criteria('ZZ x': 'PORT:12ab'): 'mixed digits');
+
+  aEqualExact('Invalid data for port number or job name criteria for ' +
+              'service ''ZZ x'': PORT:':
+              SCOUT_invalid_criteria('ZZ x': 'PORT:'): 'an empty value');
+
+  aEqualExact('Invalid data for port number or job name criteria for ' +
+              'service ''ZZ x'': JOBNAME:QUSRWRK/SOMEJOB':
+              SCOUT_invalid_criteria('ZZ x': 'JOBNAME:QUSRWRK/SOMEJOB'):
+              'a job form passes through too');
+
+end-proc;
+
+//==============================================================================
+// INFERRED - the message is not a check row and must not be shaped like one
+//
+// It goes to stderr, so it is not read by the consumer that parses columns -
+// but the consumer's rule is positional, and error-delivery-test.sh's whole
+// premise is that RMSC has put error text on stdout before now. If this line
+// ever reached stdout, the one thing that must not happen is that it parses
+// AS A ROW: a bogus row is silently accepted, whereas a non-row line is
+// silently dropped, and dropped is survivable.
+//
+// So: no bar in column 22, and the line does not begin with two spaces.
+//==============================================================================
+
+dcl-proc test_invalid_criteria_is_not_row_shaped export;
+
+  dcl-s line like(SCOUT_LINE_t);
+
+  line = SCOUT_invalid_criteria('ZZ bad': 'PORT:abc');
+
+  assert((%scan('|': line) <> SCOUT_BAR_COLUMN):
+         'no bar in column 22 - it must not parse as a check row');
+  assert((%subst(line: 1: 2) <> '  '):
+         'and it does not start with the two spaces a row starts with');
+
+end-proc;

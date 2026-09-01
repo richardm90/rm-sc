@@ -47,8 +47,21 @@ dcl-pr to_integer like(INTEGER_t);
 end-pr;
 
 dcl-pr add_criterion like(BOOLEAN_t);
-  def likeds(SCDEF_t);
-  raw like(SCDEF_CRIT_t) const;
+  def  likeds(SCDEF_t);
+  raw  like(SCDEF_CRIT_t) const;
+  kind like(SCDEF_KIND_t) const options(*nopass);
+end-pr;
+
+// The type names check_alive may carry instead of a value, or blank if it
+// carries a value. PORT and JOBNAME only, matched without regard to case -
+// 'pgm' and 'process' are not types and fall through to being job names.
+dcl-pr criterion_type like(SCDEF_KIND_t);
+  value like(SCDEF_CRIT_t) const;
+end-pr;
+
+// Whether a port criterion's text can be used as a port number at all.
+dcl-pr usable_port like(BOOLEAN_t);
+  value like(SCDEF_CRIT_t) const;
 end-pr;
 
 dcl-pr load_criteria like(BOOLEAN_t);
@@ -220,16 +233,36 @@ dcl-proc load_criteria;
     def likeds(SCDEF_t);
   end-pi;
 
-  dcl-s key like(SCYAML_KEY_t);
-  dcl-s i   like(INTEGER_t);
-  dcl-s n   like(INTEGER_t);
+  dcl-s key    like(SCYAML_KEY_t);
+  dcl-s i      like(INTEGER_t);
+  dcl-s n      like(INTEGER_t);
+  dcl-s forced like(SCDEF_KIND_t);
 
-  // check_alive_criteria is upstream's deprecated spelling. Accept it, but
-  // prefer check_alive when a file carries both.
+  // check_alive is required and has no alternative spelling. A file carrying
+  // only check_alive_criteria is discarded - the caller's criteria_count
+  // check reports it - which is what upstream does with it.
   key = 'check_alive';
   if not SCYAML_has(doc: key);
-    key = 'check_alive_criteria';
-    if not SCYAML_has(doc: key);
+    return true;
+  endif;
+
+  // The type-and-value form: check_alive names a TYPE and check_alive_criteria
+  // supplies its value. It applies only when both keys are present and the
+  // first really is a type name; 'check_alive: port' on its own means a job
+  // called PORT, and a check_alive carrying an ordinary value ignores the
+  // companion. All three measured against sc 1.7.1.
+  //
+  // The type decides the kind outright. 'jobname' with a value of 12345 is a
+  // job named 12345, not port 12345, so the value is never re-inspected.
+  if SCYAML_has(doc: 'check_alive_criteria') and not SCYAML_is_seq(doc: key);
+    forced = criterion_type(SCYAML_value(doc: key));
+    if %len(%trim(forced)) > 0;
+      if not add_criterion(def: SCYAML_value(doc: 'check_alive_criteria'):
+                           forced);
+        def.err = 'More than ' + %char(SCDEF_MAX_CRITERIA) +
+                  ' check_alive criteria';
+        return false;
+      endif;
       return true;
     endif;
   endif;
@@ -297,8 +330,9 @@ end-proc;
 
 dcl-proc add_criterion;
   dcl-pi *n like(BOOLEAN_t);
-    def likeds(SCDEF_t);
-    raw like(SCDEF_CRIT_t) const;
+    def  likeds(SCDEF_t);
+    raw  like(SCDEF_CRIT_t) const;
+    kind like(SCDEF_KIND_t) const options(*nopass);
   end-pi;
 
   dcl-s work  like(SCDEF_CRIT_t);
@@ -318,6 +352,34 @@ dcl-proc add_criterion;
   def.criteria_count += 1;
   def.criteria(def.criteria_count).raw = work;
 
+  // A kind given by the caller came from a check_alive naming a type, and
+  // settles it: the value is not inspected, so a job named 12345 stays a job.
+  if %parms() >= 3 and %addr(kind) <> *null and %len(%trim(kind)) > 0;
+    def.criteria(def.criteria_count).kind = kind;
+    if kind = SCDEF_CHECK_PORT;
+      // Only if it really is a number. %int is lenient - it reads 22 out of
+      // '22,23' and 12 out of '12ab' - and raises RNX0105 on 'abc', so
+      // converting whatever arrived either answers the wrong question
+      // silently or brings the program down. Upstream keeps the text, loads
+      // the definition, and complains when it tries to USE it, so .port stays
+      // zero here and the criterion is judged unusable at evaluate time.
+      if usable_port(work);
+        def.criteria(def.criteria_count).port = %int(work);
+      endif;
+    else;
+      slash = %scan('/': work);
+      if slash > 1 and slash < %len(work);
+        def.criteria(def.criteria_count).subsystem =
+            STRING_upper(%subst(work: 1: slash - 1));
+        def.criteria(def.criteria_count).job_name =
+            STRING_upper(%subst(work: slash + 1));
+      else;
+        def.criteria(def.criteria_count).job_name = STRING_upper(work);
+      endif;
+    endif;
+    return true;
+  endif;
+
   // All digits: a port
   digits = true;
   for i = 1 to %len(work);
@@ -332,6 +394,11 @@ dcl-proc add_criterion;
     def.criteria(def.criteria_count).port = %int(work);
     return true;
   endif;
+
+  // Note that 'digits' above decides the KIND. A criterion reached through
+  // the type-and-value form is a port because check_alive said so, and its
+  // value may be anything at all - see the forced-kind path below, which is
+  // where 'port' + 'abc' arrives. Nothing is converted without checking.
 
   // PGM-name: jobs running that program
   if %len(work) > 4 and STRING_upper(%subst(work: 1: 4)) = 'PGM-';
@@ -531,8 +598,13 @@ dcl-proc SCDEF_criterion_text export;
     criterion likeds(SCDEF_CRITERION_t) const;
   end-pi;
 
+  // From the raw text, not from the converted number. They are the same for
+  // any ordinary port, and they differ in exactly the cases that matter: a
+  // value that could not be converted renders as it was written - upstream
+  // says PORT:abc, not PORT:0 - and one that %int would silently read part of
+  // renders whole, PORT:22,23 rather than PORT:22.
   if criterion.kind = SCDEF_CHECK_PORT;
-    return 'PORT:' + %char(criterion.port);
+    return 'PORT:' + %trim(criterion.raw);
   endif;
 
   // Everything else is a job name to upstream, including the SBS/JOB slash
@@ -540,5 +612,110 @@ dcl-proc SCDEF_criterion_text export;
   // rather than the split-out fields so those forms survive intact, and
   // upper-cased because upstream folds the criterion as it parses it.
   return 'JOBNAME:' + STRING_upper(%trim(criterion.raw));
+
+end-proc;
+
+//==============================================================================
+// criterion_type
+//   The type a check_alive value names, or blank if it names a value
+//
+// Upstream accepts PORT and JOBNAME, matched without regard to case. Nothing
+// else is a type: 'pgm' and 'process' both come back blank and are read as
+// job names, which is what sc 1.7.1 does with them.
+//==============================================================================
+
+dcl-proc criterion_type;
+  dcl-pi *n like(SCDEF_KIND_t);
+    value like(SCDEF_CRIT_t) const;
+  end-pi;
+
+  dcl-s work like(SCDEF_CRIT_t);
+
+  work = STRING_upper(%trim(value));
+
+  select;
+    when work = 'PORT';
+      return SCDEF_CHECK_PORT;
+    when work = 'JOBNAME';
+      return SCDEF_CHECK_JOB;
+    other;
+      return *blanks;
+  endsl;
+
+end-proc;
+
+//==============================================================================
+// usable_port
+//   Can this text be used as a port number?
+//
+// Upstream's complaint - "Invalid data for port number or job name criteria" -
+// is the wording of a parse failure, and sc is Java, so the rule is what
+// Integer.parseInt accepts: optionally signed digits, nothing else.
+//
+// Deliberately NOT a range check. 0, -1 and 65536 all parse, so upstream
+// accepts them and reports the service NOT RUNNING; refusing them here would
+// be a worse parity defect than the crash this replaces. The only departure
+// is a value too wide for the field, which is refused rather than truncated -
+// silently turning 4294967296 into something else is a wrong answer with no
+// error, which is the fault being fixed.
+//==============================================================================
+
+dcl-proc usable_port;
+  dcl-pi *n like(BOOLEAN_t);
+    value like(SCDEF_CRIT_t) const;
+  end-pi;
+
+  dcl-s work like(SCDEF_CRIT_t);
+  dcl-s i    like(INTEGER_t);
+  dcl-s from like(INTEGER_t) inz(1);
+
+  work = %trim(value);
+  if %len(work) = 0;
+    return false;
+  endif;
+
+  if %subst(work: 1: 1) = '-' or %subst(work: 1: 1) = '+';
+    from = 2;
+  endif;
+  if %len(work) < from;
+    return false;
+  endif;
+
+  for i = from to %len(work);
+    if %subst(work: i: 1) < '0' or %subst(work: i: 1) > '9';
+      return false;
+    endif;
+  endfor;
+
+  // Wider than the field can hold. %int would wrap rather than refuse.
+  if %len(work) - (from - 1) > 10;
+    return false;
+  endif;
+
+  monitor;
+    if %int(work) = 0;
+    endif;
+  on-error;
+    return false;
+  endmon;
+
+  return true;
+
+end-proc;
+
+//==============================================================================
+// SCDEF_criterion_usable
+//==============================================================================
+
+dcl-proc SCDEF_criterion_usable export;
+  dcl-pi *n like(BOOLEAN_t);
+    criterion likeds(SCDEF_CRITERION_t) const;
+  end-pi;
+
+  if criterion.kind = SCDEF_CHECK_PORT;
+    return usable_port(criterion.raw);
+  endif;
+
+  return true;
 
 end-proc;

@@ -345,7 +345,9 @@ dcl-proc SCMAIN_run export;
   dcl-s i     like(INTEGER_t);
   dcl-s group like(SCDEF_NAME_t);
   dcl-s acted like(BOOLEAN_t) inz(false);
-  dcl-s shown like(INTEGER_t);
+  dcl-s shown    like(INTEGER_t);
+  dcl-s unusable like(INTEGER_t) inz(0);
+  dcl-s bad      like(BOOLEAN_t) inz(false);
 
   // Anything the parse stage had to say has been said by now. Left in place
   // it would be reported a second time when this stage returns, which is the
@@ -379,8 +381,18 @@ dcl-proc SCMAIN_run export;
     // A bare 'check', which is how a caller asks for everything
     when opts.operation = 'check'
      and (%len(%trim(opts.spec)) = 0 or STRING_lower(opts.spec) = 'all');
-      shown = SCEXEC_check_all(coll: opts.ignore_groups);
-      warn_if_empty(shown: SCMAIN_GROUP_ALL);
+      shown = SCEXEC_check_all(coll: opts.ignore_groups: unusable);
+      // Nothing found at all is a different thing from services found and
+      // not checkable: upstream warns about the first and says nothing
+      // further about the second, having already named each one.
+      if unusable = 0;
+        warn_if_empty(shown: SCMAIN_GROUP_ALL);
+      endif;
+      if unusable > 0;
+        // Reported as it went, in each service's own place. opts.err stays
+        // empty so SCRUN exits without adding a word.
+        return SCMAIN_EXIT_FAILED;
+      endif;
       return SCMAIN_EXIT_OK;
   endsl;
 
@@ -461,7 +473,18 @@ dcl-proc SCMAIN_run export;
 
   select;
     when opts.operation = 'check';
-      SCEXEC_check(def);
+      SCEXEC_check(def: bad);
+      if bad;
+        // No row was printed and no blank follows one - upstream leaves
+        // stdout completely empty when it cannot check the service it was
+        // asked about.
+        return SCMAIN_EXIT_FAILED;
+      endif;
+      // Naming one service ends with a blank line just as checking them all
+      // does. Nothing compared this until 'check' joined the gate's live
+      // differential: stage 1 diffs a BARE check, which takes the other path
+      // entirely, so a named check had never been run against upstream.
+      SCOUT_writeln('');
     when opts.operation = 'start';
       if not SCEXEC_start(coll: def.short_name: err);
         opts.err = err;

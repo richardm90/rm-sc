@@ -60,7 +60,10 @@ end-pr;
 ///
 
 dcl-pr SCEXEC_check;
-  def likeds(SCDEF_t) const;
+  def      likeds(SCDEF_t) const;
+  // Set when the service could not be checked at all, so a walk can count it
+  // without evaluating twice.
+  unusable like(BOOLEAN_t) options(*nopass);
 end-pr;
 
 ///
@@ -77,6 +80,10 @@ end-pr;
 dcl-pr SCEXEC_check_all like(INTEGER_t);
   coll          likeds(SCCOLL_t);
   ignore_groups like(SCDEF_NAME_t) const;
+  // How many services could not be checked at all. The caller needs it for
+  // the exit status and for suppressing the trailing blank line, both of
+  // which upstream does when this happens.
+  unusable      like(INTEGER_t) options(*nopass);
 end-pr;
 
 ///
@@ -193,6 +200,26 @@ dcl-ds SCEXEC_EVAL_t qualified template inz;
   failed_count like(INTEGER_t) inz(0);
   failed       like(SCDEF_NAME_t) dim(SCDEF_MAX_CRITERIA);
   failed_text  like(SCOUT_LINE_t) inz('');
+
+  // A criterion can be UNUSABLE as opposed to unsatisfied: 'check_alive: port'
+  // with a value that is not a number names a port that cannot be looked for.
+  // Those were one boolean, which is how a running service came to be reported
+  // as stopped - and, once the value was converted without checking, how a
+  // malformed definition came to crash the program.
+  //
+  // A count rather than a flag, so that zero is the "nothing wrong" reading:
+  // `clear` on a structure resets to blanks and not to the template's inz, so
+  // a stale structure lies whatever the sense of the field, and it should lie
+  // in the same direction failed_count already does.
+  //
+  // state is left BLANK when unusable_count > 0, with every other count zero.
+  // It is fed straight to SCOUT_check_row on the byte-exact path, so a fourth
+  // status word there is one careless caller away from printing a row upstream
+  // does not print - and leaving a plausible NOT RUNNING would recreate the
+  // very conflation being fixed, one layer up.
+  unusable_count like(INTEGER_t) inz(0);
+  unusable_index like(INTEGER_t) inz(0);
+  unusable_text  like(SCDEF_NAME_t) inz('');
 end-ds;
 
 ///

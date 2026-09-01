@@ -68,7 +68,14 @@ fi
 export QIBM_MULTI_THREADED=Y
 
 # Operations compared live. Read-only, safe to run against real services.
-DIFF_OPS="info file loginfo jobinfo scrunattrs perfinfo"
+#
+# check is here as well as in stage 1, and the two are not the same test. Stage
+# 1 diffs a BARE check - every service, through SCEXEC_check_all - against a
+# captured baseline. Naming a single service takes a different path entirely,
+# and nothing compared it until this line existed: a trailing blank line that
+# upstream prints and RMSC did not went unnoticed because no test ran
+# 'check <service>' against upstream at all.
+DIFF_OPS="check info file loginfo jobinfo scrunattrs perfinfo"
 
 # Verification step 8 requires the sweep to include "two system-group services".
 # These two are chosen to reach the check_alive forms the three default services
