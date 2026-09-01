@@ -369,8 +369,17 @@ end-proc;
 //==============================================================================
 // A cycle is named, not fallen into
 //
-// Upstream recurses with no visited set and overflows its stack, which says
-// nothing about which definitions are at fault.
+// Upstream detects this too - validateNoCircularDependencies, run only for
+// operations that change state - and names every hop:
+//
+//   Circular dependency detected in service definitions!!
+//       cyc1 (Cycle 1) depends on ----> cyc2 (Cycle 2)
+//       cyc2 (Cycle 2) depends on ----> cyc1 (Cycle 1)
+//
+// on stderr, exiting 253. RMSC names one service, on stdout as well as
+// stderr, exiting 255. Both refuse before launching anything, which is the
+// part that matters here; the wording is an open difference recorded in
+// docs/parity.md.
 //==============================================================================
 
 dcl-proc test_dependency_cycle_detected export;
