@@ -85,12 +85,19 @@ end-ds;
 //
 // This is NOT a general YAML parser. It reads the shallow subset service
 // definitions actually use: top-level scalar keys, block sequences, inline
-// flow sequences, quoted and bare scalars, '#' comment lines, blank lines and
-// the literal null.
+// flow sequences, quoted and bare scalars, blank lines and the literal null.
+//
+// Comments are removed, whole-line and trailing alike. A '#' opens a comment
+// only where YAML says it does - starting the line or following whitespace,
+// and outside quotes - so a '#' inside a command string survives. This was
+// once listed here as deliberately unsupported, on the reasoning that
+// truncating a command was worse than keeping a comment; sc 1.7.1 was then
+// measured and it strips, and the whitespace rule turns out to protect the
+// command case anyway.
 //
 // Deliberately not supported, because no definition uses them and guessing
 // would corrupt command strings: nested mappings, multi-line block scalars
-// (| and >), anchors and aliases, and trailing comments after a value.
+// (| and >), and anchors and aliases.
 //
 // @param path to the .yaml file
 // @param the document to populate

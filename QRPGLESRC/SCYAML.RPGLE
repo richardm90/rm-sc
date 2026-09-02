@@ -51,6 +51,10 @@ dcl-pr strip_eol like(STRING_t);
   line like(STRING_t) const;
 end-pr;
 
+dcl-pr strip_comment like(STRING_t);
+  line like(STRING_t) const;
+end-pr;
+
 dcl-pr unquote like(SCYAML_VALUE_t);
   value like(SCYAML_VALUE_t) const;
 end-pr;
@@ -63,6 +67,11 @@ dcl-pr split_flow like(BOOLEAN_t);
   doc       likeds(SCYAML_DOC_t);
   key_index like(INTEGER_t) const;
   value     like(SCYAML_VALUE_t) const;
+  line_no   like(INTEGER_t) const;
+end-pr;
+
+dcl-pr next_comma like(INTEGER_t);
+  text like(SCYAML_VALUE_t) const;
 end-pr;
 
 //==============================================================================
@@ -109,12 +118,18 @@ dcl-proc SCYAML_parse export;
 
     work = %trim(work);
 
-    // Whole-line comment. Trailing comments are deliberately not stripped:
-    // a '#' inside a start_cmd is far more likely than a trailing comment,
-    // and silently truncating a command string is the worse failure.
+    // Whole-line comment.
     if %subst(work: 1: 1) = '#';
       iter;
     endif;
+
+    // A trailing comment goes the same way. This used to be left in place, on
+    // the reasoning that a '#' inside a start_cmd was likelier than a trailing
+    // comment and truncating a command was the worse failure. The reasoning
+    // was sound but the premise was not measured: sc 1.7.1 strips trailing
+    // comments, and the whitespace rule protects the case it was worried about
+    // anyway, since a '#' with no space before it stays put.
+    work = strip_comment(work);
 
     // Sequence item: '-' followed by a blank, or '-' alone
     if %subst(work: 1: 1) = '-'
@@ -173,9 +188,12 @@ dcl-proc SCYAML_parse export;
        and %subst(value: 1: 1) = '['
        and %subst(value: %len(value): 1) = ']';
       doc.keys(cur_key).is_seq = true;
-      if not split_flow(doc: cur_key: value);
-        doc.err = 'More than ' + %char(SCYAML_MAX_ITEMS) +
-                  ' sequence items at line ' + %char(line_no);
+      if not split_flow(doc: cur_key: value: line_no);
+        // split_flow sets doc.err itself at every point it can fail. It used
+        // to be the caller's job to supply the item-ceiling message, which
+        // meant any future failure inside split_flow that forgot to set err
+        // would have been reported as a ceiling overflow.
+
         IFS_fclose(handle);
         return false;
       endif;
@@ -221,8 +239,182 @@ dcl-proc strip_eol;
 end-proc;
 
 //==============================================================================
+// strip_comment
+//   Remove a trailing comment
+//
+// A '#' opens a comment only when it starts the line or follows whitespace,
+// and only outside quotes. All of that is measured against sc 1.7.1:
+// 'Nospace#hash' keeps its hash, '"Dquote # hash"' keeps its hash, and a
+// comment following a closing quote is still a comment - so this runs before
+// unquote rather than after it.
+//
+// A quote only quotes when it OPENS a scalar. In "Bobs' service # comment"
+// the apostrophe is an ordinary character and the comment is stripped, which
+// a scan treating every quote as an opener gets wrong - it swallows the rest
+// of the line and keeps the comment. Measured, along with the inch-mark
+// spelling.
+//
+// Whitespace before the '#' goes with it, tabs included. %TRIM removes blanks
+// only, so the tab is removed explicitly; a tab reaches here as EBCDIC x'05',
+// the source line having been converted on the way in. That conversion is the
+// assumption: x'05' is HT in every EBCDIC CCSID including the 1146 this
+// compiles under, but a job running 65535 or 1208 gets no conversion and the
+// tab arrives as x'09'. The failure would be silent - no error, the comment
+// simply stops being stripped - which is why the assumption is written down
+// rather than left in the constant.
+//==============================================================================
+
+dcl-proc strip_comment;
+  dcl-pi *n like(STRING_t);
+    line like(STRING_t) const;
+  end-pi;
+
+  dcl-s work     like(STRING_t);
+  dcl-s i        like(INTEGER_t);
+  dcl-s c        char(1);
+  dcl-s nxt      char(1);
+  dcl-s prev     char(1);
+  dcl-s in_sq    like(BOOLEAN_t) inz(*off);
+  dcl-s in_dq    like(BOOLEAN_t) inz(*off);
+  // Whether the scan is somewhere a scalar could begin. A quote only quotes
+  // when it OPENS a scalar; anywhere else it is an ordinary character, which
+  // is why this flag exists rather than a bare "is this a quote" test.
+  dcl-s at_start like(BOOLEAN_t) inz(*on);
+  // Flow-collection nesting, so a comma is only a separator inside one.
+  dcl-s depth    like(INTEGER_t) inz(0);
+  dcl-c HT const(x'05');
+
+  work = line;
+  i = 1;
+
+  dow i <= %len(work);
+    c = %subst(work: i: 1);
+
+    if in_sq;
+      if c = '''';
+        // YAML escapes a quote inside a single-quoted scalar by doubling it.
+        // The pair is one character and does not end the scalar - reading the
+        // first as a close and then declining to reopen truncated the value
+        // and left the quotes on it.
+        if i < %len(work) and %subst(work: i + 1: 1) = '''';
+          i += 1;
+        else;
+          in_sq = *off;
+        endif;
+      endif;
+
+    elseif in_dq;
+      // A backslash escapes the next character, so a quote behind one does
+      // not close the scalar.
+      if c = '\';
+        i += 1;
+      elseif c = '"';
+        in_dq = *off;
+      endif;
+
+    else;
+      select;
+        // Whitespace does not consume a scalar-start position: the value in
+        // 'key: "quoted"' still begins at the quote.
+        when c = ' ' or c = HT;
+
+        when at_start and c = '''';
+          in_sq    = *on;
+          at_start = *off;
+
+        when at_start and c = '"';
+          in_dq    = *on;
+          at_start = *off;
+
+        when c = '#';
+          prev = ' ';
+          if i > 1;
+            prev = %subst(work: i - 1: 1);
+          endif;
+          if i = 1 or prev = ' ' or prev = HT;
+            work = %subst(work: 1: i - 1);
+            // Trailing blanks and tabs go with the comment.
+            dow %len(work) > 0
+                and (%subst(work: %len(work): 1) = ' '
+                     or %subst(work: %len(work): 1) = HT);
+              work = %subst(work: 1: %len(work) - 1);
+            enddo;
+
+            // Nothing but whitespace stood before the '#'. A blank-indented
+            // comment never reaches here, the whole-line test above having
+            // caught it once %trim removed the blanks - so this is a
+            // TAB-indented comment, which YAML does not allow and upstream
+            // reports as a load error. Hand the line back untouched so it
+            // reaches that error, rather than returning an empty string the
+            // caller goes on to index into.
+            if %len(work) = 0;
+              return line;
+            endif;
+
+            return work;
+          endif;
+          at_start = *off;
+
+        // A colon opens a value only when it ends a key - 'PORT:8080' is one
+        // plain scalar, not a key and a value.
+        when c = ':';
+          nxt = ' ';
+          if i < %len(work);
+            nxt = %subst(work: i + 1: 1);
+          endif;
+          if i = %len(work) or nxt = ' ' or nxt = HT;
+            at_start = *on;
+          else;
+            at_start = *off;
+          endif;
+
+        // Only a dash that is already at a scalar-start position introduces a
+        // sequence item. The dashes in '--tag' are part of a plain scalar.
+        when c = '-' and at_start;
+
+        // Only where a scalar could begin. A bracket in the middle of a
+        // plain scalar is an ordinary character, and treating it as opening a
+        // collection re-enabled the comma rule one level down - which is the
+        // same quote-blindness this procedure exists to remove.
+        when at_start and (c = '[' or c = '{');
+          depth += 1;
+          at_start = *on;
+
+        when c = ']' or c = '}';
+          if depth > 0;
+            depth -= 1;
+          endif;
+          at_start = *off;
+
+        // A comma separates items inside a flow collection. Outside one it is
+        // an ordinary character in a plain scalar, and treating it as a
+        // separator everywhere was the only rule here that YAML does not have.
+        when c = ',';
+          at_start = (depth > 0);
+
+        other;
+          at_start = *off;
+      endsl;
+    endif;
+
+    i += 1;
+  enddo;
+
+  return work;
+
+end-proc;
+
+//==============================================================================
 // unquote
 //   Strip one layer of matching surrounding quotes
+//
+// A doubled apostrophe inside a single-quoted scalar is YAML's escape for one
+// apostrophe and is collapsed here. Backslash escapes inside a DOUBLE-quoted
+// scalar are not decoded - '\"' stays two characters where upstream renders
+// one. That gap predates this procedure handling escapes at all, and no
+// definition on the box uses one; it is recorded in the plan rather than
+// fixed here, because decoding one escape without the rest would be a worse
+// half-measure than decoding none.
 //==============================================================================
 
 dcl-proc unquote;
@@ -233,6 +425,7 @@ dcl-proc unquote;
   dcl-s work  like(SCYAML_VALUE_t);
   dcl-s first char(1);
   dcl-s last  char(1);
+  dcl-s pos   like(INTEGER_t);
 
   work = %trim(value);
   if %len(work) < 2;
@@ -242,7 +435,34 @@ dcl-proc unquote;
   first = %subst(work: 1: 1);
   last  = %subst(work: %len(work): 1);
 
-  if (first = '''' and last = '''') or (first = '"' and last = '"');
+  if first = '''' and last = '''';
+    work = %subst(work: 2: %len(work) - 2);
+
+    // YAML escapes an apostrophe inside a single-quoted scalar by doubling
+    // it, so collapse each pair back to one. Without this the pair reached
+    // the parenthesised description on the byte-exact path - 'don''t' where
+    // upstream renders "don't".
+    pos = %scan('''''': work);
+    dow pos > 0;
+      if pos + 1 < %len(work);
+        work = %subst(work: 1: pos) + %subst(work: pos + 2);
+      else;
+        // The pair ends the scalar; there is nothing after it to keep, and
+        // asking %SUBST for it would raise the same error being fixed
+        // elsewhere in this change.
+        work = %subst(work: 1: pos);
+      endif;
+
+      if pos + 1 > %len(work);
+        leave;
+      endif;
+      pos = %scan('''''': work: pos + 1);
+    enddo;
+
+    return work;
+  endif;
+
+  if first = '"' and last = '"';
     return %subst(work: 2: %len(work) - 2);
   endif;
 
@@ -277,6 +497,80 @@ dcl-proc is_null_literal;
 end-proc;
 
 //==============================================================================
+// next_comma
+//   Position of the first comma that SEPARATES flow items, or 0
+//
+// A comma inside quotes belongs to the item rather than between items.
+// Splitting on raw commas made "['a,,b']" look like a gap where YAML requires
+// a node, so the empty-element check refused a file upstream loads happily -
+// and a service vanishing from 'check' is the failure this project cares most
+// about.
+//
+// A quote only quotes when it opens an item, as everywhere else in this
+// parser: '[Bobs' service, x]' is two items, because that apostrophe is an
+// ordinary character in a plain scalar.
+//==============================================================================
+
+dcl-proc next_comma;
+  dcl-pi *n like(INTEGER_t);
+    text like(SCYAML_VALUE_t) const;
+  end-pi;
+
+  dcl-s i        like(INTEGER_t);
+  dcl-s c        char(1);
+  dcl-s in_sq    like(BOOLEAN_t) inz(*off);
+  dcl-s in_dq    like(BOOLEAN_t) inz(*off);
+  dcl-s at_start like(BOOLEAN_t) inz(*on);
+  dcl-c HT const(x'05');
+
+  i = 1;
+  dow i <= %len(text);
+    c = %subst(text: i: 1);
+
+    if in_sq;
+      if c = '''';
+        if i < %len(text) and %subst(text: i + 1: 1) = '''';
+          i += 1;
+        else;
+          in_sq = *off;
+        endif;
+      endif;
+
+    elseif in_dq;
+      if c = '\';
+        i += 1;
+      elseif c = '"';
+        in_dq = *off;
+      endif;
+
+    else;
+      select;
+        when c = ' ' or c = HT;
+
+        when at_start and c = '''';
+          in_sq    = *on;
+          at_start = *off;
+
+        when at_start and c = '"';
+          in_dq    = *on;
+          at_start = *off;
+
+        when c = ',';
+          return i;
+
+        other;
+          at_start = *off;
+      endsl;
+    endif;
+
+    i += 1;
+  enddo;
+
+  return 0;
+
+end-proc;
+
+//==============================================================================
 // split_flow
 //   Split an inline [a, b, c] sequence into items
 //==============================================================================
@@ -286,6 +580,7 @@ dcl-proc split_flow;
     doc       likeds(SCYAML_DOC_t);
     key_index like(INTEGER_t) const;
     value     like(SCYAML_VALUE_t) const;
+    line_no   like(INTEGER_t) const;
   end-pi;
 
   dcl-s inner like(SCYAML_VALUE_t);
@@ -301,16 +596,35 @@ dcl-proc split_flow;
   endif;
 
   dow %len(inner) > 0;
-    comma = %scan(',': inner);
+    comma = next_comma(inner);
     if comma = 0;
       part = %trim(inner);
       inner = '';
     else;
       part = %trim(%subst(inner: 1: comma - 1));
-      inner = %trim(%subst(inner: comma + 1));
+
+      // '[a,]' is valid YAML and abended here: a comma in the last position
+      // leaves nothing after it, and %SUBST rejects a start beyond the end.
+      if comma < %len(inner);
+        inner = %trim(%subst(inner: comma + 1));
+      else;
+        inner = '';
+      endif;
+    endif;
+
+    // A gap between two commas is a position where YAML requires a node and
+    // none is present, so upstream rejects the whole file: 'while parsing a
+    // flow node'. A comma in the LAST position is different - it leaves
+    // nothing after it, and that is tolerated. Measured against sc 1.7.1;
+    // '[a,]' loads with one item where '[a,,b]' loads not at all.
+    if %len(part) = 0;
+      doc.err = 'Empty item in flow sequence at line ' + %char(line_no);
+      return false;
     endif;
 
     if not add_item(doc: key_index: unquote(part));
+      doc.err = 'More than ' + %char(SCYAML_MAX_ITEMS) +
+                ' sequence items at line ' + %char(line_no);
       return false;
     endif;
   enddo;

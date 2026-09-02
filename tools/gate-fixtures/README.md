@@ -280,9 +280,10 @@ none of these was reachable before:
    the three real definitions there happen to be read in alphabetical order. See installation
    note 4: copy the pack in reverse so this cannot hide again.
 2. **A trailing YAML comment is not stripped.** `rmscgate_comments.yaml` writes
-   `name: RMSC gate comments   # a trailing comment after a value`; RMSC carries the comment
-   into the description, upstream does not. The description is the parenthesised field the
-   consumer parses.
+   `name: RMSC gate comments   # a trailing comment after a value`; RMSC carried the comment
+   into the description, upstream did not. The description is the parenthesised field the
+   consumer parses. **Fixed** - the parser now removes comments where YAML says a comment
+   begins, which is why the fixture's own header records the two as identical.
 3. **RMSC emits no check-alive conflict warning**, where upstream warns and names every service
    sharing the criterion — now measured on both sides rather than read from upstream's source.
 
