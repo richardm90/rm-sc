@@ -225,7 +225,11 @@ dcl-proc SCMAIN_adhoc export;
   dcl-s value like(SCMAIN_SPEC_t);
   dcl-s slash like(INTEGER_t);
 
-  clear def;
+  // Assigned, not cleared: CLEAR would leave 'enabled' *off, so every ad-hoc
+  // port:, job: and PGM- spec would be a disabled definition the moment
+  // anything reads that field. Harmless today because only the loader reads
+  // it, which is exactly what makes it worth removing now rather than later.
+  SCDEF_clear(def);
   work = %trim(spec);
 
   if %len(work) > 5 and STRING_lower(%subst(work: 1: 5)) = 'port:';
@@ -376,7 +380,9 @@ dcl-proc SCMAIN_run export;
     return SCMAIN_EXIT_USAGE;
   endif;
 
-  SCCOLL_load(coll: opts.ignore_globals);
+  // quiet reaches the loader because the warnings found during the walk are
+  // emitted there, where the 'if not opts.quiet' block below cannot see them.
+  SCCOLL_load(coll: opts.ignore_globals: opts.quiet);
 
   // A definition that failed to load is reported but does not stop the rest
   // being managed. Under -q it is suppressed, which is what quiet is for.

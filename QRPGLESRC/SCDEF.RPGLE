@@ -32,6 +32,23 @@ ctl-opt text('RMSC: Service definition model');
 // Internal prototypes
 ///
 
+// A pristine SCDEF_t to assign from, rather than CLEAR.
+//
+// CLEAR resets to blanks, zeros and *off - NOT to a template's inz. 'enabled'
+// defaults ON, so a cleared definition looks disabled, and when that was first
+// written every definition vanished and 38 tests failed at once. The two other
+// places that cleared a definition had the same bug dormant, waiting for
+// someone to read the field there.
+//
+// Assigning from a structure initialised with inz(*likeds) restores every
+// template default, including the next field somebody appends with a non-blank
+// one. That removes the class rather than patching the instances.
+dcl-ds SCDEF_BLANK likeds(SCDEF_t) inz(*likeds);
+
+dcl-pr enabled_is_true like(BOOLEAN_t);
+  value like(SCYAML_VALUE_t) const;
+end-pr;
+
 dcl-pr is_known_key like(BOOLEAN_t);
   key like(SCYAML_KEY_t) const;
 end-pr;
@@ -87,7 +104,7 @@ dcl-proc SCDEF_load export;
 
   dcl-ds doc likeds(SCYAML_DOC_t);
 
-  clear def;
+  def = SCDEF_BLANK;
 
   if not SCYAML_parse(stmf: doc);
     def.err = SCYAML_error(doc);
@@ -113,7 +130,7 @@ dcl-proc SCDEF_from_doc export;
   dcl-s n    like(INTEGER_t);
   dcl-s key  like(SCYAML_KEY_t);
 
-  clear def;
+  def = SCDEF_BLANK;
 
   def.defined_at = stmf;
 
@@ -144,6 +161,13 @@ dcl-proc SCDEF_from_doc export;
   def.log_dir     = SCYAML_value(doc: 'log_dir');
   def.sbmjob_opts = SCYAML_value(doc: 'sbmjob_opts');
   def.only_if_executable = SCYAML_value(doc: 'only_if_executable');
+
+  // Present but not recognised as true means disabled - so 'enabled: nonsense'
+  // hides the service, and a typo hides it silently. Absent, or present with
+  // no value, leaves it enabled.
+  if SCYAML_has(doc: 'enabled');
+    def.enabled = enabled_is_true(SCYAML_value(doc: 'enabled'));
+  endif;
 
   if %len(SCYAML_value(doc: 'sbmjob_jobname')) > 0;
     def.sbmjob_jobname = SCYAML_value(doc: 'sbmjob_jobname');
@@ -461,7 +485,11 @@ dcl-proc to_boolean;
     return default;
   endif;
 
-  // YAML 1.1 truthy spellings, which is what upstream's parser accepted
+  // YAML 1.1 truthy spellings, which is what upstream's parser was ASSUMED to
+  // accept. Never measured, and now known to be wrong for at least one key:
+  // 'enabled' disables on an unrecognised value rather than defaulting, and
+  // reads 'oN' as false. Whether batch_mode and the environment flag behave
+  // the same way upstream has not been checked - see docs/parity.md.
   if work = 'true' or work = 'yes' or work = 'on' or work = '1';
     return true;
   endif;
@@ -505,8 +533,91 @@ dcl-proc to_integer;
 end-proc;
 
 //==============================================================================
-// is_known_key
+// SCDEF_clear
+//   Reset a definition to its declared defaults
+//
+// Use this instead of CLEAR. CLEAR resets to blanks, zeros and *off and takes
+// no notice of a template's inz, so a cleared definition has enabled = *off
+// and looks disabled. When that was first written every definition vanished
+// and 38 tests failed at once; two other places had the same bug dormant,
+// waiting for someone to read the field there.
+//
+// Assigning from a structure initialised with inz(*likeds) restores every
+// default, including the next field somebody appends with a non-blank one.
 //==============================================================================
+
+dcl-proc SCDEF_clear export;
+  dcl-pi *n;
+    def likeds(SCDEF_t);
+  end-pi;
+
+  def = SCDEF_BLANK;
+
+end-proc;
+
+//==============================================================================
+// enabled_is_true
+//   Is this the value upstream reads as enabling the service?
+//
+// Measured against sc 1.7.1 over 66 values, and it is a PREFIX test, not the
+// equality test it first looks like. Enabled when, after trimming, any of:
+//
+//   - it is one of YAML's boolean trues:  y Y yes Yes YES on On ON true True TRUE
+//   - it STARTS WITH 'y' or 'Y'           yak, ye, yesno, Y2, YeSs all enable
+//   - it equals 'true' ignoring case      tRue, TrUe
+//   - it is exactly '1'                   but not 2, 00 or 1.0
+//
+// Anything else DISABLES, so 'enabled: nonsense' hides the service and a typo
+// removes it silently. Note there is no prefix rule for 't': trues, tru and t
+// are all disabled, and 'oN' is disabled while 'on' is not.
+//
+// The first version of this tested 'yes' for equality, which was true of every
+// value in the table it was built from and still wrong: 'yeah' and 'yep' are
+// honoured upstream and were removing the service here. A measured table is
+// not a measured rule.
+//
+// ONE CASE CANNOT BE REPRODUCED and is recorded in docs/parity.md: quoting
+// suppresses YAML's boolean resolution, so upstream hides 'on' in quotes while
+// showing it bare. SCYAML's unquote discards whether a scalar was quoted, so
+// by the time this runs the two are the same string.
+//
+// Deliberately NOT to_boolean, which returns its default for an unrecognised
+// value where this must disable.
+//==============================================================================
+
+dcl-proc enabled_is_true;
+  dcl-pi *n like(BOOLEAN_t);
+    value like(SCYAML_VALUE_t) const;
+  end-pi;
+
+  dcl-s v like(SCYAML_VALUE_t);
+  dcl-s c char(1);
+
+  v = %trim(value);
+
+  // The key with no value at all leaves the service enabled.
+  if %len(v) = 0;
+    return true;
+  endif;
+
+  // The prefix rule, which subsumes y, Y, yes, Yes and YES.
+  c = %subst(v: 1: 1);
+  if c = 'y' or c = 'Y';
+    return true;
+  endif;
+
+  if STRING_lower(v) = 'true';
+    return true;
+  endif;
+
+  // Exactly these, and case-sensitively for 'on'. See the note above.
+  if v = '1' or v = 'on' or v = 'On' or v = 'ON';
+    return true;
+  endif;
+
+  return false;
+
+end-proc;
 
 //==============================================================================
 // is_known_key
@@ -535,6 +646,7 @@ dcl-proc is_known_key;
       or key = 'service_dependencies'
       or key = 'groups'
       or key = 'only_if_executable'
+      or key = 'enabled'
       or key = 'cluster';
       return true;
     other;

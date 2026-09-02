@@ -84,17 +84,23 @@ dcl-proc SCCOLL_load export;
   dcl-pi *n like(BOOLEAN_t);
     coll likeds(SCCOLL_t);
     ignore_globals like(BOOLEAN_t) const options(*nopass);
+    quiet          like(BOOLEAN_t) const options(*nopass);
   end-pi;
 
   dcl-ds dirs likeds(SCDIRS_t);
   dcl-ds def  likeds(SCDEF_t);
   dcl-s i     like(INTEGER_t);
   dcl-s skip  like(BOOLEAN_t) inz(false);
+  dcl-s hush  like(BOOLEAN_t) inz(false);
 
   SCCOLL_init(coll);
 
   if %parms() >= 2 and %addr(ignore_globals) <> *null;
     skip = ignore_globals;
+  endif;
+
+  if %parms() >= 3 and %addr(quiet) <> *null;
+    hush = quiet;
   endif;
 
   if SCDIRS_search_path(dirs: skip) = 0;
@@ -104,7 +110,7 @@ dcl-proc SCCOLL_load export;
   endif;
 
   for i = 1 to dirs.count;
-    SCCOLL_load_dir(coll: dirs.path(i));
+    SCCOLL_load_dir(coll: dirs.path(i): hush);
   endfor;
 
   return true;
@@ -118,17 +124,24 @@ end-proc;
 
 dcl-proc SCCOLL_load_dir export;
   dcl-pi *n like(BOOLEAN_t);
-    coll likeds(SCCOLL_t);
-    dir  like(STMF_t) const;
+    coll  likeds(SCCOLL_t);
+    dir   like(STMF_t) const;
+    quiet like(BOOLEAN_t) const options(*nopass);
   end-pi;
 
   dcl-s handle   pointer;
   dcl-s filename like(IFS_DIR_FILENAME_t);
   dcl-s path     like(STMF_t);
   dcl-s prefix   like(STMF_t);
+  dcl-s hush     like(BOOLEAN_t) inz(false);
+  dcl-s u        like(INTEGER_t);
   dcl-s rrn      like(INTEGER_t);
   dcl-s key      like(SCCOLL_KEY_t);
   dcl-ds def     likeds(SCDEF_t);
+
+  if %parms() >= 3 and %addr(quiet) <> *null;
+    hush = quiet;
+  endif;
 
   handle = IFS_opendir(dir);
   if handle = *null;
@@ -181,12 +194,42 @@ dcl-proc SCCOLL_load_dir export;
       // building the path from the untrimmed name. path is a varchar built by
       // concatenation and carries no padding, so there is nothing else for a
       // trim to remove.
-      SCOUT_warnln('WARNING: Ignoring file: ' + path);
+      // Suppressed by -q, as upstream suppresses it. It is a warning about
+      // something being left alone, not an error - and it is emitted here,
+      // where SCMAIN's own quiet test cannot reach, which is how it came to
+      // ignore the option in the first place.
+      if not hush;
+        SCOUT_warnln('WARNING: Ignoring file: ' + path);
+      endif;
       iter;
     endif;
 
     if not SCDEF_load(path: def);
       record_bad(coll: def);
+      iter;
+    endif;
+
+    // Upstream names every unrecognised key, on stderr, on every invocation,
+    // and suppresses it under -q. RMSC used to record them and mention them
+    // only in 'info', on stdout, which meant a typo in a definition was
+    // invisible to anyone not asking about that service by name.
+    //
+    // Emitted before the enabled test below, so a disabled definition still
+    // has its typos reported. Measured: upstream warns about an unrecognised
+    // key in a definition it then hides, and so does this.
+    if not hush;
+      for u = 1 to def.unknown_count;
+        SCOUT_warnln('WARNING: Unrecognized attribute ''' +
+                     %trim(def.unknown(u)) + ''' in file ' +
+                     %trim(def.defined_at));
+      endfor;
+    endif;
+
+    // 'enabled:' with anything not recognised as true hides the service
+    // completely - no row, no warning, no mention. Skipped silently here
+    // rather than recorded as a bad definition, because it is not one: the
+    // file is valid and its author asked for this.
+    if not def.enabled;
       iter;
     endif;
 

@@ -121,6 +121,17 @@ dcl-ds SCDEF_t qualified template inz;
   // upstream key cannot stop a definition loading.
   unknown_count like(INTEGER_t) inz(0);
   unknown like(SCYAML_KEY_t) dim(SCDEF_MAX_UNKNOWN);
+
+  // 'enabled: false' hides the service completely - upstream does not list it,
+  // check it or mention it. Default on, so a definition without the key, and
+  // one whose key has no value, are both enabled.
+  //
+  // Appended rather than placed with the identity fields it belongs beside:
+  // this structure is passed across the service-program boundary, where a size
+  // change is silent to the binder. Appending is the conservative choice even
+  // though nothing outside can currently see it - SCAPI exposes its own types,
+  // and the only other declarers are the suites, which recompile every run.
+  enabled like(BOOLEAN_t) inz(*on);
 end-ds;
 
 ///
@@ -204,4 +215,16 @@ end-pr;
 
 dcl-pr SCDEF_criterion_usable like(BOOLEAN_t);
   criterion likeds(SCDEF_CRITERION_t) const;
+end-pr;
+
+///
+// Reset a definition to its declared defaults.
+//
+// Use this rather than CLEAR on an SCDEF_t. CLEAR ignores the template's inz,
+// so a cleared definition arrives with enabled = *off and is treated as
+// disabled - which once made every definition on the system vanish at once.
+///
+
+dcl-pr SCDEF_clear;
+  def likeds(SCDEF_t);
 end-pr;

@@ -630,9 +630,10 @@ dcl-proc SCEXEC_info export;
     SCOUT_writeln('Group: ' + %trim(def.groups(i)));
   endfor;
 
-  for i = 1 to def.unknown_count;
-    SCOUT_writeln('Unrecognised key (ignored): ' + %trim(def.unknown(i)));
-  endfor;
+  // Unrecognised keys are reported by the loader now, on stderr, on every
+  // invocation - which is what upstream does. Printing them here as well
+  // would mean two warnings for one cause, on two streams, and this one was
+  // on stdout where a column-parsing consumer reads.
 
 end-proc;
 

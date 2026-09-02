@@ -136,6 +136,10 @@ end-pr;
 dcl-pr SCCOLL_load like(BOOLEAN_t);
   coll likeds(SCCOLL_t);
   ignore_globals like(BOOLEAN_t) const options(*nopass);
+  // Suppresses the warnings emitted during the walk, as '-q' does upstream.
+  // It reaches this far because the walk is where those warnings are found;
+  // SCMAIN cannot filter what it never sees.
+  quiet          like(BOOLEAN_t) const options(*nopass);
 end-pr;
 
 ///
@@ -149,8 +153,9 @@ end-pr;
 ///
 
 dcl-pr SCCOLL_load_dir like(BOOLEAN_t);
-  coll likeds(SCCOLL_t);
-  dir  like(STMF_t) const;
+  coll  likeds(SCCOLL_t);
+  dir   like(STMF_t) const;
+  quiet like(BOOLEAN_t) const options(*nopass);
 end-pr;
 
 ///

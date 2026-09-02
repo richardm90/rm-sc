@@ -103,6 +103,28 @@ dcl-pr cfl_index like(INTEGER_t);
   want      varchar(64) const;
 end-pr;
 
+dcl-s g_en like(STMF_t);
+
+// Sentinel for en_write: write no 'enabled' key at all. Distinct from '',
+// which writes the key with an empty value - two different fixtures, and the
+// measurements say both are VISIBLE, so nothing here may conflate them.
+dcl-c EN_OMIT '*OMIT';
+
+dcl-pr en_setup end-pr;
+
+dcl-pr en_teardown end-pr;
+
+dcl-pr en_write;
+  suffix  varchar(32) const;
+  short   varchar(64) const;
+  enabled varchar(64) const;
+end-pr;
+
+dcl-pr en_load;
+  suffix varchar(32) const;
+  coll   likeds(SCCOLL_t);
+end-pr;
+
 dcl-pr cp_before like(BOOLEAN_t);
   a_val varchar(512) const;
   b_val varchar(512) const;
@@ -200,6 +222,7 @@ dcl-proc setUpSuite export;
   nam_setup();
   blk_setup();
   cfl_setup();
+  en_setup();
 
 end-proc;
 
@@ -211,6 +234,7 @@ dcl-proc tearDownSuite export;
   nam_teardown();
   blk_teardown();
   cfl_teardown();
+  en_teardown();
 
 end-proc;
 
@@ -2925,5 +2949,404 @@ dcl-proc test_conflicts_case_insensitive export;
   iEqual(2: cf.item(n).count: 'claimed by both services');
   aEqualV('rmsccfl_romeo':  cf.item(n).name(1): 'first member');
   aEqualV('rmsccfl_sierra': cf.item(n).name(2): 'second member');
+
+end-proc;
+
+
+//##############################################################################
+//##                                                                          ##
+//##  'enabled:' HIDES A SERVICE                                              ##
+//##                                                                          ##
+//##############################################################################
+//
+// MEASURED - upstream omits a disabled service ENTIRELY. It is absent from
+// list, from check, from groups, from everything. RMSC shows it today, because
+// 'enabled' is not a known key and is recorded as an unknown one.
+//
+// THE RULE IS NOT "YAML FALSE DISABLES". It is "anything not recognised as TRUE
+// disables", and the difference matters: a typo silently HIDES a service rather
+// than being ignored. A definition nobody can see is the failure mode CLAUDE.md
+// singles out, arriving through the definition file rather than through the
+// output format.
+//
+// THE RULE, measured across 66 values against sc 1.7.1. Trim, then ENABLED if
+// ANY of these holds:
+//
+//   1. it resolved to a YAML boolean true
+//      y Y yes Yes YES on On ON true True TRUE
+//   2. the string STARTS WITH 'y' or 'Y'      <- a prefix test, not equality
+//   3. it equals 'true' ignoring case
+//   4. it is exactly 1
+//
+// Clause 2 is the one nobody guesses. 'yak', 'ye', 'yesno', 'Y2' and 'YeSs' are
+// all VISIBLE, and none of them is a spelling of yes. There is no matching
+// prefix rule for t or for o: 'trues', 'tru', 't', 'onn' and 'ony' are all
+// HIDDEN, which is what tells clause 2 apart from a sloppier reading in which
+// any near-miss of a true word counts.
+//
+// Clause 4 is exact. 1 is visible; 2, 00 and 1.0 are not.
+//
+// HOW THIS WAS GOT WRONG THE FIRST TIME, because the failure is instructive and
+// is NOT the derived-versus-measured one this project has been catching
+// elsewhere. The first table for these tests was MEASURED, and every entry in
+// it was true. It was still the wrong rule, because its 35 values did not
+// DISTINGUISH "yes in any case" from "starts with y" - both explain every row
+// in it. An implementation built on it removed services upstream shows.
+//
+// A MEASURED TABLE IS NOT A MEASURED RULE. Values consistent with a hypothesis
+// do not pin it; only values that would SEPARATE it from its rivals do. The way
+// to tell them apart is to measure something the rule predicts and the table
+// does not contain - and 'yak' is exactly that value, which nothing in the
+// original table would have prompted anyone to try.
+//
+// The property asserted is ABSENCE FROM THE COLLECTION, not a flag on a
+// definition that is still there. Present-but-flagged would leave every caller
+// that walks the collection - check, list, groups, start_order - responsible
+// for remembering to skip it, and the first one that forgot would show a
+// service upstream does not.
+//
+// WHY THE COUNT AND THE NAMES ARE BOTH ASSERTED. The count alone would pass if
+// the right NUMBER of services survived and the wrong ones did; the names alone
+// would pass if a hidden one leaked in beside all the visible ones. Together
+// they pin the set exactly, and the by-name assertions say WHICH spelling broke
+// rather than only that the total moved.
+//
+// Write order is scrambled, as elsewhere in this suite. Nothing here asserts
+// ORDER, so it is hygiene rather than a discriminator - said plainly so nobody
+// reads an ordering contract into it that is not being claimed.
+//==============================================================================
+
+//------------------------------------------------------------------------------
+// en_setup - two subdirectories: the spelling table, and the 'on' contrast
+//------------------------------------------------------------------------------
+dcl-proc en_setup;
+
+  g_en = '/tmp/rmsc-sccoll-enabled-' + %trim(psds.current_user);
+  IFS_crtdir(g_en);
+  IFS_crtdir(%trim(g_en) + '/main');
+  IFS_crtdir(%trim(g_en) + '/oncase');
+  IFS_crtdir(%trim(g_en) + '/yprefix');
+  IFS_crtdir(%trim(g_en) + '/quoton');
+
+  // VISIBLE - ten of them. Scrambled, and not grouped visible-then-hidden.
+  en_write('main': 'rmscen_nonsense': 'nonsense');
+  en_write('main': 'rmscen_true':     'true');
+  en_write('main': 'rmscen_zero':     '0');
+  en_write('main': 'rmscen_yesmix':   'yEs');
+  en_write('main': 'rmscen_absent':   EN_OMIT);
+  en_write('main': 'rmscen_false':    'false');
+  en_write('main': 'rmscen_on':       'on');
+  en_write('main': 'rmscen_onepoint': '1.0');
+  en_write('main': 'rmscen_truemix':  'tRue');
+  en_write('main': 'rmscen_no':       'no');
+  en_write('main': 'rmscen_ychar':    'y');
+  en_write('main': 'rmscen_onmix':    'oN');
+  en_write('main': 'rmscen_empty':    '');
+  en_write('main': 'rmscen_one':      '1');
+  en_write('main': 'rmscen_yes':      'yes');
+  en_write('main': 'rmscen_quoted':   '''true''');
+  en_write('main': 'rmscen_two':      '2');
+  en_write('main': 'rmscen_zerozero': '00');
+
+  // The y-prefix rule and the negatives that separate it from equality
+  en_write('yprefix': 'rmscyp_trues': 'trues');
+  en_write('yprefix': 'rmscyp_yak':   'yak');
+  en_write('yprefix': 'rmscyp_onn':   'onn');
+  en_write('yprefix': 'rmscyp_ye':    'ye');
+  en_write('yprefix': 'rmscyp_tchar': 't');
+  en_write('yprefix': 'rmscyp_ycap2': 'Y2');
+  en_write('yprefix': 'rmscyp_ony':   'ony');
+  en_write('yprefix': 'rmscyp_yesno': 'yesno');
+  en_write('yprefix': 'rmscyp_tru':   'tru');
+  en_write('yprefix': 'rmscyp_yesss': 'YeSs');
+
+  // The sanctioned divergence - see test_enabled_quoted_on_diverges
+  en_write('quoton': 'rmscqt_sq': '''on''');
+  en_write('quoton': 'rmscqt_dq': '"on"');
+  en_write('quoton': 'rmscqt_up': '''ON''');
+
+  // The 'on' contrast, in a directory of its own so its count is its own
+  en_write('oncase': 'rmscon_mixed': 'oN');
+  en_write('oncase': 'rmscon_upper': 'ON');
+  en_write('oncase': 'rmscon_lower': 'on');
+  en_write('oncase': 'rmscon_title': 'On');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// en_write - one definition, with, without, or with an empty 'enabled' key
+//
+// Every definition is otherwise identical and valid. Nothing but the 'enabled'
+// value can explain a difference in the result, which is the same discipline
+// the filename fixture uses and for the same reason: a fixture whose hidden
+// services were also malformed would pass against a loader applying no rule.
+//------------------------------------------------------------------------------
+dcl-proc en_write;
+  dcl-pi *n;
+    suffix  varchar(32) const;
+    short   varchar(64) const;
+    enabled varchar(64) const;
+  end-pi;
+
+  dcl-s y like(STRING_t);
+
+  y = 'name: Enabled probe' + LF;
+  y += 'start_cmd: /usr/bin/rmscen' + LF;
+  y += 'check_alive: 8140' + LF;
+
+  if enabled = EN_OMIT;
+    // no key at all - the baseline
+  elseif %len(enabled) = 0;
+    // the key present with nothing after it. Written without a trailing blank
+    // so the fixture is exactly 'enabled:' and not 'enabled: '.
+    y += 'enabled:' + LF;
+  else;
+    y += 'enabled: ' + enabled + LF;
+  endif;
+
+  write_file(%trim(g_en) + '/' + %trim(suffix) + '/' +
+             %trim(short) + '.yaml': y);
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// en_load - load one enabled-fixture subdirectory into a fresh collection
+//------------------------------------------------------------------------------
+dcl-proc en_load;
+  dcl-pi *n;
+    suffix varchar(32) const;
+    coll   likeds(SCCOLL_t);
+  end-pi;
+
+  SCCOLL_init(coll);
+  assert(SCCOLL_load_dir(coll: %trim(g_en) + '/' + %trim(suffix)):
+         'enabled fixture ' + %trim(suffix) + ' loaded');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// en_teardown - reuses cfl_rmdir, which is general rather than conflict-specific
+//------------------------------------------------------------------------------
+dcl-proc en_teardown;
+
+  cfl_rmdir(%trim(g_en) + '/main');
+  cfl_rmdir(%trim(g_en) + '/oncase');
+  cfl_rmdir(%trim(g_en) + '/yprefix');
+  cfl_rmdir(%trim(g_en) + '/quoton');
+
+  IFS_dltdir(g_en);
+
+  assert((not IFS_isa_directory(g_en)):
+         'Enabled fixture tree ' + %trim(g_en) + ' not removed');
+
+end-proc;
+
+//==============================================================================
+// Every spelling upstream treats as TRUE leaves the service visible
+//
+// The count comes first: it is the assertion that says nothing hidden leaked
+// in, which no individual find can say.
+//==============================================================================
+
+dcl-proc test_enabled_visible export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t) inz(*likeds);
+
+  en_load('main': coll);
+
+  iEqual(10: SCCOLL_count(coll): 'ten visible, and the other six absent');
+
+  nEqual(true: SCCOLL_find(coll: 'rmscen_absent': def):
+         'no enabled key at all');
+  nEqual(true: SCCOLL_find(coll: 'rmscen_empty': def):
+         'the key present with an empty value');
+  nEqual(true: SCCOLL_find(coll: 'rmscen_true': def):   'true');
+  nEqual(true: SCCOLL_find(coll: 'rmscen_truemix': def):
+         'tRue - true matches without regard to case');
+  nEqual(true: SCCOLL_find(coll: 'rmscen_yes': def):    'yes');
+  nEqual(true: SCCOLL_find(coll: 'rmscen_yesmix': def):
+         'yEs - by the y prefix, not by a case-folded match on yes');
+  nEqual(true: SCCOLL_find(coll: 'rmscen_ychar': def):
+         'y - the prefix rule at its shortest');
+  nEqual(true: SCCOLL_find(coll: 'rmscen_on': def):     'on');
+  nEqual(true: SCCOLL_find(coll: 'rmscen_one': def):    '1');
+  nEqual(true: SCCOLL_find(coll: 'rmscen_quoted': def):
+         '''true'' - the quotes come off before the value is judged');
+
+end-proc;
+
+//==============================================================================
+// Anything NOT recognised as true hides the service - typos included
+//
+// Asserted by name as well as by the count above, so a failure says which
+// spelling stopped hiding rather than only that one of them did.
+//
+// rmscen_nonsense is the one that shows the rule is not "false disables".
+// Nothing about the word 'nonsense' says no; it is simply not on the list of
+// spellings that say yes, and that is enough to remove the service from every
+// operation. A reader who assumes YAML boolean parsing will get this wrong.
+//==============================================================================
+
+dcl-proc test_enabled_hidden export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t) inz(*likeds);
+
+  en_load('main': coll);
+
+  nEqual(false: SCCOLL_find(coll: 'rmscen_false': def):    'false');
+  nEqual(false: SCCOLL_find(coll: 'rmscen_no': def):       'no');
+  nEqual(false: SCCOLL_find(coll: 'rmscen_zero': def):     '0');
+  nEqual(false: SCCOLL_find(coll: 'rmscen_nonsense': def):
+         'nonsense - not a negative, just not a recognised positive');
+  nEqual(false: SCCOLL_find(coll: 'rmscen_onepoint': def):
+         '1.0 - the numeric clause is EXACTLY 1');
+  nEqual(false: SCCOLL_find(coll: 'rmscen_two': def):      '2');
+  nEqual(false: SCCOLL_find(coll: 'rmscen_zerozero': def): '00');
+  nEqual(false: SCCOLL_find(coll: 'rmscen_onmix': def):
+         'oN - see test_enabled_on_is_case_sensitive');
+
+end-proc;
+
+//==============================================================================
+// MEASURED - 'on' is matched EXACTLY where 'true' and 'yes' are not
+//
+//   on / On / ON   VISIBLE
+//   oN             HIDDEN
+//
+// while tRue and yEs are both visible. So two of the three positive words fold
+// case and the third does not.
+//
+// THIS LOOKS EXACTLY LIKE A TYPO AND IS NOT. It was measured twice, on purpose,
+// because the natural reaction to reading it is to "correct" it to match the
+// other two - and doing so would make RMSC show a service upstream hides.
+// Whatever upstream's internals are doing here, this is the observed behaviour
+// and parity is the contract.
+//
+// The four spellings are in a directory of their own so the count is a
+// statement about them alone: three visible out of four, which no single find
+// assertion could establish.
+//==============================================================================
+
+dcl-proc test_enabled_on_is_case_sensitive export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t) inz(*likeds);
+
+  en_load('oncase': coll);
+
+  iEqual(3: SCCOLL_count(coll): 'three of the four spellings are visible');
+
+  nEqual(true:  SCCOLL_find(coll: 'rmscon_lower': def): 'on');
+  nEqual(true:  SCCOLL_find(coll: 'rmscon_title': def): 'On');
+  nEqual(true:  SCCOLL_find(coll: 'rmscon_upper': def): 'ON');
+  nEqual(false: SCCOLL_find(coll: 'rmscon_mixed': def):
+         'oN is FALSE - measured, not a typo in this test');
+
+end-proc;
+
+//==============================================================================
+// MEASURED - anything STARTING with y or Y is enabled, whatever follows
+//
+//   yak / ye / yesno / Y2 / YeSs   VISIBLE
+//
+// None of these is a spelling of 'yes'. This is clause 2 of the rule, a PREFIX
+// test, and it is the clause that a table of sensible-looking values cannot
+// reveal: every plausible spelling of yes also starts with y, so a fixture
+// built only from spellings of yes is explained equally well by either reading.
+// 'yak' separates them, and only a value like 'yak' can.
+//
+// THE NEGATIVES ARE THE POINT OF THIS TEST AS MUCH AS THE POSITIVES. There is
+// no matching prefix rule for t or for o:
+//
+//   trues / tru / t / onn / ony     HIDDEN
+//
+// 'trues' and 'onn' are the two that a sloppier reading gets wrong - any rule
+// phrased as "starts with a true word" or "close enough to true/on" admits
+// them, and upstream does not. 't' is there because it is the exact analogue of
+// 'y' and is nonetheless hidden, which is what makes the y prefix a special
+// case rather than an instance of a general rule.
+//
+// The count is asserted as well, so a rule that admitted some sixth value not
+// named here would fail even though every find below still passed.
+//==============================================================================
+
+dcl-proc test_enabled_y_prefix export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t) inz(*likeds);
+
+  en_load('yprefix': coll);
+
+  iEqual(5: SCCOLL_count(coll): 'five of the ten are enabled');
+
+  nEqual(true: SCCOLL_find(coll: 'rmscyp_yak': def):
+         'yak - not a spelling of yes, and visible anyway');
+  nEqual(true: SCCOLL_find(coll: 'rmscyp_ye': def):    'ye');
+  nEqual(true: SCCOLL_find(coll: 'rmscyp_yesno': def):
+         'yesno - it starts with y, and nothing after that is read');
+  nEqual(true: SCCOLL_find(coll: 'rmscyp_ycap2': def):
+         'Y2 - the capital counts too');
+  nEqual(true: SCCOLL_find(coll: 'rmscyp_yesss': def): 'YeSs');
+
+  nEqual(false: SCCOLL_find(coll: 'rmscyp_trues': def):
+         'trues - no prefix rule for t, so a near-miss of true is hidden');
+  nEqual(false: SCCOLL_find(coll: 'rmscyp_tru': def):  'tru');
+  nEqual(false: SCCOLL_find(coll: 'rmscyp_tchar': def):
+         't - the exact analogue of y, and still hidden');
+  nEqual(false: SCCOLL_find(coll: 'rmscyp_onn': def):
+         'onn - no prefix rule for o either');
+  nEqual(false: SCCOLL_find(coll: 'rmscyp_ony': def):
+         'ony - starts with o, not with y');
+
+end-proc;
+
+//==============================================================================
+// SANCTIONED DIVERGENCE - a QUOTED 'on' stays visible in RMSC, and does not
+// upstream. THIS TEST ASSERTS RMSC's BEHAVIOUR, NOT UPSTREAM'S.
+//
+//   enabled: 'on'  /  "on"  /  'ON'      upstream HIDDEN, RMSC VISIBLE
+//
+// Quoting suppresses YAML's boolean resolution, so upstream sees the plain
+// string "on". That satisfies none of its STRING tests - it does not start with
+// y, it does not equal 'true', it is not 1 - and only clause 1, the boolean
+// resolution, would have admitted it. Unquoted 'on' still resolves to boolean
+// true and stays visible.
+//
+// Note what this explains about the quoted case that AGREES: 'true' quoted is
+// visible in both, because clause 3 tests the string 'true' directly. The
+// divergence is specific to 'on' and to 'y'-less values that only clause 1
+// would have caught.
+//
+// RMSC CANNOT REPRODUCE IT AS THINGS STAND. SCYAML's unquote discards whether a
+// scalar was quoted, so by the time the enabled test runs, 'on' and on are the
+// same three characters. Reproducing upstream would mean teaching the parser to
+// carry quotedness through, for a value almost nobody writes. Recorded as a
+// sanctioned difference in docs/parity.md instead.
+//
+// WHY PIN IT AT ALL. A sanctioned difference that nothing observes is one that
+// can move without anyone noticing - the same argument the pinned cases in
+// tools/error-delivery-test.sh make. This holds RMSC's side still.
+//
+// IF THIS TEST FAILS, IT MAY BE THE DIVERGENCE BEING CLOSED rather than a
+// regression - somebody has taught SCYAML to carry quotedness. That is a good
+// change. Update this test and docs/parity.md together, in that case, and do
+// not simply delete it.
+//==============================================================================
+
+dcl-proc test_enabled_quoted_on_diverges export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t) inz(*likeds);
+
+  en_load('quoton': coll);
+
+  iEqual(3: SCCOLL_count(coll):
+         'all three stay visible in RMSC - upstream hides all three');
+
+  nEqual(true: SCCOLL_find(coll: 'rmscqt_sq': def): '''on''');
+  nEqual(true: SCCOLL_find(coll: 'rmscqt_dq': def): '"on"');
+  nEqual(true: SCCOLL_find(coll: 'rmscqt_up': def): '''ON''');
 
 end-proc;

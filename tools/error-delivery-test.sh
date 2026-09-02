@@ -269,6 +269,18 @@ assert_case() {
       # command that succeeded - D4 put them there and upstream does the same.
       # ANY OTHER line is the success path writing where it should not, which is
       # the regression this case has always existed to catch.
+      #
+      # THE FILTER IS A PREFIX, AND THAT IS A STANDING ASSUMPTION. Three classes
+      # of line are tolerated here today, and all three begin with WARNING:
+      #
+      #     WARNING: Ignoring file: <path>                    (57ba0ad)
+      #     WARNING: <name>: <reason>                         (load failure)
+      #     WARNING: Unrecognized attribute '<k>' in file ... (point 6)
+      #
+      # A new warning class that does NOT carry the prefix would be counted as a
+      # non-warning line and fail these two cases - correctly, on this policy's
+      # terms, but for a reason its author might not expect. D2 is about to
+      # rewrite this wording: keep the prefix, or update this filter with it.
       local nonwarn
       nonwarn=$(grep -vE '^[[:space:]]*$' "$e" 2>/dev/null | grep -cvE '^WARNING' || true)
       [ -z "$nonwarn" ] && nonwarn=0
@@ -953,6 +965,251 @@ else
       failed=$((failed+1))
     fi
   fi
+fi
+
+# -q MUST SUPPRESS THE SKIP WARNING.
+#
+# MEASURED, with an ignorable file staged - a regression in 57ba0ad, the change
+# that added the "Ignoring file" warning in the first place:
+#
+#     sc   list      warning present
+#     sc -q list     SUPPRESSED
+#     scr  list      present
+#     scr -q list    STILL PRESENT     <- the defect
+#
+# It is emitted during the directory walk, which has no knowledge of the
+# option, so the suppression never gets a chance to apply.
+#
+# BOTH HALVES ARE ASSERTED, and the second is not decoration. A case that only
+# checked the -q run would pass against an implementation that had stopped
+# warning altogether - it would confirm silence and call it suppression. The
+# run WITHOUT -q is therefore both the other half of the contract and this
+# case's staging proof, and it is invariant under the fix: -q is what moves,
+# the warning itself is not.
+#
+# Counted on BOTH streams on purpose. Whether the line belongs on stderr is
+# D4(2)'s question and is asserted there; this case is only about whether -q
+# silences it, and it should not fail twice for one stream defect nor pass
+# because the line moved to a stream it was not looking at.
+#
+# ---------------------------------------------------------------------------
+# FOR THE D2 LEDGER, NOT ASSERTED HERE - the two implementations differ in the
+# OPPOSITE direction on load ERRORS, and it is worth writing down so the next
+# person does not rediscover it and "fix" it in isolation. Measured:
+#
+#     sc   list      "Invalid configuration for service 'x' ..." present
+#     sc -q list     STILL PRESENT      <- upstream does NOT suppress it
+#     scr  list      "WARNING: x: ..." present
+#     scr -q list    SUPPRESSED         <- RMSC does
+#
+# The coherent reading: -q suppresses WARNINGS, and upstream does not class a
+# load error as one. It prints "Invalid configuration" under -q and suppresses
+# only the "WARNING: Ignoring file due to load errors" line accompanying it.
+# RMSC folds both into one WARNING-prefixed line and so suppresses the lot.
+#
+# That is entangled with the one-line-versus-two-line wording difference
+# already on the D2 ledger and should be fixed there as one piece. Asserting it
+# here would pin half a behaviour whose other half is about to change, and
+# would have to be rewritten by the change that fixes it.
+# ---------------------------------------------------------------------------
+IGNORE_DIR="$WORK/staged-ignorable"
+IGNORE_NAME=rmsc_d6_noext
+mkdir -p "$IGNORE_DIR"
+# No extension, so the filename rule skips it. A valid definition inside, so
+# that nothing but the NAME can explain its being skipped.
+printf 'name: D6 no extension\nstart_cmd: /QOpenSys/usr/bin/true\ncheck_alive: 59431\n' \
+  > "$IGNORE_DIR/$IGNORE_NAME"
+
+# A skip warning about the staged file, on either stream.
+ignore_lines() {
+  cat "$1" "$2" 2>/dev/null | grep -F -- "$IGNORE_NAME" | grep -c 'Ignoring' || true
+}
+
+SC_SERVICES_DIR="$IGNORE_DIR" "$SCR" list \
+  > "$WORK/quiet-off.out" 2> "$WORK/quiet-off.err"
+SC_SERVICES_DIR="$IGNORE_DIR" "$SCR" -q list \
+  > "$WORK/quiet-on.out" 2> "$WORK/quiet-on.err"
+q_rc=$?
+
+q_off=$(ignore_lines "$WORK/quiet-off.out" "$WORK/quiet-off.err")
+q_on=$(ignore_lines "$WORK/quiet-on.out" "$WORK/quiet-on.err")
+[ -z "$q_off" ] && q_off=0
+[ -z "$q_on" ] && q_on=0
+
+if [ "$q_off" -eq 0 ]; then
+  report FAIL quiet-suppresses-skip \
+    "FIXTURE DID NOT TAKE: no skip warning about $IGNORE_NAME without -q"
+  printf '  %-9s %-30s   - %s\n' "" "" "SC_SERVICES_DIR=$IGNORE_DIR was not read, or the file was not skipped"
+  printf '  %-9s %-30s   - %s\n' "" "" "the -q half proves nothing until this warns"
+  failed=$((failed+1))
+elif [ "$q_rc" -ne 0 ]; then
+  # Silence because the flag was refused is not suppression. Without this the
+  # case would go green on an RMSC that had never implemented -q at all.
+  report FAIL quiet-suppresses-skip \
+    "-q was not accepted: 'scr -q list' exits $q_rc, so suppression cannot be tested"
+  printf '  %-9s %-30s   - %s\n' "" "" "artefacts: quiet-on.out quiet-on.err"
+  failed=$((failed+1))
+elif [ "$q_on" -ne 0 ]; then
+  report FAIL quiet-suppresses-skip \
+    "(measured) $q_on skip warning line(s) survive -q, wanted 0"
+  printf '  %-9s %-30s   - %s\n' "" "" "first line: $(cat "$WORK/quiet-on.out" "$WORK/quiet-on.err" 2>/dev/null | grep -F -m1 -- "$IGNORE_NAME")"
+  printf '  %-9s %-30s   - %s\n' "" "" "emitted during the directory walk, which cannot see the option"
+  printf '  %-9s %-30s   - %s\n' "" "" "artefacts: quiet-off.out quiet-off.err quiet-on.out quiet-on.err"
+  failed=$((failed+1))
+else
+  report PASS quiet-suppresses-skip \
+    "(measured) $q_off skip warning line(s) without -q, none with it"
+  pass=$((pass+1))
+fi
+
+# AN UNRECOGNISED KEY WARNS, ON STDERR, ON EVERY INVOCATION.
+#
+# MEASURED. Upstream, with a definition carrying an unknown key:
+#
+#     WARNING: Unrecognized attribute 'wibble' in file /full/path/to/def.yaml
+#
+# on STDERR, on check AND list AND info alike, suppressed by -q. RMSC says
+# nothing at all on check or list, and on `info` only it prints, to STDOUT:
+#
+#     Unrecognised key (ignored): wibble
+#
+# So the text is wrong, the stream is wrong, and the set of operations is wrong.
+#
+# NEITHER SPELLING IS A TYPO. Upstream writes "Unrecognized" with a z and RMSC
+# "Unrecognised" with an s; each is deliberate in its own codebase. Nothing here
+# asserts either, and nobody should "correct" one to the other on sight.
+#
+# WHAT IS ASSERTED, AND WHAT IS LEFT TO D2. The wording alignment is D2's, so
+# the only pattern matched is the KEY NAME - the minimum that identifies the
+# line without pinning a sentence about to be rewritten. The one content
+# assertion is that the line NAMES THE FILE, because that is what makes the
+# warning useful: RMSC's current line names neither the file nor the service, so
+# a person reading it has to go looking for which of their definitions is meant.
+#
+# THE STDOUT ASSERTION IS NOT REDUNDANT. RMSC's existing `info` line has to GO
+# when the stderr one arrives. Two warnings for one cause, on two streams, would
+# be worse than the bug - and the stdout copy is on the format-critical surface,
+# which is the whole subject of this script.
+UNKNOWN_DIR="$WORK/staged-unknown"
+UNKNOWN_SVC=rmsc_d6_unknown
+UNKNOWN_KEY=wibble
+mkdir -p "$UNKNOWN_DIR"
+printf 'name: D6 unknown key\nstart_cmd: /QOpenSys/usr/bin/true\ncheck_alive: 59441\n%s: 42\n' \
+  "$UNKNOWN_KEY" > "$UNKNOWN_DIR/$UNKNOWN_SVC.yaml"
+
+# STAGING PROOF, and chosen to be invariant under the fix - the lesson from the
+# usage-stdout-clean guard earlier in this stage. The definition is valid apart
+# from the unknown key, so it LOADS and is listed; the fix adds a warning and
+# does not hide the service. Proving staging from the warning itself would be
+# circular, since the warning is the thing under test and is absent today.
+SC_SERVICES_DIR="$UNKNOWN_DIR" "$SCR" list \
+  > "$WORK/unknown-list.out" 2> "$WORK/unknown-list.err"
+uk_listed=$(grep -Fc -- "$UNKNOWN_SVC" "$WORK/unknown-list.out" 2>/dev/null || true)
+[ -z "$uk_listed" ] && uk_listed=0
+
+if [ "$uk_listed" -eq 0 ]; then
+  unknown_ok=0
+  report FAIL staged-unknown-key \
+    "FIXTURE DID NOT TAKE: $UNKNOWN_SVC is not listed"
+  printf '  %-9s %-30s   - %s\n' "" "" "SC_SERVICES_DIR=$UNKNOWN_DIR was not read, or the definition did not load"
+  printf '  %-9s %-30s   - %s\n' "" "" "the three cases below are not evidence until this works"
+  failed=$((failed+1))
+else
+  unknown_ok=1
+  report PASS staged-unknown-key \
+    "(fixture) $UNKNOWN_SVC loads and is listed, so the unknown key reached the loader"
+  pass=$((pass+1))
+fi
+
+SC_SERVICES_DIR="$UNKNOWN_DIR" "$SCR" check \
+  > "$WORK/unknown-check.out" 2> "$WORK/unknown-check.err"
+SC_SERVICES_DIR="$UNKNOWN_DIR" "$SCR" -q check \
+  > "$WORK/unknown-quiet.out" 2> "$WORK/unknown-quiet.err"
+uk_q_rc=$?
+SC_SERVICES_DIR="$UNKNOWN_DIR" "$SCR" info "$UNKNOWN_SVC" \
+  > "$WORK/unknown-info.out" 2> "$WORK/unknown-info.err"
+uk_info_rc=$?
+
+uk_err=$(grep -Fc -- "$UNKNOWN_KEY" "$WORK/unknown-check.err" 2>/dev/null || true)
+uk_out=$(grep -Fc -- "$UNKNOWN_KEY" "$WORK/unknown-check.out" 2>/dev/null || true)
+uk_named=$(grep -F -- "$UNKNOWN_KEY" "$WORK/unknown-check.err" 2>/dev/null | grep -Fc -- "$UNKNOWN_SVC.yaml" || true)
+uk_quiet=$(cat "$WORK/unknown-quiet.out" "$WORK/unknown-quiet.err" 2>/dev/null | grep -Fc -- "$UNKNOWN_KEY" || true)
+uk_info_out=$(grep -Fc -- "$UNKNOWN_KEY" "$WORK/unknown-info.out" 2>/dev/null || true)
+[ -z "$uk_err" ]      && uk_err=0
+[ -z "$uk_out" ]      && uk_out=0
+[ -z "$uk_named" ]    && uk_named=0
+[ -z "$uk_quiet" ]    && uk_quiet=0
+[ -z "$uk_info_out" ] && uk_info_out=0
+
+# (1) it warns at all, on stderr, and the line names the file
+if [ "$unknown_ok" -eq 0 ]; then
+  report SKIPPED unknown-key-warns "staged-unknown-key failed - see above"
+else
+  ukprob=()
+  [ "$uk_err" -ge 1 ] || ukprob+=("no line naming '$UNKNOWN_KEY' on stderr for check - upstream warns on check, list and info alike")
+  [ "$uk_out" -eq 0 ] || ukprob+=("$uk_out line(s) naming '$UNKNOWN_KEY' on STDOUT, the format-critical stream")
+  if [ "$uk_err" -ge 1 ] && [ "$uk_named" -eq 0 ]; then
+    ukprob+=("the warning does not name the file - '$UNKNOWN_SVC.yaml' appears on no line that mentions the key")
+  fi
+  if [ ${#ukprob[@]} -eq 0 ]; then
+    report PASS unknown-key-warns "(measured) $uk_err stderr line(s), naming the file, none on stdout"
+    pass=$((pass+1))
+  else
+    report FAIL unknown-key-warns "(measured)"
+    for u in "${ukprob[@]}"; do printf '  %-9s %-30s   - %s\n' "" "" "$u"; done
+    printf '  %-9s %-30s   - %s\n' "" "" "artefacts: unknown-check.out unknown-check.err"
+    failed=$((failed+1))
+  fi
+fi
+
+# (2) and -q silences it.
+#
+# THIS CANNOT REPORT SUCCESS WHILE THERE IS NOTHING TO SUPPRESS. RMSC emits no
+# unrecognised-key warning at all today, so a bare "is it absent under -q"
+# check would be green from the start and turn out to have been testing
+# silence, not suppression - the same trap quiet-suppresses-skip carries two
+# halves to avoid. So the run WITHOUT -q has to warn first; until it does, this
+# case is skipped rather than passed.
+if [ "$unknown_ok" -eq 0 ]; then
+  report SKIPPED unknown-key-quiet "staged-unknown-key failed - see above"
+elif [ "$uk_err" -eq 0 ]; then
+  report SKIPPED unknown-key-quiet \
+    "nothing warns without -q yet, so suppression is not testable - see unknown-key-warns"
+elif [ "$uk_q_rc" -ne 0 ]; then
+  # Silence because the flag was refused is not suppression - the same guard
+  # quiet-suppresses-skip carries, and for the same reason.
+  report FAIL unknown-key-quiet \
+    "-q was not accepted: 'scr -q check' exits $uk_q_rc, so suppression cannot be tested"
+  failed=$((failed+1))
+elif [ "$uk_quiet" -ne 0 ]; then
+  report FAIL unknown-key-quiet \
+    "(measured) $uk_quiet line(s) naming '$UNKNOWN_KEY' survive -q, wanted 0"
+  printf '  %-9s %-30s   - %s\n' "" "" "artefacts: unknown-quiet.out unknown-quiet.err"
+  failed=$((failed+1))
+else
+  report PASS unknown-key-quiet "(measured) -q silences the unrecognised-key warning"
+  pass=$((pass+1))
+fi
+
+# (3) and info does not print its own copy on stdout
+if [ "$unknown_ok" -eq 0 ]; then
+  report SKIPPED unknown-key-not-on-stdout "staged-unknown-key failed - see above"
+elif [ "$uk_info_rc" -ne 0 ]; then
+  # An info that failed prints nothing, and nothing would satisfy the assertion
+  # below without meaning anything by it.
+  report FAIL unknown-key-not-on-stdout \
+    "info $UNKNOWN_SVC exits $uk_info_rc, so an empty stdout proves nothing"
+  failed=$((failed+1))
+elif [ "$uk_info_out" -ne 0 ]; then
+  report FAIL unknown-key-not-on-stdout \
+    "(measured) info still prints $uk_info_out line(s) naming '$UNKNOWN_KEY' on STDOUT"
+  printf '  %-9s %-30s   - %s\n' "" "" "first line: $(grep -F -m1 -- "$UNKNOWN_KEY" "$WORK/unknown-info.out")"
+  printf '  %-9s %-30s   - %s\n' "" "" "the stderr warning replaces this one - two for one cause is worse than the bug"
+  printf '  %-9s %-30s   - %s\n' "" "" "artefacts: unknown-info.out unknown-info.err"
+  failed=$((failed+1))
+else
+  report PASS unknown-key-not-on-stdout "(measured) info keeps the unrecognised key off stdout"
+  pass=$((pass+1))
 fi
 
 echo

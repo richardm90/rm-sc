@@ -148,6 +148,30 @@ embedded SQL reads the `ACTIVE_JOB_INFO` performance columns directly"*. That is
 of the plan asked for *"every `QueryUtils` query as embedded SQL"*. Nothing explains twelve lines
 where upstream prints sixty-six, so the narrower output is undocumented rather than designed.
 
+## Beyond the operations — a quoted `on` in `enabled:`
+
+RMSC reproduces upstream's `enabled:` rule exactly, including its oddities - the `y` prefix test,
+`on` being case-sensitive where `true` and `yes` are not, and an unrecognised value disabling the
+service. One corner it cannot reach:
+
+    enabled: 'on'      upstream: HIDDEN     RMSC: visible
+    enabled: "on"      upstream: HIDDEN     RMSC: visible
+
+Quoting suppresses YAML's boolean resolution, so upstream sees the plain string `on`, which
+satisfies none of its string tests and disables the service. Bare `on` resolves to a real boolean
+and enables it. Every other quoted spelling agrees between the two, because `'y'`, `'yes'`,
+`'true'` and `'1'` all satisfy a string test that acts on the text regardless.
+
+**Why this is sanctioned rather than fixed.** `SCYAML`'s `unquote` discards whether a scalar was
+quoted, so by the time the `enabled` test runs, `on` and `'on'` are the same string. Reproducing
+it means carrying quotedness through the parser - a real change to `SCYAML_DOC_t` and every value
+that passes through it - for one spelling of one value of one key, where the bare form is what
+anybody would actually write.
+
+The divergence is in the safe direction: RMSC **shows** a service upstream hides. The opposite
+would be far worse, and was in fact the defect this rule was first implemented with - a `yes`
+equality test rather than a `y` prefix test, which hid `enabled: yeah` and `enabled: yep`.
+
 ## Beyond the operations — RMSC does not narrate
 
 Upstream reports what it is doing while it does it. RMSC is silent. This affects every
