@@ -359,14 +359,34 @@ dcl-proc SCMAIN_run export;
 
   SCOUT_set_colour(opts.colours);
 
+  // Decided BEFORE the load, because upstream decides it before it reads
+  // anything: 'sc info' with no service prints usage, exits 255 and leaves
+  // stdout EMPTY even when a definition on disk will not load. Deciding it
+  // afterwards meant RMSC announced a broken definition on stdout - the
+  // stream a column-parsing consumer reads - for a command that never ran.
+  //
+  // groups, list and check are the operations that describe the whole
+  // collection, so an absent service is ordinary for those three and a usage
+  // failure for every other.
+  if %len(%trim(opts.spec)) = 0
+     and opts.operation <> 'groups'
+     and opts.operation <> 'list'
+     and opts.operation <> 'check';
+    opts.err = 'Operation ' + %trim(opts.operation) + ' needs a service';
+    return SCMAIN_EXIT_USAGE;
+  endif;
+
   SCCOLL_load(coll: opts.ignore_globals);
 
   // A definition that failed to load is reported but does not stop the rest
   // being managed. Under -q it is suppressed, which is what quiet is for.
   if not opts.quiet;
+    // On stderr, where upstream puts them. A load warning on stdout is a
+    // non-row line on the stream the consumer parses by column position -
+    // dropped if it is lucky, misread if it is not.
     for i = 1 to coll.bad_count;
-      SCOUT_writeln('WARNING: ' + %trim(coll.bad_name(i)) + ': ' +
-                    %trim(coll.bad_err(i)));
+      SCOUT_warnln('WARNING: ' + %trim(coll.bad_name(i)) + ': ' +
+                   %trim(coll.bad_err(i)));
     endfor;
 
     // Two services claiming one criterion. Reported on every operation, as
@@ -447,20 +467,24 @@ dcl-proc SCMAIN_run export;
         when opts.operation = 'check';
           SCEXEC_check(def);
         when opts.operation = 'start';
+          // Each member's failure goes to stderr, as upstream's does. The
+          // exit status is NOT changed with it: upstream exits 0 from a group
+          // operation even when every member fails, and RMSC already matches.
+          // That half looks like a defect and is not.
           if not SCEXEC_start(coll: def.short_name: err);
-            SCOUT_writeln('ERROR: ' + %trim(err));
+            SCOUT_warnln('ERROR: ' + %trim(err));
           endif;
         when opts.operation = 'stop';
           if not SCEXEC_stop(coll: def.short_name: false: err);
-            SCOUT_writeln('ERROR: ' + %trim(err));
+            SCOUT_warnln('ERROR: ' + %trim(err));
           endif;
         when opts.operation = 'kill';
           if not SCEXEC_stop(coll: def.short_name: true: err);
-            SCOUT_writeln('ERROR: ' + %trim(err));
+            SCOUT_warnln('ERROR: ' + %trim(err));
           endif;
         when opts.operation = 'restart';
           if not SCEXEC_restart(coll: def.short_name: err);
-            SCOUT_writeln('ERROR: ' + %trim(err));
+            SCOUT_warnln('ERROR: ' + %trim(err));
           endif;
         other;
           run_reporting(opts: def);
@@ -486,11 +510,15 @@ dcl-proc SCMAIN_run export;
     return SCMAIN_EXIT_OK;
   endif;
 
-  // Everything else needs one named service
+  // Everything else needs one named service.
+  //
+  // A backstop rather than the decision: the same test now runs before the
+  // load, so that a usage failure prints nothing on stdout for a command that
+  // never ran. Nothing should reach here with an empty spec - groups, list and
+  // check are answered above, and every other operation was turned away
+  // earlier - but the two tests must stay in step, and a wrong answer here is
+  // an exit status rather than a crash.
   if %len(%trim(opts.spec)) = 0;
-    // Upstream treats a missing service as a USAGE failure, not a failed
-    // operation: 'sc info' with no service prints the usage line and exits
-    // 255. Measured across all ten operations that require one.
     opts.err = 'Operation ' + %trim(opts.operation) + ' needs a service';
     return SCMAIN_EXIT_USAGE;
   endif;
