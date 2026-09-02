@@ -1,0 +1,17 @@
+# rmscgate_job_down - a job-name criterion that cannot be active.
+#
+# EXERCISES  the dead branch of job lookup. Paired with rmscgate_job_up for the
+#            same reason the two port fixtures are paired: a lookup stuck on one
+#            answer passes either fixture alone.
+# UPSTREAM   NOT RUNNING, criterion JOBNAME:RMSCGATENOJOB.
+# RMSC       identical.
+# BASIS      measured (rendering); the name is invented and longer than the ten
+#            characters a job name can hold, so no job can ever match it.
+# STAGING    none.
+# ISOLATION  no.
+# FAILS IF   it reports RUNNING - a job-name filter matching on a prefix or
+#            substring would do that, and would also make every real service
+#            look alive for the wrong reason.
+name: RMSC gate job down
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: rmscgatenojob

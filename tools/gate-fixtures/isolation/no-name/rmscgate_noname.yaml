@@ -1,0 +1,28 @@
+# rmscgate_noname - a definition with no name: key.
+#
+# EXERCISES  a KNOWN, RECORDED difference in what the two implementations even
+#            consider to be a service.
+# UPSTREAM   DISCARDS the file entirely, with two warning lines on STDERR. No
+#            such service exists: it is absent from `list`, from `check`, and
+#            from `groups`, and `check rmscgate_noname` is an unknown service
+#            (exit 253).
+# RMSC       KEEPS the definition, defaulting the description to the short name.
+#            The service exists for RMSC and not for upstream - so the row
+#            '  NOT RUNNING        | rmscgate_noname (rmscgate_noname) ' appears
+#            on one side only. Recorded in the plan's key table, corrected
+#            01/09/2026, and in docs/parity.md.
+# BASIS      measured, both sides, on sc 1.7.1.
+# STAGING    none.
+# ISOLATION  YES, twice over. Upstream's two stderr lines ride along with every
+#            command, and the extra ROW on the RMSC side lands in the middle of
+#            the byte-exact check surface - so with this file installed, every
+#            other fixture's check comparison fails for a reason that has nothing
+#            to do with that fixture.
+# FAILS IF   the two implementations agree. That is not a pass: it means the
+#            recorded difference has been resolved one way or the other, and
+#            docs/parity.md and the plan's key table both need updating. Which
+#            way it was resolved is the interesting part - upstream discarding is
+#            the safer behaviour, since a service with no friendly name yields a
+#            row whose parenthesised field is a duplicate of its name.
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: rmscgatedeadnn

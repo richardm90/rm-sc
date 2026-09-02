@@ -1,0 +1,22 @@
+# rmscgate_unknown_key - a key neither implementation knows.
+#
+# EXERCISES  the forward-compatibility rule: unknown keys warn under -v and never
+#            fail. The plan's Risks section leans on this - 'YAML drift. Unknown
+#            keys warn rather than fail' - so a definition written for a newer sc
+#            must not take a service off a screen.
+# UPSTREAM   loaded and reported normally, NOT RUNNING. Nothing on stderr for a
+#            plain command; a note under -v is allowed.
+# RMSC       identical.
+# BASIS      chosen, from the plan's key table ('Unknown keys - warn under -v,
+#            never fail'). Upstream's exact -v wording was not measured, so
+#            compare the two implementations rather than asserting text.
+# STAGING    none.
+# ISOLATION  no - PROVIDED nothing is said without -v. A warning on a plain
+#            command would perturb every other fixture, and would itself be the
+#            finding.
+# FAILS IF   the service is missing, the load fails, or anything is printed
+#            without -v.
+name: RMSC gate unknown key
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: 55461
+rmscgate_not_a_real_key: this value has no meaning to either implementation

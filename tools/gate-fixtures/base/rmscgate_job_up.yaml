@@ -1,0 +1,39 @@
+# rmscgate_job_up - a job-name criterion that is genuinely active.
+#
+# EXERCISES  the alive branch of job lookup, and the upper-casing of a job name
+#            written in lower case.
+# UPSTREAM   RUNNING, criterion rendered JOBNAME:QP0ZSPWP.
+# RMSC       identical.
+# BASIS      measured for the rendering (JOBNAME:<text upper-cased>). The
+#            LIVENESS is structural rather than measured: QP0ZSPWP is the PASE
+#            job, and the command being compared is itself running in one - both
+#            sc and scr are launched from PASE. There is therefore always at
+#            least one active QP0ZSPWP, whatever else the machine is doing.
+# STAGING    none, but see FAILS IF - this fixture is self-referential on purpose
+#            because the harness can stage listeners and not jobs. A harness that
+#            can submit a batch job with a known name should prefer that.
+# ISOLATION  no.
+# FAILS IF   either side reports NOT RUNNING. Read that as the fixture being
+#            wrong (job lookup does not see the caller's own job) before reading
+#            it as a defect. If it renders JOBNAME:qp0zspwp, the upper-casing is
+#            gone and that IS a defect - it is on the byte-exact suffix path.
+# DUPLICATE  This criterion, JOBNAME:QP0ZSPWP, is shared with ONE other fixture,
+#            rmscgate_type_jobname. Both need a live job and QP0ZSPWP is the only
+#            one the pack can rely on, so the duplication is unavoidable; a third
+#            fixture that shared it, rmscgate_type_case, has been moved off it.
+#
+#            MEASURED, and the reason this is tolerable: with three services on
+#            this criterion, upstream emitted NO conflict warning - while warning
+#            immediately about two services sharing PORT:22. So upstream's
+#            check-alive conflict detection appears to cover PORT criteria and
+#            not JOBNAME ones. That rule is pinned by
+#            isolation/duplicate-criterion-job, which asks the question directly
+#            instead of inferring it from this pack's silence.
+#
+#            If that isolation case ever DOES warn, this pair is what must change,
+#            and the base pack would be perturbing every one of its own
+#            comparisons until it does. Check that case before reading a wrong
+#            row here as a job-lookup defect.
+name: RMSC gate job up
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: qp0zspwp

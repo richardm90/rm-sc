@@ -1,0 +1,20 @@
+# rmscgate_batch_bare - batch_mode written as a bare boolean.
+#
+# EXERCISES  'batch_mode: true'. Paired with rmscgate_batch_quoted, which writes
+#            the same intent as a quoted string. The plan records BOTH spellings
+#            in shipped definitions, so both have to mean the same thing.
+# UPSTREAM   loaded, batch mode ON. `info` reports it the same way it reports
+#            rmscgate_batch_quoted.
+# RMSC       identical.
+# BASIS      chosen, from the plan's key table ('Bare true and quoted 'true'
+#            both in use') and its case table.
+# STAGING    none - and note that nothing here starts anything. batch_mode only
+#            changes HOW a service is started; the pack never runs `start`.
+# ISOLATION  no.
+# FAILS IF   this fixture and rmscgate_batch_quoted report batch mode
+#            differently under `info`. Which of the two is wrong is then the
+#            question; that they differ is the defect.
+name: RMSC gate batch bare
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: rmscgatedeadbb
+batch_mode: true

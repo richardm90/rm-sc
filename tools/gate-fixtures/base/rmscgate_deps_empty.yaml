@@ -1,0 +1,18 @@
+# rmscgate_deps_empty - an empty inline flow sequence.
+#
+# EXERCISES  'service_dependencies: []' - a shipped form per the plan's case
+#            table, and the only place in the pack where YAML flow syntax
+#            appears. A reader handling only block sequences sees the two
+#            characters '[]' and could take them as a dependency named '[]'.
+# UPSTREAM   loaded, no dependencies, reported normally as NOT RUNNING.
+# RMSC       identical.
+# BASIS      chosen, from the plan's SCYAML case table.
+# STAGING    none.
+# ISOLATION  no.
+# FAILS IF   `info` shows a dependency, or the definition fails to load. A
+#            phantom dependency is not cosmetic: `start` resolves dependencies
+#            first and would fail on a service that does not exist.
+name: RMSC gate empty dependencies
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: rmscgatedeaddpe
+service_dependencies: []

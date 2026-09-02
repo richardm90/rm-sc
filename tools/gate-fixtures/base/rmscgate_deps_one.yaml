@@ -1,0 +1,22 @@
+# rmscgate_deps_one - one real dependency, on another fixture in the pack.
+#
+# EXERCISES  a dependency that RESOLVES. It names rmscgate_port_down, which is in
+#            this pack, so the graph is closed and owned by the repository -
+#            nothing here depends on a service the machine happens to have.
+# UPSTREAM   loaded; `info` names rmscgate_port_down as a dependency. The check
+#            row is an ordinary NOT RUNNING - dependencies order `start` and
+#            `stop`, they do not change status.
+# RMSC       identical.
+# BASIS      chosen, from the plan's key table.
+# STAGING    none.
+# ISOLATION  no - but it is the one fixture that is NOT self-contained. Installed
+#            without rmscgate_port_down its dependency dangles, and what either
+#            implementation does with an unresolvable dependency has not been
+#            measured. Install the base pack whole.
+# FAILS IF   the dependency is missing from `info`, or its presence changes the
+#            check row (status must not inherit from a dependency).
+name: RMSC gate one dependency
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: rmscgatedeaddp1
+service_dependencies:
+- rmscgate_port_down

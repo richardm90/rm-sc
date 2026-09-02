@@ -1,0 +1,19 @@
+# rmscgate_null_stop - a literal YAML null.
+#
+# EXERCISES  'stop_cmd: null' written out, which the plan's real-world case table
+#            records as a form actually shipped in a service definition. A reader
+#            that takes scalars as text sees the four characters 'null' and would
+#            try to run them as a command.
+# UPSTREAM   loaded; stop_cmd is absent, not the string 'null'. `info` shows no
+#            stop command, and `stop` would fall back to ENDJOB.
+# RMSC       identical.
+# BASIS      chosen, from the plan's SCYAML case table ('stop_cmd: null literal').
+#            The observable surface is `info`; nothing on the check row changes.
+# STAGING    none.
+# ISOLATION  no.
+# FAILS IF   `info` shows a stop command of 'null'. That is a live hazard rather
+#            than a cosmetic one - it is a command that would be executed.
+name: RMSC gate null stop command
+start_cmd: /QOpenSys/usr/bin/true
+stop_cmd: null
+check_alive: rmscgatedeadnull

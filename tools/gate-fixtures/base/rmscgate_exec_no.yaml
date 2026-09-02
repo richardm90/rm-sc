@@ -1,0 +1,24 @@
+# rmscgate_exec_no - only_if_executable naming something that does not exist.
+#
+# EXERCISES  the negative half. This is how upstream keeps a definition for
+#            software that is not installed from cluttering `check`, and
+#            docs/performance.md notes it is why the PGM- form has no reachable
+#            service on the box: its only definition is filtered out this way.
+# UPSTREAM   filtered out. No row, no entry in `list`, and no warning - a
+#            definition excluded by its own condition is not an error.
+# RMSC       identical.
+# BASIS      inferred, as for rmscgate_exec_yes.
+# STAGING    none. The path is invented and must stay non-existent; if anything
+#            ever creates /QOpenSys/rmscgate_no_such_binary this fixture is
+#            testing the opposite of what it says.
+# ISOLATION  no - as long as it stays SILENT. If it turns out to warn, it belongs
+#            in isolation/ instead, because the warning would ride along with
+#            every other comparison.
+# FAILS IF   the service appears in `list` or `check` (the condition is not
+#            applied), or anything is warned about (the condition is applied but
+#            reported as a failure, which changes every other comparison in the
+#            pack).
+name: RMSC gate only if executable no
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: 55459
+only_if_executable: /QOpenSys/rmscgate_no_such_binary

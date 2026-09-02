@@ -1,0 +1,20 @@
+# rmscgate_cycle_b - the other half of the cycle.
+#
+# Depends on rmscgate_cycle_a, which depends on this file. See rmscgate_cycle_a
+# for the full case; neither file means anything without the other, and installed
+# alone each is an ordinary definition with one unresolvable dependency.
+#
+# EXERCISES  the closing hop of the cycle.
+# UPSTREAM   named in the second line of upstream's hop list.
+# RMSC       see rmscgate_cycle_a.
+# BASIS      measured - docs/parity.md.
+# STAGING    none.
+# ISOLATION  YES.
+# FAILS IF   only one hop is reported - the cycle was detected but the path was
+#            not, which is the part upstream does better and the part that tells
+#            an operator which definition to edit.
+name: RMSC gate cycle B
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: rmscgatedeadcyb
+service_dependencies:
+- rmscgate_cycle_a

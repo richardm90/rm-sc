@@ -1,0 +1,21 @@
+# rmscgate_pgm_form - the PGM-xxx form of a criterion.
+#
+# EXERCISES  the PGM- spelling, which the plan's key table lists as a criterion
+#            form alongside port, job name and SBS/JOB.
+# UPSTREAM   NOT RUNNING, criterion JOBNAME:PGM-RMSCGNOPGM. There is NO PGM:
+#            label: the text is carried through as a job name, prefix and all.
+# RMSC       identical.
+# BASIS      measured - 'there is no PGM: form; PGM-X and SBS/JOB are both job
+#            names'. The program named does not exist, so the NOT RUNNING half
+#            of the expectation holds whether the implementation resolves PGM-
+#            by job name or by looking for jobs running that program. That is
+#            deliberate: this fixture pins the RENDERING, and declines to assert
+#            a matching rule nobody has measured.
+# STAGING    none.
+# ISOLATION  no.
+# FAILS IF   the criterion renders as PGM:RMSCGNOPGM, or the PGM- prefix is
+#            stripped leaving JOBNAME:RMSCGNOPGM. Either would be a divergence on
+#            the byte-exact suffix path.
+name: RMSC gate pgm form
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: PGM-RMSCGNOPGM

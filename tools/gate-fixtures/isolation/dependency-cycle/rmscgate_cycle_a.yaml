@@ -1,0 +1,33 @@
+# rmscgate_cycle_a - one half of a two-service dependency cycle.
+#
+# EXERCISES  cycle detection, and a difference docs/parity.md records that
+#            nothing in the repository can currently produce: upstream HAS cycle
+#            detection and reports it BETTER -
+#              Circular dependency detected in service definitions!!
+#            then one 'a (A) depends on ----> b (B)' line per hop, on stderr,
+#            exit 253. RMSC prints 'Dependency cycle involving <name>' to STDOUT
+#            *and* stderr, and exits 255.
+# UPSTREAM   as above: the hop list, stderr only, 253.
+# RMSC       one line on two streams, 255. A known difference on three axes at
+#            once - text, stream, and status - and the stream half is the same
+#            defect as open finding 4.
+# BASIS      measured, both sides (docs/parity.md, corrected 01/09/2026).
+# STAGING    none.
+# ISOLATION  YES.
+# FAILS IF   no cycle is detected at all - a depth-first walk with no visited set
+#            recurses until it runs out of stack, and on a real definition set
+#            that is a hang or an MCH escape rather than a message.
+# NOTE       WHEN the cycle is detected has not been measured. If it is only
+#            found while ordering a `start`, no read-only comparison reaches it,
+#            and this case needs a `start` - which the gate does not run, for the
+#            reasons fidelity-gate.sh gives. Establish that first: run `check`
+#            and `list` with this case installed and see whether either says
+#            anything. If they do not, the case is only reachable from
+#            SCLIFE.TEST-style lifecycle testing against services the suite owns,
+#            and these two files are exactly that - self-contained and owned by
+#            the pack.
+name: RMSC gate cycle A
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: rmscgatedeadcya
+service_dependencies:
+- rmscgate_cycle_b

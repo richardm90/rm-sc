@@ -1,0 +1,24 @@
+# rmscgate_info_reldir - a relative working directory.
+#
+# EXERCISES  'dir: .', which the plan records as a shipped form, together with a
+#            start_cmd relative to it. Two things ride on it: relative paths
+#            resolve against the YAML FILE's location, not the caller's current
+#            directory; and `info` shows the raw value upstream and a resolved
+#            one in RMSC - the fourth of the recorded info differences, and the
+#            only one this fixture is built to make visible.
+# UPSTREAM   `info` shows the working directory as written: '.'
+# RMSC       `info` shows it resolved - the directory the pack was installed in.
+#            UNDECIDED in docs/parity.md.
+# BASIS      measured (docs/parity.md records the resolved-vs-raw difference);
+#            the resolution rule is the plan's key table ('relative paths resolve
+#            against the YAML file's location').
+# STAGING    none.
+# ISOLATION  no.
+# FAILS IF   RMSC resolves it against the CALLER's working directory rather than
+#            the file's - run the comparison from two different directories and
+#            the answer must not move. A gate that always runs from one place
+#            cannot see that, which is why it is written down here.
+name: RMSC gate relative dir
+dir: .
+start_cmd: ./rmscgate-not-a-real-binary
+check_alive: rmscgatedeadrel

@@ -1,0 +1,19 @@
+# rmscgate_port_down - a port criterion with nothing listening.
+#
+# EXERCISES  the NOT RUNNING branch, and the negative half of the port lookup.
+#            Paired with rmscgate_port_up: on their own, either one passes for a
+#            probe that always answers the same way. Together they cannot.
+# UPSTREAM   NOT RUNNING, no suffix - only PARTIAL rows carry [not running at -->].
+#              check row:  '  NOT RUNNING        | rmscgate_port_down (RMSC gate port down) '
+# RMSC       identical.
+# BASIS      measured (the suffix rule); the rest is the documented tri-state.
+# STAGING    NONE, and this is an assertion rather than an absence: 55450-55469
+#            are the pack's known-dead range and the harness must never bind
+#            them. Confirm nothing is listening before the run.
+# ISOLATION  no.
+# FAILS IF   it reports RUNNING (something is on 55450, so the whole dead range
+#            is suspect), or a [not running at -->] suffix appears on a
+#            NOT RUNNING row.
+name: RMSC gate port down
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: 55450

@@ -1,0 +1,21 @@
+# rmscgate_sbsjob - the SBS/JOB form of a job criterion.
+#
+# EXERCISES  the subsystem-qualified job name. Upstream has no PGM: criterion
+#            type and no SBS: type either - SBS/JOB is a JOB NAME containing a
+#            slash, and renders as one.
+# UPSTREAM   NOT RUNNING, criterion JOBNAME:RMSCGSBS/RMSCGJOB.
+# RMSC       identical.
+# BASIS      measured - 'a criterion renders as PORT:<text> or JOBNAME:<text
+#            upper-cased>; there is no PGM: form, and SBS/JOB is a job name'.
+# STAGING    none, and deliberately so: both halves are invented, so the answer
+#            cannot depend on what subsystems this machine runs. The ALIVE side
+#            of this form is already covered by the gate's existing system-group
+#            service (QHTTPSVR/ADMIN1); what has never been covered is the
+#            rendering, which is what this pins.
+# ISOLATION  no.
+# FAILS IF   the slash is dropped or turned into a separate criterion (the count
+#            would be 2 rather than 1 wherever a count is shown), the criterion
+#            is labelled anything but JOBNAME:, or it reports RUNNING.
+name: RMSC gate subsystem job
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: RMSCGSBS/RMSCGJOB

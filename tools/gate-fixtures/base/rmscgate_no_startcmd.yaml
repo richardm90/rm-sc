@@ -1,0 +1,18 @@
+# rmscgate_no_startcmd - a definition with no start_cmd.
+#
+# EXERCISES  whether a key the plan marks 'Required' is required at LOAD time or
+#            only at START time. `check` never needs it.
+# UPSTREAM   EXPECTED loaded and reported normally, NOT RUNNING - start_cmd is
+#            needed to start a service, not to ask whether it is running.
+# RMSC       expected the same.
+# BASIS      INFERRED, and the weakest expectation in the pack. Upstream was not
+#            measured on this. If both implementations discard the definition,
+#            the inference was wrong and this file should be rewritten to assert
+#            that instead - it is NOT evidence of a defect. If they DISAGREE,
+#            that is the finding, whichever way round it falls.
+# STAGING    none.
+# ISOLATION  no. Should it turn out to produce a load warning, move it - a
+#            warning on every command is a perturbation.
+# FAILS IF   the two implementations differ on whether this service exists.
+name: RMSC gate no start command
+check_alive: 55462

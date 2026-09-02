@@ -1,0 +1,19 @@
+# rmscgate_hyphen-9 - hyphen and digit in the filename.
+#
+# EXERCISES  the character class in the filename filter. The regex allows
+#            [a-z\-_0-9]; every other fixture uses only letters and underscore,
+#            so a filter narrowed to those would still pass the whole pack.
+# UPSTREAM   loaded, short name 'rmscgate_hyphen-9', NOT RUNNING. The short name
+#            keeps both the hyphen and the digit, and `check rmscgate_hyphen-9`
+#            resolves it.
+# RMSC       identical.
+# BASIS      measured (the regex); the rest follows.
+# STAGING    none.
+# ISOLATION  no.
+# FAILS IF   it is missing from `list`, warned about as an unreadable filename,
+#            or reachable only under a name with the hyphen altered. Naming it by
+#            hand is part of the case - a specifier parser that splits on '-'
+#            would list it fine and fail to resolve it.
+name: RMSC gate hyphen and digit
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: 55455

@@ -1,0 +1,41 @@
+# rmscgate_dupjob_one - two services claiming the same JOB NAME criterion.
+#
+# EXERCISES  the SCOPE of upstream's check-alive conflict detection. The port
+#            case (isolation/duplicate-criterion) warns. Three base fixtures once
+#            shared JOBNAME:QP0ZSPWP and upstream said nothing about them at all,
+#            while warning about the port collision in the same run.
+#
+#            That silence is evidence, not proof, because those three did not all
+#            spell the criterion the same way - one wrote the job name plainly,
+#            two reached it through check_alive_criteria, one of those in mixed
+#            case. If the conflict map is keyed on the raw text rather than on
+#            the rendered criterion, they would not have collided for a reason
+#            that has nothing to do with job criteria being exempt.
+#
+#            This case removes that ambiguity. Both files below write the SAME
+#            job name in the SAME plain spelling, so they collide on any keying
+#            upstream could plausibly use. What comes back settles the rule.
+# UPSTREAM   EXPECTED silent - no conflict warning, both services reported
+#            normally as NOT RUNNING.
+#            If it DOES warn, the expected shape is the port case's, with the
+#            criterion given as 'JOBNAME:RMSCGATEDUPJOB'.
+# RMSC       silent either way - RMSC emits no conflict warning at all (measured).
+# BASIS      INFERRED, from the base pack's measured silence about a shared job
+#            criterion in a run where a shared port criterion warned immediately.
+#            The inference is exactly what this case exists to confirm or break,
+#            so a warning here is NOT a defect - it is the answer, and it makes
+#            work: rmscgate_job_up and rmscgate_type_jobname share
+#            JOBNAME:QP0ZSPWP in base/ and would then be perturbing every
+#            comparison in the pack, and would have to be reworked.
+# STAGING    none. A conflict between two definitions is decided when they are
+#            loaded; nothing needs to be alive for the question to be asked, and
+#            an invented job name keeps the answer independent of the machine.
+# ISOLATION  YES. If it warns, the warning appears on every command - which is
+#            the whole reason a duplicate belongs here and not in base/.
+# FAILS IF   nothing at all can be concluded: both services missing, or one of
+#            them silently dropped, means the duplicate was resolved by discarding
+#            a definition rather than by reporting it, and neither implementation
+#            should be doing that.
+name: RMSC gate duplicate job one
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: rmscgatedupjob

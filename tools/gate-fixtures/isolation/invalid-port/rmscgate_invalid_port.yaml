@@ -1,0 +1,35 @@
+# rmscgate_invalid_port - a port criterion whose value is not a number.
+#
+# EXERCISES  what happens when a definition LOADS cleanly and then cannot be
+#            evaluated. The distinction matters: this is not a parse failure and
+#            not a missing service, it is a third class, and it is reported at
+#            check time rather than at load time.
+# UPSTREAM   the definition loads. `check` then fails, on stderr:
+#              Invalid data for port number or job name criteria for service
+#              'RMSC gate invalid port': PORT:abc
+#            No row for this service, the trailing blank line is SUPPRESSED, and
+#            the exit status is 253 - the operational class, matching an unknown
+#            service and an unloadable definition (see tools/error-delivery-test.sh).
+# RMSC       expected to agree on the classification. Message TEXT is NOT part of
+#            the expectation: error-delivery-test.sh records that RMSC's wording
+#            deliberately does not match upstream yet. Compare stream, count,
+#            exit status, and the presence or absence of rows.
+# BASIS      measured, on sc 1.7.1, including the suppressed trailing blank and
+#            the 253.
+# STAGING    none.
+# ISOLATION  YES, and this is the strongest case in the pack for it. The failure
+#            is not confined to this service - it takes down the whole `check`.
+#            The control file beside it is how you SEE that: if
+#            rmscgate_control's row is also absent, the run aborted; if it is
+#            present, the failure was per-service. The measured note says 'no
+#            row, trailing blank suppressed', which reads as the whole run, and
+#            the control is here to confirm or refute that rather than assume it.
+# FAILS IF   exit 0 (an evaluation failure being reported as success), exit 255
+#            (misclassified as a usage failure), the message on STDOUT - which a
+#            column-parsing consumer reads and which is the exact defect
+#            error-delivery-test.sh exists to catch - or a row printed for a
+#            service whose criterion could not be evaluated.
+name: RMSC gate invalid port
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: port
+check_alive_criteria: abc

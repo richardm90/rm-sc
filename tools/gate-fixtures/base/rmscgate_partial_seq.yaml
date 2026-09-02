@@ -1,0 +1,37 @@
+# rmscgate_partial_seq - a genuine PARTIAL, written as a YAML sequence.
+#
+# EXERCISES  the PARTIAL branch, the [not running at -->] suffix, and the
+#            SEQUENCE spelling of check_alive (as against the comma-separated
+#            spelling in rmscgate_partial_multi).
+# UPSTREAM   PARTIAL (1/2), padded to 18, suffix appended after the row's
+#            trailing space:
+#              '  PARTIAL (1/2)      | rmscgate_partial_seq (RMSC gate partial sequence) [not running at -->JOBNAME:RMSCGATENOSEQJOB]'
+#            Port 22 is alive because the session arrived over SSH; the job name
+#            is invented and cannot be active.
+# RMSC       identical. parity.md records this as recently fixed - RMSC printed a
+#            bare PARTIAL with no count and no suffix, on the byte-exact path.
+# BASIS      measured (PARTIAL renders 'PARTIAL (alive/total)' padded to 18 then
+#            the suffix; job names are upper-cased in the criterion).
+# STAGING    none. Port 22/sshd is the project's sanctioned always-there fixture,
+#            and this is the fixture that keeps PARTIAL reachable when nothing
+#            can be staged.
+# ISOLATION  no.
+# FAILS IF   the count is missing or wrong, the suffix is absent, the job name is
+#            not upper-cased, or the sequence spelling yields one criterion
+#            instead of two (which would show as 1/1 or 0/1).
+# PORT 22 IS THIS FIXTURE'S ALONE.
+#            No other file in base/ may claim it. rmscgate_partial_multi used to,
+#            and upstream then warned about the conflicting definitions on every
+#            command, perturbing every other comparison in the pack. It now uses
+#            a staged port; see its header for the measured warning text.
+#            One residual hazard this cannot design away: port 22 is claimed by
+#            definitions OUTSIDE the pack too - upstream ships one for sshd. The
+#            pack is meant to be run with --ignore-globals, which puts those out
+#            of reach. If the conflict warning ever appears naming this fixture
+#            AND a service that is not in the pack, --ignore-globals was not in
+#            effect, and that is a harness fault rather than a fixture fault.
+name: RMSC gate partial sequence
+start_cmd: /QOpenSys/usr/bin/true
+check_alive:
+  - 22
+  - rmscgatenoseqjob

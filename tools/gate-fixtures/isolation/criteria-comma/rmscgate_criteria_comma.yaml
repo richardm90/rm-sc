@@ -1,0 +1,31 @@
+# rmscgate_criteria_comma - a comma inside check_alive_criteria.
+#
+# EXERCISES  the asymmetry between the two ways of writing criteria. check_alive
+#            splits on commas; check_alive_criteria does NOT. So this is one
+#            criterion whose value is the eleven characters '55437,55438', not
+#            two ports - and since that is not a number, it lands in the same
+#            invalid-port failure as rmscgate_invalid_port, by a different route.
+# UPSTREAM   the definition loads; `check` fails on stderr with
+#              Invalid data for port number or job name criteria for service
+#              'RMSC gate criteria comma': PORT:55437,55438
+#            no row, trailing blank suppressed, exit 253.
+# RMSC       expected to agree on stream, count and exit status; wording is not
+#            compared (see rmscgate_invalid_port).
+# BASIS      measured - 'the companion does not split on commas', plus the
+#            measured invalid-value behaviour it therefore falls into.
+# STAGING    NONE, and this is load-bearing: 55437 and 55438 are inside the
+#            staging range 55430-55449 but must be left UNBOUND. If the companion
+#            ever did split on commas, an implementation would find two live
+#            ports and report RUNNING - so the fixture would fail to detect the
+#            very change it exists to detect. Leave both ports dead.
+# ISOLATION  YES - same reason as rmscgate_invalid_port; the control beside it
+#            shows whether other rows survive.
+# FAILS IF   the service reports a status at all (the value was split, or coerced
+#            to a number by taking the text up to the comma - which would silently
+#            monitor port 55437 and ignore 55438), or the failure is classified
+#            differently from rmscgate_invalid_port's. The two are the same
+#            failure arriving by different doors and must not be told apart.
+name: RMSC gate criteria comma
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: port
+check_alive_criteria: 55437,55438

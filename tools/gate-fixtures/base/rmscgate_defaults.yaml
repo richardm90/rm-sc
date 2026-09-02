@@ -1,0 +1,22 @@
+# rmscgate_defaults - the smallest legal definition.
+#
+# EXERCISES  upstream's DEFAULTS, by omitting everything that has one. Paired
+#            with rmscgate_info_full, which sets the same keys explicitly: one
+#            fixture shows the values are read, the other shows what is supplied
+#            when they are not.
+# UPSTREAM   `info` reports startup_wait_time 60, stop_wait_time 45, and
+#            environment_is_inheriting_vars true.
+# RMSC       the same three defaults (SCDEF applies upstream's), subject to the
+#            recorded `info` layout differences.
+# BASIS      chosen, from the plan's key table and the Phase 2 description
+#            ('SCDEF - the definition record and upstream's defaults
+#            (startup_wait_time 60, stop_wait_time 45,
+#            environment_is_inheriting_vars true)').
+# STAGING    none.
+# ISOLATION  no.
+# FAILS IF   a default is 0, blank, or different between the two - a wait of 0
+#            would make `start` give up immediately and report a service that is
+#            merely slow as failed.
+name: RMSC gate defaults
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: rmscgatedeaddef

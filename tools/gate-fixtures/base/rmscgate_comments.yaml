@@ -1,0 +1,22 @@
+# rmscgate_comments - comments in the places real definitions carry them.
+#
+# EXERCISES  a header comment block, a whole-line comment between keys, and a
+#            trailing comment after a value. The plan's case table lists header
+#            comments as a shipped form; the trailing comment is the one that
+#            bites, because a reader taking the rest of the line as the value
+#            silently extends every value it touches.
+# UPSTREAM   loaded; the name is 'RMSC gate comments' with no trailing text, and
+#            the criterion is JOBNAME:RMSCGATEDEADCMT with nothing appended.
+# RMSC       identical.
+# BASIS      chosen, from the plan's SCYAML case table.
+# STAGING    none.
+# ISOLATION  no.
+# FAILS IF   a '#' or any comment text appears in the check row's parenthesised
+#            description or in a criterion. The description is on the byte-exact
+#            path and is what the consumer parses out of the parentheses.
+
+# a whole-line comment between the header and the first key
+name: RMSC gate comments   # a trailing comment after a value
+start_cmd: /QOpenSys/usr/bin/true
+# and another between two keys
+check_alive: rmscgatedeadcmt   # and one after the criterion

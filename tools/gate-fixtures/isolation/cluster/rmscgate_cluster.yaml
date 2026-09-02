@@ -1,0 +1,31 @@
+# rmscgate_cluster - a definition carrying the cluster key.
+#
+# EXERCISES  the one part of upstream's surface RMSC deliberately does not
+#            implement. The scope is 'full parity except cluster mode and nginx
+#            cluster.conf generation', and the plan's key table is explicit about
+#            HOW that exclusion must present itself: cluster is 'Parsed and
+#            rejected with a clear message - never silently ignored'.
+# UPSTREAM   accepts the key. Cluster mode is in scope upstream, so the service
+#            loads and is reported normally.
+# RMSC       must say so. A clear message; the definition not treated as an
+#            ordinary service. WHAT it says, on which stream, and with what exit
+#            status is not asserted here - none of it has been decided, and this
+#            fixture exists so that whatever RMSC does is VISIBLE rather than
+#            discovered by a user with a cluster definition on disk.
+# BASIS      chosen, from the plan's key table. Weakest basis in the pack, and
+#            deliberately so: upstream's own handling of the key was not measured
+#            and the shape of the definition below is a plausible minimum rather
+#            than a captured example. Read a difference here as a question about
+#            the fixture first.
+# STAGING    none.
+# ISOLATION  YES. If RMSC reports on it - which is what it is required to do -
+#            that report appears on every command, and would ride along with
+#            every other comparison in the pack.
+# FAILS IF   RMSC ignores the key SILENTLY and reports the service as ordinary.
+#            That is the specific failure the plan's wording forbids: a cluster
+#            definition treated as a plain service would be started as one, on
+#            every node, with none of the coordination the definition asked for.
+name: RMSC gate cluster
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: rmscgatedeadclu
+cluster: rmscgate_cluster_name

@@ -1,0 +1,19 @@
+# rmscgate_port_up - a port criterion with something actually listening.
+#
+# EXERCISES  the single-port form of check_alive, and the RUNNING branch of the
+#            status surface. Also the PORT/PORT_PLUS_1..8 environment derivation,
+#            which upstream applies only when check_alive is a single port.
+# UPSTREAM   RUNNING, criterion rendered PORT:55431.
+#              check row:  '  RUNNING            | rmscgate_port_up (RMSC gate port up) '
+# RMSC       identical - byte for byte, this is the format-critical surface.
+# BASIS      measured. A criterion renders as PORT:<text>; RUNNING/NOT RUNNING/
+#            PARTIAL is the tri-state in the plan's operation table.
+# STAGING    REQUIRED - a listener on TCP 55431 (IPv4).
+#            tools/gate-listen.py 55431, and wait for its READY line.
+# ISOLATION  no.
+# FAILS IF   either side says NOT RUNNING (the listener did not take, or port
+#            lookup is broken), or the criterion renders as anything but
+#            PORT:55431, or the row does not put | at column 22.
+name: RMSC gate port up
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: 55431

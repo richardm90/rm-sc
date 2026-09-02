@@ -1,0 +1,18 @@
+# rmscgate_dup_two - the second of two services claiming the same PORT criterion.
+#
+# Identical in every respect to rmscgate_dup_one except its filename and friendly
+# name. See that file for the full case, including the measured warning text; the
+# two are one fixture in two parts and are meaningless apart.
+#
+# EXERCISES  the same port, 55443, from a second definition.
+# UPSTREAM   named in the second line of the conflict warning; RUNNING; same job
+#            under `jobinfo` as rmscgate_dup_one.
+# RMSC       RUNNING, no warning.
+# BASIS      measured - see rmscgate_dup_one.
+# STAGING    REQUIRED - the same single listener on 55443 serves both.
+# ISOLATION  YES.
+# FAILS IF   this row and rmscgate_dup_one's differ in any way but the name, or
+#            this service is missing from the warning's list.
+name: RMSC gate duplicate two
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: 55443

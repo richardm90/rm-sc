@@ -1,0 +1,33 @@
+# rmscgate_group_system - a member of the group excluded by default.
+#
+# EXERCISES  the default --ignore-groups=system, which the plan records the
+#            client as relying on, and which nothing in the repository can
+#            currently demonstrate against a definition it owns.
+# UPSTREAM   ABSENT from a bare `check` and a bare `list`.
+#            PRESENT under -a / --all, as NOT RUNNING.
+#            'system' appears in `groups` output.
+# RMSC       identical.
+# BASIS      measured for the default exclusion (the plan: 'must exclude the
+#            system group'; on the live box the default check shows three
+#            services and -a shows 36). The 0-indented sequence spelling below is
+#            from the plan's case table - both 0- and 2-indented sequences are in
+#            use in shipped definitions, and rmscgate_group_two carries the other.
+# STAGING    none.
+# ISOLATION  no, but it DOES add 'system' to the pack's group list. Under
+#            --ignore-globals, docs/parity.md records upstream adding a built-in
+#            'system' group only when it read the globals - so with this fixture
+#            installed, 'system' is present because a definition declares it.
+#            Expect it in `groups` output on both sides and do not read it as a
+#            built-in leaking through.
+# FAILS IF   it shows up in a bare `check` (the default exclusion is gone - the
+#            client would see services it does not expect), or is still missing
+#            under -a (the exclusion is unconditional, and -a does not override
+#            it as it must).
+# NOTE       `check group:system` is deliberately NOT asserted here. Whether an
+#            explicitly named group beats the default ignore list has not been
+#            measured on 1.7.1, and a fixture must not smuggle in a guess.
+name: RMSC gate system group member
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: rmscgatedeadsys
+groups:
+- system

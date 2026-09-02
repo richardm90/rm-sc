@@ -1,0 +1,21 @@
+# rmscgate_control - a deliberately boring definition.
+#
+# EXERCISES  nothing on its own. It is installed beside each isolation case so
+#            that the case can be asked the question that makes it an isolation
+#            case: what happens to the OTHER services?
+# UPSTREAM   NOT RUNNING, one ordinary row:
+#              '  NOT RUNNING        | rmscgate_control (RMSC gate control) '
+#            followed by the trailing blank line every check prints.
+# RMSC       identical.
+# BASIS      measured (the row format is the byte-exact contract; the trailing
+#            blank is upstream's format, recorded in tools/error-delivery-test.sh
+#            and inside the captured baselines).
+# STAGING    none. 55460 is reserved for this file across every isolation case
+#            and must never be staged.
+# ISOLATION  it IS the isolation control - copy it into each case directory.
+# FAILS IF   this row is missing while the case's own fixture produced output.
+#            That is the finding, not an accident: it means the case aborted the
+#            whole run rather than affecting only itself.
+name: RMSC gate control
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: 55460

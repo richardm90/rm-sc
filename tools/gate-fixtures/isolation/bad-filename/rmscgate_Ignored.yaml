@@ -1,0 +1,26 @@
+# rmscgate_Ignored.yaml - an upper-case letter in the filename.
+#
+# EXERCISES  the filename filter's rejection path. Upstream's regex is
+#            ^([a-z\-_0-9]+)\.y[a]{0,1}ml$ - lower case ONLY - and a name that
+#            does not match is ignored WITH A WARNING. The single capital 'I' is
+#            the only thing wrong with this file; its contents are valid.
+# UPSTREAM   not loaded; a warning naming the file, on STDERR.
+# RMSC       not loaded. Stream is expected to DIFFER: docs/parity.md and
+#            tools/error-delivery-test.sh record RMSC writing load messages to
+#            STDOUT, as an open finding rather than a sanctioned difference. That
+#            is a defect on the format-critical surface - a non-row line among
+#            the rows - and this fixture reproduces it on demand instead of
+#            waiting for a machine to happen to hold a bad file.
+# BASIS      measured (the regex and the warn-vs-silent rule); the stream
+#            difference is the repository's own open finding 4.
+# STAGING    none.
+# ISOLATION  YES - the warning appears on every command, so every other
+#            comparison in the pack would carry it.
+# FAILS IF   a service named rmscgate_Ignored appears (the filter is
+#            case-insensitive, and definitions upstream cannot see are visible to
+#            RMSC - the same class of defect as the recursion one), or nothing is
+#            warned about at all (a rejected file that says nothing is
+#            indistinguishable from a file that was never installed).
+name: RMSC gate ignored filename
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: rmscgatedeadign

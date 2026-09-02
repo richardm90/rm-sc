@@ -1,0 +1,39 @@
+# rmscgate_dup_one - the first of two services claiming the same PORT criterion.
+#
+# EXERCISES  upstream's check-alive conflict detection, on a port. Real systems
+#            do this by accident - a definition copied and edited, the criterion
+#            not changed - and the two questions are whether anyone is told, and
+#            whether a service's jobs get attributed to its neighbour.
+# UPSTREAM   warns, naming EVERY service that shares the criterion:
+#              WARNING: the following services all have conflicting definitions
+#              for liveliness check 'PORT:55443':
+#                  rmscgate_dup_one (RMSC gate duplicate one)
+#                  rmscgate_dup_two (RMSC gate duplicate two)
+#            and does so on every command, not only on `check`.
+# RMSC       emits NO such warning. Measured, and one of the differences this
+#            pack settled on its first run.
+# BASIS      MEASURED, both sides - and measured by accident, which is worth
+#            recording. Two base fixtures shared PORT:22 when the pack was first
+#            installed and upstream warned about them on every comparison. That
+#            mistake produced the text above for free; the base collision has
+#            since been removed (see rmscgate_partial_multi) so that this case is
+#            once again the only place the behaviour appears.
+# STAGING    REQUIRED - a listener on TCP 55443 (IPv4), shared by both files:
+#              tools/gate-listen.py 55443
+#            The warning itself is a LOAD-time property and does not need the
+#            listener; the status half of the case does.
+# ISOLATION  YES, and now demonstrably so rather than by prediction: this is
+#            exactly the fixture whose warning rode along with every other
+#            comparison when the collision was in base/.
+# FAILS IF   upstream stops warning, or warns without naming both services (the
+#            list is what tells an operator which definition to edit); if RMSC
+#            starts warning, which would be the difference being fixed and needs
+#            docs/parity.md updated rather than a green tick; if only one of the
+#            two reports RUNNING, or one vanishes from `list` - a conflict that
+#            is reported and then also silently resolved by dropping a
+#            definition; or if `jobinfo` names different jobs for the two.
+#            rmscgate_control beside them shows whether the warning cost the
+#            other rows anything.
+name: RMSC gate duplicate one
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: 55443

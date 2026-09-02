@@ -1,0 +1,51 @@
+# rmscgate_info_full - every key that feeds `info`, in one definition.
+#
+# EXERCISES  the `info` surface, which docs/parity.md lists as the largest of the
+#            still-undecided formatting differences. Until now it could only be
+#            compared against whatever definitions a machine happened to hold,
+#            so the differences were observed rather than pinned; this definition
+#            reaches all four of them at once and is owned by the repository.
+#
+#            The four recorded differences it should reproduce:
+#              1. RMSC omits the 'Inherits environment variables?' and
+#                 'Custom environment variables:' block - which is why
+#                 environment_is_inheriting_vars and environment_vars are BOTH
+#                 set here, and set to the non-default value, so the block
+#                 cannot be empty.
+#              2. RMSC omits upstream's closing separator.
+#              3. RMSC adds a 'Group:' line upstream does not print - which is
+#                 why this definition carries a group.
+#              4. RMSC shows a resolved working directory where upstream shows
+#                 the raw one. This file uses an ABSOLUTE dir so the two agree;
+#                 rmscgate_info_reldir is the one that makes them differ.
+#            The 'Defined in:' path also differs, harmlessly, since both resolve
+#            to byte-identical copies of the same file.
+# UPSTREAM   prints all of the above.
+# RMSC       differs as listed - UNDECIDED in docs/parity.md, not a regression.
+# BASIS      measured (the four differences are docs/parity.md's own list); the
+#            key set is the plan's YAML key table.
+# STAGING    none.
+# ISOLATION  no.
+# FAILS IF   a value set here does not appear in `info` at all on either side - a
+#            key that is parsed and then dropped. Note this fixture is expected to
+#            DIFFER between the implementations; the gate should classify it
+#            'undecided', and a sudden match means the differences were fixed and
+#            docs/parity.md needs updating rather than a pass being recorded.
+name: RMSC gate info full
+dir: /QOpenSys
+start_cmd: /QOpenSys/usr/bin/true
+stop_cmd: /QOpenSys/usr/bin/true
+check_alive: rmscgatedeadinf
+startup_wait_time: 11
+stop_wait_time: 12
+log_dir: /tmp
+batch_mode: true
+sbmjob_jobname: RMSCGINFO
+sbmjob_opts: JOBQ(QSYS/QUSRNOMAX)
+environment_is_inheriting_vars: false
+environment_vars:
+- RMSCGATE_ONE=first
+- RMSCGATE_TWO=second value with spaces
+service_dependencies: []
+groups:
+- rmscgate_info

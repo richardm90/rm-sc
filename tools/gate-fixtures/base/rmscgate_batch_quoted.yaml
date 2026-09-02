@@ -1,0 +1,15 @@
+# rmscgate_batch_quoted - batch_mode written as a quoted string.
+#
+# EXERCISES  "batch_mode: 'true'". See rmscgate_batch_bare for the pairing.
+# UPSTREAM   loaded, batch mode ON - the quotes make it the string 'true', and it
+#            still means batch mode.
+# RMSC       identical.
+# BASIS      chosen, from the plan's key table and case table.
+# STAGING    none.
+# ISOLATION  no.
+# FAILS IF   `info` reports this service's batch mode differently from
+#            rmscgate_batch_bare's.
+name: RMSC gate batch quoted
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: rmscgatedeadbq
+batch_mode: 'true'

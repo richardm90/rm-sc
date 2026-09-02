@@ -1,0 +1,18 @@
+# rmscgate_yml_ext - the .yml extension.
+#
+# EXERCISES  the second half of upstream's filename filter,
+#            ^([a-z\-_0-9]+)\.y[a]{0,1}ml$ - which accepts .yml as well as .yaml.
+#            Every other fixture in the pack is .yaml, so nothing else can tell
+#            you whether .yml is read.
+# UPSTREAM   loaded, short name rmscgate_yml_ext, NOT RUNNING.
+# RMSC       identical.
+# BASIS      measured - the regex is upstream's, quoted in the task brief; the
+#            status follows from a dead port.
+# STAGING    none.
+# ISOLATION  no.
+# FAILS IF   the service is absent from `list` (the extension filter is
+#            .yaml-only), or present under the name 'rmscgate_yml_ext.yml' (the
+#            extension was not stripped from the short name).
+name: RMSC gate yml extension
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: 55454

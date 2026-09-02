@@ -1,0 +1,28 @@
+# rmscgate_word_port - check_alive: port with NO companion value.
+#
+# EXERCISES  the boundary of the type-and-value pairing. 'port' names a type only
+#            when check_alive_criteria is also present; on its own it is just
+#            text, and text that is not a number is a job name.
+# UPSTREAM   NOT RUNNING, criterion JOBNAME:PORT.
+# RMSC       identical - and this is the one case where RMSC's known handling of
+#            check_alive_criteria (treating it as an alias, see
+#            rmscgate_type_port) happens to give the right answer. Which is
+#            exactly why this fixture is not a substitute for that one.
+# BASIS      measured - 'check_alive: port alone means a job called PORT'.
+# STAGING    none.
+# ISOLATION  no.
+# FAILS IF   it renders PORT:<anything>, reports RUNNING, or is rejected at load
+#            time as an incomplete pair. All three would mean the pairing rule is
+#            being applied to a definition that never asked for it.
+# DUPLICATE  Watch for a LATENT collision with rmscgate_type_port. Upstream reads
+#            that file as PORT:55432 and this one as JOBNAME:PORT, so the two do
+#            not collide. Under RMSC's recorded check_alive_criteria handling,
+#            BOTH become JOBNAME:PORT - two services on one criterion, arriving
+#            not from how the pack was written but from the difference under test.
+#            Note what that collision would be: a JOB criterion, and RMSC emits no
+#            conflict warning at all (measured), so nothing would say so. It is
+#            listed here because a reader chasing an odd row in either fixture
+#            needs to know the two can converge.
+name: RMSC gate word port
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: port

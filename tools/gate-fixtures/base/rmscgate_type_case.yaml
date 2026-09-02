@@ -1,0 +1,30 @@
+# rmscgate_type_case - the type word in mixed case.
+#
+# EXERCISES  case-insensitivity of the TYPE word. The value is this fixture's
+#            OWN invented job name, so the assertion is self-contained: if
+#            'JobName' was recognised as a type, the criterion is the VALUE; if
+#            it was not, the word itself becomes the criterion.
+# UPSTREAM   NOT RUNNING, criterion JOBNAME:RMSCGATETYPECASE.
+# RMSC       expected to show the same divergence as rmscgate_type_port if the
+#            check_alive_criteria alias handling is still in place - reading
+#            check_alive = 'JobName' and building JOBNAME:JOBNAME.
+# BASIS      measured - the pair 'applies only when both are present and the
+#            first names a type (port or jobname, case-insensitive)'.
+# STAGING    none. Liveness is irrelevant here: the failure signature is the
+#            criterion TEXT, not the status, and a dead value shows it just as
+#            plainly while costing no listener.
+# ISOLATION  no.
+# FAILS IF   the criterion renders JOBNAME:JOBNAME - the type word is matched
+#            case-sensitively, 'JobName' fell through to being a job name, and
+#            the companion value was silently discarded. Compare against
+#            rmscgate_type_jobname, which writes the same type in lower case:
+#            the two must differ ONLY in the value they carry.
+# WAS        This fixture used to share rmscgate_type_jobname's live QP0ZSPWP
+#            criterion so their rows could be compared byte for byte. That was a
+#            crutch, and it put a third service on a criterion two others already
+#            held. Asserting the value directly is a stronger test and leaves the
+#            pack with one fewer duplicate.
+name: RMSC gate type case
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: JobName
+check_alive_criteria: rmscgatetypecase

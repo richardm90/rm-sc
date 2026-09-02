@@ -1,0 +1,26 @@
+# rmscgate_group_alpha - a single invented group, 0-indented sequence.
+#
+# EXERCISES  ordinary group membership and the group: specifier, against a group
+#            whose entire membership the pack owns. The gate's group comparisons
+#            have until now run against whatever groups the machine happened to
+#            have, so no test could say what SHOULD be in one.
+# UPSTREAM   'rmscgate_alpha' appears in `groups`, with exactly two members -
+#            this fixture and rmscgate_group_two. `check group:rmscgate_alpha`
+#            shows both, NOT RUNNING.
+# RMSC       identical. docs/parity.md records `list group:NAME` having printed
+#            nothing at all until recently, so the list form is worth running too.
+# BASIS      chosen - the group is invented, so its membership is whatever these
+#            two files say. That is the point: an expectation the repository owns
+#            rather than one the machine supplies.
+# STAGING    none.
+# ISOLATION  no. Its membership depends on rmscgate_group_two being installed
+#            alongside it - if you install this file alone, expect one member.
+# FAILS IF   the group is missing from `groups`, has the wrong membership, or
+#            `check group:rmscgate_alpha` warns 'No services are found in group'
+#            (measured: that warning goes to stderr with exit 0, and is correct
+#            only for a group with no members).
+name: RMSC gate group alpha
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: rmscgatedeadga
+groups:
+- rmscgate_alpha

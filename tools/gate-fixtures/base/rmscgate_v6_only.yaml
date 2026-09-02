@@ -1,0 +1,28 @@
+# rmscgate_v6_only - a port reachable over IPv6 ONLY.
+#
+# EXERCISES  the IPv6 fallthrough in port lookup, through a real definition and a
+#            real `check` rather than through a procedure call.
+#            docs/testing-notes.md records that branch being wrong from the day
+#            it was written and surviving review, because every service on a
+#            typical IBM i binds both families so the IPv4 probe always answered
+#            first. tools/gate-listen.py grew --v6only for this.
+# UPSTREAM   RUNNING, criterion PORT:55445.
+# RMSC       identical - via the fallthrough, not via the IPv4 probe.
+# BASIS      inferred. Upstream's own IPv6 handling was not measured; the
+#            expectation is that a listening socket is a listening socket. If the
+#            two implementations disagree HERE and agree on rmscgate_port_up,
+#            the difference is address-family handling and nothing else, which is
+#            the whole reason this fixture is separate.
+# STAGING    REQUIRED - an IPv6-ONLY listener on 55445:
+#              tools/gate-listen.py --v6only 55445
+#            Binding '::' without IPV6_V6ONLY takes the IPv4 port too and the
+#            fixture then proves nothing, which is the failure mode
+#            testing-notes.md describes at length.
+# ISOLATION  no.
+# FAILS IF   it reports NOT RUNNING while rmscgate_port_up reports RUNNING - the
+#            fallthrough is not being reached. Check first that the listener is
+#            genuinely v6-only, since a listener that quietly bound both families
+#            makes this fixture pass while proving nothing.
+name: RMSC gate IPv6 only
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: 55445

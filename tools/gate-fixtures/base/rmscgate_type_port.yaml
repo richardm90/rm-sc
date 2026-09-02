@@ -1,0 +1,31 @@
+# rmscgate_type_port - the type-and-value pair, port form.
+#
+# EXERCISES  check_alive naming a TYPE with check_alive_criteria supplying the
+#            VALUE. This is the highest-consequence fixture in the pack.
+# UPSTREAM   RUNNING, criterion PORT:55432.
+# RMSC       KNOWN DIFFERENCE, recorded in the plan's key table (corrected
+#            01/09/2026): RMSC has treated check_alive_criteria as an alternative
+#            SPELLING of check_alive, so it reads check_alive = 'port', cannot
+#            parse that as a port, and builds JOBNAME:PORT - reporting a live
+#            service as NOT RUNNING, silently. Measured on 1.7.1 with port 22:
+#            sc said RUNNING/PORT:22, scr said NOT RUNNING/JOBNAME:PORT.
+#            If this now matches, the difference is fixed and the plan's key
+#            table and docs/parity.md both need updating - do not simply record
+#            a pass.
+# BASIS      measured, both sides.
+# STAGING    REQUIRED - a listener on TCP 55432 (IPv4). Without it the fixture
+#            reports NOT RUNNING for BOTH implementations and the comparison
+#            agrees for the wrong reason, which is precisely the failure
+#            tools/gate-listen.py refuses to bind over.
+# ISOLATION  no.
+# FAILS IF   the criterion is not PORT:55432 on the upstream side (the pairing
+#            rule itself has moved, or the value 55432 was not read), or the two
+#            implementations agree while the recorded difference still stands in
+#            the docs.
+# DUPLICATE  See rmscgate_word_port: if RMSC still reads check_alive_criteria as
+#            an alias, this definition and that one land on the same criterion,
+#            silently.
+name: RMSC gate type port
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: port
+check_alive_criteria: 55432

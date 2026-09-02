@@ -1,0 +1,22 @@
+# rmscgate_criteria_ignored - a companion value with no type to attach to.
+#
+# EXERCISES  the other boundary of the pairing rule: check_alive_criteria is
+#            consumed ONLY when check_alive names a type. Here check_alive is a
+#            port number, so the companion has nothing to qualify and is dropped.
+# UPSTREAM   NOT RUNNING with exactly ONE criterion, PORT:55452. 55453 does not
+#            appear anywhere, in the row or in `info`.
+# RMSC       identical. Note that an implementation treating check_alive_criteria
+#            as an alias would land on PORT:55453 here - the wrong port, from the
+#            wrong key - so this fixture distinguishes the two readings without
+#            needing a listener.
+# BASIS      measured - 'it applies only when both are present AND the first
+#            names a type'.
+# STAGING    none. Both ports are in the known-dead range, so a stray listener on
+#            either would be visible as a RUNNING row.
+# ISOLATION  no.
+# FAILS IF   PORT:55453 appears, two criteria appear (a count of 2 wherever one
+#            is shown), or the definition is refused as contradictory.
+name: RMSC gate criteria ignored
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: 55452
+check_alive_criteria: 55453

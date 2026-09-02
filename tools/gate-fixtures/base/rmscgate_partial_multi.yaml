@@ -1,0 +1,36 @@
+# rmscgate_partial_multi - PARTIAL with TWO dead criteria, comma-separated.
+#
+# EXERCISES  the comma-separated spelling of check_alive; a mixed port + job
+#            criterion list; and the separator and ORDER inside the suffix, which
+#            a one-item suffix cannot show.
+# UPSTREAM   PARTIAL (1/3) with both dead criteria listed, in definition order,
+#            separated by ', ':
+#              '  PARTIAL (1/3)      | rmscgate_partial_multi (RMSC gate partial multi) [not running at -->PORT:55451, JOBNAME:RMSCGATENOMULTI]'
+# RMSC       identical.
+# BASIS      measured - the suffix form '[not running at -->PORT:1, JOBNAME:X]'
+#            was observed on sc 1.7.1.
+# STAGING    REQUIRED - a listener on TCP 55433 (IPv4):
+#              tools/gate-listen.py 55433
+#            Without it the row is NOT RUNNING (0/3) on both sides, no suffix is
+#            printed, and the fixture silently stops testing the thing it is for.
+# ISOLATION  no.
+# FAILS IF   the two dead criteria are joined by anything but ', ', are emitted
+#            in the wrong order, or one of them is dropped; or if the comma
+#            spelling produces a single criterion (count would read 0/1 or 1/1).
+# WHY 55433  This fixture used PORT:22, and so does rmscgate_partial_seq, which
+#            made the base pack collide with itself: upstream emits
+#              WARNING: the following services all have conflicting definitions
+#              for liveliness check 'PORT:22':
+#            naming both, on EVERY command - so every other comparison in the
+#            pack carried it, and isolation/duplicate-criterion could no longer
+#            show anything the base pack was not already showing. A staged port
+#            costs one listener and removes the collision outright.
+#
+#            THE RULE THAT FOLLOWS: exactly ONE fixture in base/ may claim
+#            PORT:22, and it is rmscgate_partial_seq. Anything else needing a
+#            live port takes a staged one. The two PARTIAL fixtures were chosen
+#            to sit either side of that line deliberately - if staging is ever
+#            unavailable, rmscgate_partial_seq still proves PARTIAL works.
+name: RMSC gate partial multi
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: 55433,55451,rmscgatenomulti

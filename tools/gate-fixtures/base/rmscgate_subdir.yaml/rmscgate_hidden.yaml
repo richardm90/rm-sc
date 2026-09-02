@@ -1,0 +1,26 @@
+# rmscgate_hidden - a perfectly good definition inside a subdirectory.
+#
+# The subdirectory is named 'rmscgate_subdir.yaml' on purpose: its NAME matches
+# the filename regex, so an implementation that checks the name before checking
+# whether the entry is a directory will try to parse a directory as YAML.
+#
+# EXERCISES  the corrected discovery rule. Upstream does NOT recurse -
+#            YamlServiceDefLoader.loadFromDirectory skips directories outright
+#            ('if (f.isDirectory()) { continue; }') and reaches the definitions
+#            under system/ and oss_common/ by naming those paths. docs/parity.md
+#            records RMSC having recursed generally, finding definitions upstream
+#            cannot see, and calls that as much a parity defect as missing some -
+#            and the harder one to notice, since nothing looks absent.
+# UPSTREAM   neither rmscgate_subdir nor rmscgate_hidden appears anywhere, and
+#            nothing is warned about.
+# RMSC       identical, since discovery was corrected to read each directory flat.
+# BASIS      measured - upstream's loader source, quoted in docs/parity.md.
+# STAGING    none.
+# ISOLATION  no.
+# FAILS IF   rmscgate_hidden appears in `list` (recursion is back), or anything
+#            warns about rmscgate_subdir.yaml (a directory is being opened as a
+#            file). The second failure is worth separating from the first: it
+#            means the name test runs before the directory test.
+name: RMSC gate hidden in a subdirectory
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: 55457

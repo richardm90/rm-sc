@@ -1,0 +1,32 @@
+# rmscgate_malformed - a file that will not parse.
+#
+# EXERCISES  the load-failure path, on demand. tools/error-delivery-test.sh
+#            already stages a broken definition through SC_SERVICES_DIR for
+#            exactly this reason, and says why: 'it only appears on a system that
+#            happens to hold a broken definition. A plain assertion would pass on
+#            a clean box and fail on a dirty one - the machine deciding the
+#            verdict, which is the worst kind of test.'
+# UPSTREAM   the file is rejected; a message naming it goes to STDERR; the rest
+#            of the directory still loads, so rmscgate_control still reports.
+#            An operation that was going to fail anyway still fails with its own
+#            status - a load warning must not change the classification.
+# RMSC       rejects it too, but writes the message to STDOUT. That is open
+#            finding 4 in tools/error-delivery-test.sh, and it is a defect rather
+#            than a sanctioned difference: a non-row line on the stream a
+#            column-parsing consumer reads.
+# BASIS      measured for the stream difference (the repository's own finding);
+#            the content below is invalid YAML three separate ways - an unclosed
+#            flow sequence, a literal tab used for indentation, and a stray
+#            quote - so no reader can accept it by being lenient about one of them.
+# STAGING    none.
+# ISOLATION  YES. The message appears on every command, and on the RMSC side it
+#            appears on stdout, in the middle of `check` output.
+# FAILS IF   the file loads (nothing is reported and no service appears - a
+#            reader that silently discards what it cannot parse is worse than one
+#            that fails, because the definition is gone with nobody told), or
+#            rmscgate_control's row disappears (one bad file taking out the whole
+#            directory), or the exit status of an otherwise-successful command
+#            changes because of it.
+name: RMSC gate malformed
+check_alive: [55440
+	bad: 'tab indented and unbalanced

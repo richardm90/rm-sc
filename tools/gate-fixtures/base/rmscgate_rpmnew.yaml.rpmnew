@@ -1,0 +1,25 @@
+# rmscgate_rpmnew.yaml.rpmnew - the silent exception to the filename rule.
+#
+# EXERCISES  the one filename that fails the regex and is ignored WITHOUT a
+#            warning. This is a real situation, not a contrivance: `yum update`
+#            drops .rpmnew beside a service definition it did not overwrite, and
+#            a warning for every one of them on every command would be noise.
+# UPSTREAM   ignored, silently. No service, no warning, on either stream.
+# RMSC       identical.
+# BASIS      measured - 'a name that does not match is ignored with a warning,
+#            except one ending rpmnew which is ignored silently'.
+# STAGING    none.
+# ISOLATION  no - and that is the point. It is the only rejected-filename case
+#            that can live in the main pack, because it is the only one that adds
+#            no output. If it ever starts warning, every other comparison in the
+#            pack picks up an extra line and the perturbation shows up as a
+#            wholesale failure rather than as one row.
+# FAILS IF   a service named rmscgate_rpmnew (or rmscgate_rpmnew.yaml) appears in
+#            `list`, or any line on either stream mentions this filename.
+# NOTE       This fixture asserts an ABSENCE, so it cannot prove it was ever
+#            installed. Install it together with rmscgate_badname (isolation),
+#            whose warning proves the same directory is being scanned - or check
+#            that the file arrived.
+name: RMSC gate rpmnew
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: 55456

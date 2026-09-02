@@ -1,0 +1,21 @@
+# rmscgate_exec_yes - only_if_executable naming something that IS executable.
+#
+# EXERCISES  the positive half of only_if_executable. Paired with
+#            rmscgate_exec_no: an implementation ignoring the key entirely passes
+#            this one, and an implementation dropping every definition that
+#            carries the key passes the other. Only the pair pins the behaviour.
+# UPSTREAM   loaded and reported normally, NOT RUNNING.
+# RMSC       identical.
+# BASIS      inferred from the key's purpose, as recorded in the plan's key table
+#            and in docs/performance.md - it is what keeps upstream's oss_common
+#            services out of `check` on a machine where their binaries are not
+#            installed.
+# STAGING    none. /QOpenSys/usr/bin/sh is present on every IBM i with PASE, and
+#            is chosen over anything package-installed for that reason.
+# ISOLATION  no.
+# FAILS IF   the service is absent - the key is being read as 'drop this
+#            definition' rather than as a condition, or the path test is wrong.
+name: RMSC gate only if executable yes
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: 55458
+only_if_executable: /QOpenSys/usr/bin/sh

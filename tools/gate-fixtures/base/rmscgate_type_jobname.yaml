@@ -1,0 +1,32 @@
+# rmscgate_type_jobname - the type-and-value pair, jobname form.
+#
+# EXERCISES  the other half of the pairing rule. Without it, an implementation
+#            could pass rmscgate_type_port by special-casing the literal word
+#            'port' and never implement the rule at all.
+# UPSTREAM   RUNNING, criterion JOBNAME:QP0ZSPWP.
+# RMSC       expected to show the same divergence as rmscgate_type_port if the
+#            alias handling is still in place - reading check_alive = 'jobname'
+#            and building JOBNAME:JOBNAME, which is not active, so NOT RUNNING.
+# BASIS      measured for the pairing rule and the rendering. Liveness rests on
+#            QP0ZSPWP being the PASE job the comparison itself runs in - see
+#            rmscgate_job_up for why that is dependable and what it costs.
+# STAGING    none.
+# ISOLATION  no.
+# FAILS IF   the upstream side renders JOBNAME:JOBNAME (the companion was not
+#            read), or renders PORT:QP0ZSPWP (the type word was ignored and the
+#            value guessed at).
+# DUPLICATE  Shares JOBNAME:QP0ZSPWP with rmscgate_job_up, and with nothing else -
+#            see that file for the measurement that makes a shared JOBNAME
+#            criterion safe where a shared PORT criterion is not, and for the
+#            isolation case that pins it.
+#
+#            Why this fixture keeps the live job while rmscgate_type_case gave it
+#            up: the headline consequence of the recorded alias handling is 'a
+#            live service reported as stopped, silently'. That is visible on the
+#            check ROW only if the service is genuinely alive. With a dead value
+#            the difference retreats into the criterion text, which shows up only
+#            in `info` - already a differing surface, where it would be buried.
+name: RMSC gate type jobname
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: jobname
+check_alive_criteria: qp0zspwp

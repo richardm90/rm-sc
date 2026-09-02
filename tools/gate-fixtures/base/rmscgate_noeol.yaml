@@ -1,0 +1,21 @@
+# rmscgate_noeol - a file with NO trailing newline.
+#
+# EXERCISES  the last line of a file that does not end in a newline. The plan
+#            records a shipped definition in exactly this state, and a reader
+#            that only commits a line when it sees the terminator drops the
+#            final key - here check_alive, which is required, so the service
+#            either vanishes or loses its criterion.
+# UPSTREAM   loaded, criterion JOBNAME:RMSCGATEDEADEOL, NOT RUNNING.
+# RMSC       identical.
+# BASIS      chosen, from the plan SCYAML case table (mapepire.yaml ships without
+#            a trailing newline).
+# STAGING    none.
+# ISOLATION  no.
+# FAILS IF   the service is missing, or present with no criterion. Beware of
+#            editors and copy steps: `cp` preserves the missing newline, but an
+#            editor that saves with one silently repairs the fixture and it then
+#            tests nothing. Verify after installing:
+#              tail -c1 rmscgate_noeol.yaml | od -c    # must NOT be \\n
+name: RMSC gate no trailing newline
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: rmscgatedeadeol

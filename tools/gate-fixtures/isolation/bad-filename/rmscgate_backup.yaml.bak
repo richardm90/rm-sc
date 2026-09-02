@@ -1,0 +1,23 @@
+# rmscgate_backup.yaml.bak - an editor backup left in the services directory.
+#
+# EXERCISES  the same rejection path through the EXTENSION rather than the case:
+#            the name must END in .yaml or .yml, so a trailing .bak fails the
+#            regex. Kept beside rmscgate_Ignored because the two failures are
+#            reported the same way but reached differently, and because this one
+#            is what actually happens on a real machine - somebody edits a
+#            definition in place and leaves the backup behind.
+# UPSTREAM   not loaded; warned about, on stderr. Contrast rmscgate_rpmnew.yaml.rpmnew
+#            in the base pack, which is the ONE non-matching name that is ignored
+#            SILENTLY - the two together pin that the silent exception is narrow.
+# RMSC       not loaded; stream expected to differ as above.
+# BASIS      measured (the regex, and the rpmnew exception being the only silent
+#            one).
+# STAGING    none.
+# ISOLATION  YES, with the rest of this case.
+# FAILS IF   it loads, or it is ignored silently - the silent path is reserved
+#            for rpmnew, and widening it would hide genuinely misnamed
+#            definitions, which is exactly how a service goes missing with
+#            nobody told.
+name: RMSC gate backup file
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: rmscgatedeadbak

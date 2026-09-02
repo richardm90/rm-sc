@@ -1,0 +1,24 @@
+# rmscgate_group_two - two groups, 2-indented sequence.
+#
+# EXERCISES  multiple group membership, and the 2-indented sequence spelling.
+#            The plan records both indentations in shipped definitions
+#            ('Both 0-indented and 2-indented sequences in use'), and
+#            rmscgate_group_alpha carries the 0-indented one, so the pair pins
+#            that the two spellings are read alike.
+# UPSTREAM   this service appears under BOTH rmscgate_alpha and rmscgate_beta in
+#            `groups`; it is the only member of rmscgate_beta.
+# RMSC       identical.
+# BASIS      chosen (invented groups); the indentation forms come from the plan's
+#            case table.
+# STAGING    none.
+# ISOLATION  no.
+# FAILS IF   only the first group is read (rmscgate_beta missing), or the
+#            2-indented sequence is read as one scalar - which would show as a
+#            single group literally named '- rmscgate_alpha - rmscgate_beta' or
+#            as no groups at all.
+name: RMSC gate group two
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: rmscgatedeadgt
+groups:
+  - rmscgate_alpha
+  - rmscgate_beta

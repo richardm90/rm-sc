@@ -1,0 +1,17 @@
+# rmscgate_dupjob_two - the other half of the job-criterion duplicate.
+#
+# Identical to rmscgate_dupjob_one except its filename and friendly name, and
+# deliberately so: the job name is written in the same plain spelling, so the two
+# collide however upstream keys its conflict map. See rmscgate_dupjob_one for the
+# full case.
+#
+# EXERCISES  the same criterion, JOBNAME:RMSCGATEDUPJOB, from a second definition.
+# UPSTREAM   expected silent; if it warns, this service must be named in the list.
+# RMSC       silent.
+# BASIS      inferred - see rmscgate_dupjob_one.
+# STAGING    none.
+# ISOLATION  YES.
+# FAILS IF   the two rows differ in anything but the name.
+name: RMSC gate duplicate job two
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: rmscgatedupjob

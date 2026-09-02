@@ -1,0 +1,32 @@
+# rmscgate_adhoc_port - a DEFINED service carrying the port an ad-hoc specifier
+# will be asked about.
+#
+# EXERCISES  the specifier difference docs/parity.md records and the gate cannot
+#            currently see, because it only ever exercises defined services by
+#            name. Run BOTH implementations as:
+#              sc  check port:55444        /  scr check port:55444
+#            as well as by name, and compare all four.
+# UPSTREAM   matches the specifier to this DEFINITION, because it carries 55444
+#            as a criterion, and reports it under its real name with this
+#            definition's jobs:
+#              '  RUNNING            | rmscgate_adhoc_port (RMSC gate ad hoc port) '
+# RMSC       always treats port:N as ad hoc, and names it differently:
+#              '  RUNNING            | port:55444 (ad hoc port 55444) '
+#            against upstream's ad-hoc naming, which is
+#              '  RUNNING            | ad_hoc_port_55444 (Ad hoc service running at port 55444) '
+#            Both halves of that - the resolution rule and the ad-hoc naming -
+#            are recorded as undecided in docs/parity.md, and both are on the
+#            byte-exact check path.
+# BASIS      measured for the ad-hoc naming (the parity.md capture, with 445
+#            substituted); the resolution rule is upstream's documented
+#            behaviour as recorded there.
+# STAGING    REQUIRED - a listener on TCP 55444 (IPv4). Without it both sides
+#            report NOT RUNNING and the naming difference is still visible, but
+#            'with all of that definition's jobs' is not.
+# ISOLATION  no - but note it is the only fixture claiming 55444, so nothing else
+#            in the pack can be confused with it.
+# FAILS IF   run only by name. By name alone this is an ordinary RUNNING row and
+#            proves nothing; the fixture exists for the port: specifier.
+name: RMSC gate ad hoc port
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: 55444
