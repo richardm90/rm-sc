@@ -64,9 +64,14 @@ dcl-proc SCCOLL_init export;
   end-pi;
 
   dcl-ds def likeds(SCDEF_t);
+  dcl-s  key like(SCCOLL_KEY_t);
 
   clear coll;
-  coll.list = LIST_create('SCCOLL': %size(def));
+
+  // Keyed on the short name in UTF-8, so LIST_sort_by_key - which compares
+  // the key as raw bytes - orders the collection exactly as upstream's
+  // TreeMap does.
+  coll.list = LIST_create('SCCOLL': %size(def): %size(key));
 
 end-proc;
 
@@ -120,6 +125,7 @@ dcl-proc SCCOLL_load_dir export;
   dcl-s filename like(IFS_DIR_FILENAME_t);
   dcl-s path     like(STMF_t);
   dcl-s rrn      like(INTEGER_t);
+  dcl-s key      like(SCCOLL_KEY_t);
   dcl-ds def     likeds(SCDEF_t);
 
   handle = IFS_opendir(dir);
@@ -169,18 +175,27 @@ dcl-proc SCCOLL_load_dir export;
     // each directory with putAll. Skipping the later one instead would let
     // the global copy win, which is the opposite of what a user directory
     // is for, and is invisible until two directories define the same name.
+    key = def.short_name;
+
     rrn = find_rrn(coll: def.short_name);
     if rrn > 0;
-      LIST_update_by_rrn(coll.list: rrn: %addr(def));
+      LIST_update_by_rrn(coll.list: rrn: %addr(def): %addr(key));
       iter;
     endif;
 
-    LIST_add(coll.list: %addr(def));
+    LIST_add(coll.list: %addr(def): %addr(key));
     coll.count += 1;
 
   enddo;
 
   IFS_closedir(handle);
+
+  // Sorted here rather than after the whole search path, so the collection is
+  // ordered at every point a caller could look at it - which is what a
+  // TreeMap gives upstream for free. It also means a definition read from a
+  // later directory lands in its place rather than on the end.
+  LIST_sort_by_key(coll.list);
+
   return true;
 
 end-proc;
@@ -331,11 +346,12 @@ dcl-proc SCCOLL_groups export;
     groups likeds(SCCOLL_GROUPS_t);
   end-pi;
 
-  dcl-ds def likeds(SCDEF_t);
-  dcl-s i    like(INTEGER_t);
-  dcl-s j    like(INTEGER_t);
-  dcl-s k    like(INTEGER_t);
-  dcl-s seen like(BOOLEAN_t);
+  dcl-ds def  likeds(SCDEF_t);
+  dcl-s i     like(INTEGER_t);
+  dcl-s j     like(INTEGER_t);
+  dcl-s k     like(INTEGER_t);
+  dcl-s seen  like(BOOLEAN_t);
+  dcl-s swap  like(SCDEF_NAME_t);
 
   clear groups;
 
@@ -358,6 +374,20 @@ dcl-proc SCCOLL_groups export;
         groups.name(groups.count) = def.groups(j);
       endif;
     endfor;
+  endfor;
+
+  // Sorted by the same rule the collection itself is sorted by. Group names
+  // are not held in a list, so they cannot ride on a UTF-8 key - but the
+  // question asked is identical, and asking it in one place is what stops the
+  // two drifting. An insertion sort: a collection has a handful of groups.
+  for i = 2 to groups.count;
+    swap = groups.name(i);
+    j = i - 1;
+    dow j >= 1 and SCCOLL_sorts_before(swap: groups.name(j));
+      groups.name(j + 1) = groups.name(j);
+      j -= 1;
+    enddo;
+    groups.name(j + 1) = swap;
   endfor;
 
   return groups.count;
@@ -474,5 +504,28 @@ dcl-proc in_order;
   endfor;
 
   return false;
+
+end-proc;
+
+//==============================================================================
+// SCCOLL_sorts_before
+//   The application's one ordering rule
+//==============================================================================
+
+dcl-proc SCCOLL_sorts_before export;
+  dcl-pi *n like(BOOLEAN_t);
+    a_name like(SCDEF_NAME_t) const;
+    b_name like(SCDEF_NAME_t) const;
+  end-pi;
+
+  dcl-s a_utf like(SCCOLL_KEY_t);
+  dcl-s b_utf like(SCCOLL_KEY_t);
+
+  // Assigning into a ccsid(*utf8) field converts, and comparing two of them
+  // compares UTF-8 bytes - which is code-point order, and so upstream's.
+  a_utf = a_name;
+  b_utf = b_name;
+
+  return (a_utf < b_utf);
 
 end-proc;

@@ -380,10 +380,14 @@ dcl-proc SCEXEC_groups export;
     endif;
   endif;
 
-  // Alphabetical, as upstream lists them
+  // Alphabetical as upstream lists them - and by the SAME rule the collection
+  // is sorted by, not a native comparison. A native '<' compares EBCDIC, where
+  // a group named web2 sorts AFTER webserver while upstream puts it first.
+  // Measured: three groups declared ax, 9x, __x came back 9x, _x, ax from
+  // upstream and _x, ax, 9x from here.
   for i = 1 to groups.count - 1;
     for j = i + 1 to groups.count;
-      if groups.name(j) < groups.name(i);
+      if SCCOLL_sorts_before(groups.name(j): groups.name(i));
         swap = groups.name(i);
         groups.name(i) = groups.name(j);
         groups.name(j) = swap;

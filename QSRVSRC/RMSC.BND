@@ -106,4 +106,6 @@ STRPGMEXP PGMLVL(*CURRENT) SIGNATURE('RMSC 0.1.0')
   /* A criterion that cannot be used, as opposed to one that is not satisfied */
   EXPORT SYMBOL(SCOUT_invalid_criteria)
   EXPORT SYMBOL(SCDEF_criterion_usable)
+  /* The one ordering rule - code point, as upstream sorts */
+  EXPORT SYMBOL(SCCOLL_sorts_before)
 ENDPGMEXP

@@ -57,6 +57,35 @@ dcl-ds SCCOLL_GROUPS_t qualified template inz;
 end-ds;
 
 ///
+// The collection's sort key: a service's short name, held in UTF-8.
+//
+// UTF-8 because the byte order of UTF-8 IS code-point order, and code-point
+// order is what upstream sorts by - its collection is a TreeMap keyed on the
+// short name with natural String ordering. The job CCSID would not do: in
+// EBCDIC lowercase letters sort before digits, so '9x' and 'ax' come back the
+// wrong way round, measured on the box. A name made only of letters sorts the
+// same either way, which is how this went unnoticed.
+//
+// 64 bytes because a short name comes from a filename, which upstream's rule
+// confines to [a-z0-9_-] - one byte each in UTF-8.
+///
+
+dcl-s SCCOLL_KEY_t char(64) ccsid(*utf8) template;
+
+///
+// Does the first name sort before the second, the way upstream orders them?
+//
+// The one ordering rule in the application. Services get it from the UTF-8
+// key their list is sorted on; anything not held in a list - the group names -
+// asks here, so both answer the same question the same way.
+///
+
+dcl-pr SCCOLL_sorts_before like(BOOLEAN_t);
+  a_name like(SCDEF_NAME_t) const;
+  b_name like(SCDEF_NAME_t) const;
+end-pr;
+
+///
 // Initialise a collection, ready to be loaded into.
 //
 // MUST be called before SCCOLL_load_dir. RPG's likeds() copies a template's
@@ -152,8 +181,11 @@ end-pr;
 // Resolve a service and its dependencies into start order, dependencies
 // first.
 //
-// Detects cycles and reports them. Upstream recurses with no visited set and
-// overflows its stack on a cyclic definition; RMSC names the cycle instead.
+// Detects cycles and reports them. So does upstream, and better: measured on
+// sc 1.7.1 it prints 'Circular dependency detected in service definitions!!'
+// then one line per hop naming both ends, on stderr, exiting 253. RMSC names
+// one service. The wording difference is recorded in docs/parity.md; what
+// matters here is that neither falls into the cycle.
 //
 // @param the collection
 // @param the service to resolve
