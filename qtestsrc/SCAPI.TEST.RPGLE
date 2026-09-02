@@ -125,6 +125,51 @@ dcl-proc test_ignore_groups export;
 end-proc;
 
 //==============================================================================
+// DERIVED, not measured - a trailing comma in ignore_groups changes nothing
+//
+// ignore_groups is the same comma-separated list shape that abends (RNX0100)
+// on a trailing comma elsewhere, and it reaches a SECOND copy of that splitter
+// - the copy that was not fixed when the first one was. That is the entire
+// basis for this test: the same six lines, so presumed the same defect. It was
+// not measured, because the bound-call API has no upstream counterpart to
+// measure it against.
+//
+// The CONTROL runs first, and it is what gives the real assertion any force.
+// 'system' has to actually exclude something, or the comparison below is two
+// identical no-ops agreeing with each other - the shape of assertion
+// CLAUDE.md records as having hidden three defects here already. It also runs
+// first because an abend ends the procedure where it happens.
+//
+// 'system,' is compared against 'system' rather than against the default, so
+// that nothing here assumes what the default ignore list contains.
+//
+// Like test_ignore_groups above, this needs the system group to be populated
+// on the box. If it is not, this suite has larger problems than a comma, and
+// failing rather than skipping is the right answer.
+//==============================================================================
+
+dcl-proc test_ignore_groups_trailing_comma export;
+
+  dcl-ds sys_list   likeds(LIST_t) inz(*likeds);
+  dcl-ds all_list   likeds(LIST_t) inz(*likeds);
+  dcl-ds trail_list likeds(LIST_t) inz(*likeds);
+
+  // CONTROL, and first on purpose - 'system' must exclude something for the
+  // assertion below to be capable of failing
+  sys_list = SC_check_all('system');
+  all_list = SC_check_all('');
+  assert((sys_list.num_rows < all_list.num_rows):
+         'ignoring system leaves out at least one service');
+
+  // The defect - the same list, one trailing comma
+  trail_list = SC_check_all('system,');
+
+  iEqual(sys_list.num_rows: trail_list.num_rows:
+         'a trailing comma is the same list, so the same services');
+
+end-proc;
+
+//==============================================================================
 // SC_check fills one row
 //==============================================================================
 

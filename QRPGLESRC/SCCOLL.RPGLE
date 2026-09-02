@@ -569,7 +569,17 @@ dcl-proc SCCOLL_in_groups export;
       rest = '';
     else;
       part = %trim(%subst(rest: 1: comma - 1));
-      rest = %trim(%subst(rest: comma + 1));
+
+      // A comma in the last position leaves nothing after it, and %SUBST
+      // rejects a start beyond the end of the string rather than yielding an
+      // empty one - so '--ignore-groups=web,' abended where it should simply
+      // have ignored the empty element, which is what upstream does by
+      // splitting in Java.
+      if comma < %len(rest);
+        rest = %trim(%subst(rest: comma + 1));
+      else;
+        rest = '';
+      endif;
     endif;
 
     // Whole name, via SCDEF_in_group - not a scan of the comma string, which

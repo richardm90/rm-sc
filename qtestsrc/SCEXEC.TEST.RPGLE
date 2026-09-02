@@ -2427,3 +2427,377 @@ dcl-proc test_check_all_reports_no_errors_when_all_usable export;
   iEqual(0: bad: 'and neither was unusable');
 
 end-proc;
+
+//==============================================================================
+// SCEXEC_groups - the `groups` operation
+//
+// It had no test at all. The gate holds `groups` byte-exact against a
+// captured baseline, which covers this system's real definitions and nothing
+// else: no baseline on this box has a definition that DECLARES a group called
+// system, none is taken with --ignore-globals, and none is taken with an
+// exclusion that empties a group. Those are the three cases below that a
+// baseline cannot reach.
+//
+// WHAT CAN BE OBSERVED. SCEXEC_groups prints one row per group name to
+// standard output and returns the number of rows it printed. A test running
+// inside the job cannot capture stdout, so the count is the whole of the
+// evidence, and every case below is chosen so the COUNT alone discriminates.
+// Two things follow, and both are limitations worth stating rather than
+// working around:
+//
+//   - The sorted POSITION of the built-in system entry cannot be asserted
+//     here. That it is inserted in order rather than appended is the gate's
+//     to hold, byte for byte. What these tests hold is that it is printed
+//     exactly once, in the cases where it is printed at all.
+//   - Which names were printed cannot be asserted either. The fixtures are
+//     therefore arranged so that a wrong SET of names is also a wrong COUNT -
+//     a group whose only declarers are excluded takes the count down with it,
+//     and a system printed twice takes it up.
+//
+// Fixture group names sort deliberately either side of 'system': grpbef_*
+// before it (0x67) and zgrpaft_* after it (0x7A). Nothing here can see the
+// difference, for the reason above; the names are chosen so that when
+// something CAN - a baseline, or a later test with an output capture - the
+// two insertion branches are already covered by fixtures rather than needing
+// new ones.
+//
+// COVERAGE, NOT A KNOWN DEFECT. Unlike the trailing-comma tests in
+// SCCOLL.TEST these are expected to pass as written. They are here because
+// nothing exercised this procedure at all, not because it is believed wrong.
+//==============================================================================
+
+//------------------------------------------------------------------------------
+// gr_dir - a directory these tests own, guaranteed EMPTY on the way in
+//
+// Modelled on uc_dir and for the same reason: every test below counts what
+// comes back, and the suite's g_dir is written to by other tests, so under
+// ORDER(*API) a count taken from it is a count of which tests ran first.
+// A path of its own also keeps this family and the unusable-service family
+// from clearing each other's fixtures.
+//
+// Defined above its callers rather than prototyped at the top of the suite,
+// the way the uc_ helpers are. It reuses uc_load_named and uc_remove_dir,
+// which are defined earlier in this member, so this block must stay below
+// them.
+//
+// Call it ONCE per test, at the top; calling it twice wipes the caller's own
+// fixtures.
+//------------------------------------------------------------------------------
+dcl-proc gr_dir;
+  dcl-pi *n like(STMF_t);
+  end-pi;
+
+  dcl-s d like(STMF_t);
+
+  d = '/tmp/rmsc-groups-test-' + %trim(psds.current_user);
+
+  uc_remove_dir(d);       // anything a previous failure left
+  IFS_crtdir(d);
+
+  return d;
+
+end-proc;
+
+//==============================================================================
+// An empty collection still has one group
+//
+// The built-in system entry is added because the global directories were
+// READ, not because anything was found in them - upstream adds it on that
+// basis - so a collection with nothing in it prints exactly one row.
+//
+// This is the case a loop written to run once per definition gets wrong, and
+// it gets it wrong in the direction that looks like success: zero rows and a
+// zero return, from a procedure that did not fail.
+//
+// The two variations pull in opposite directions on purpose. Excluding 'all'
+// removes every service there could have been and must NOT remove the
+// built-in; --ignore-globals removes the built-in and leaves nothing at all.
+// An implementation that confuses the two answers 0 for the first or 1 for
+// the second.
+//
+// SCCOLL_init is called and load_dir is not, deliberately: docs/testing-notes
+// on what an uninitialised likeds() structure contains.
+//==============================================================================
+
+dcl-proc test_groups_empty_collection_is_system_only export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+
+  SCCOLL_init(coll);
+  iEqual(0: SCCOLL_count(coll): 'nothing loaded');
+
+  iEqual(1: SCEXEC_groups(coll: ''):
+         'one row - the built-in system group, listed although no ' +
+         'definition declared it and none was even read');
+
+  iEqual(1: SCEXEC_groups(coll: 'all'):
+         'excluding every service does not take the built-in away');
+
+  iEqual(0: SCEXEC_groups(coll: '': true):
+         'and with ignore_globals there is nothing to print at all');
+
+end-proc;
+
+//==============================================================================
+// Declared groups that all sort BEFORE the built-in
+//
+// Two definitions, one group each, both sorting before 'system'. Three rows:
+// the two declared and the built-in.
+//
+// The built-in belongs LAST in this answer, which is the branch that appends.
+// The count says only that it was printed once - see the block comment - but
+// a fixture that reaches the branch is what makes the case worth having, and
+// what a later test with an output capture would build on.
+//==============================================================================
+
+dcl-proc test_groups_declared_all_before_system export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t) inz(*likeds);
+  dcl-s  d    like(STMF_t);
+
+  d = gr_dir();
+
+  assert(uc_load_named(d: 'rmscgrp_b1.yaml':
+    'start_cmd: /usr/bin/rmscgrp' + LF +
+    'check_alive: 55961' + LF +
+    'groups:' + LF +
+    '- grpbef_a' + LF: def): 'first fixture');
+  assert(uc_load_named(d: 'rmscgrp_b2.yaml':
+    'start_cmd: /usr/bin/rmscgrp' + LF +
+    'check_alive: 55962' + LF +
+    'groups:' + LF +
+    '- grpbef_b' + LF: def): 'second fixture');
+
+  SCCOLL_init(coll);
+  assert(SCCOLL_load_dir(coll: d): 'fixtures loaded');
+  iEqual(2: SCCOLL_count(coll): 'two definitions, and nothing else');
+
+  iEqual(3: SCEXEC_groups(coll: ''):
+         'grpbef_a, grpbef_b and the built-in system');
+
+  uc_remove_dir(d);
+
+end-proc;
+
+//==============================================================================
+// Declared groups that all sort AFTER the built-in
+//
+// The other branch: the built-in belongs FIRST here, which is the insertion
+// an implementation that appends and then sorts, or that appends and does
+// not, gets wrong in the output while still printing three rows. The count
+// cannot tell those apart; what it can tell is that inserting at the front
+// did not lose or duplicate a name, which an insert that shifts the array by
+// hand is entirely capable of.
+//==============================================================================
+
+dcl-proc test_groups_declared_all_after_system export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t) inz(*likeds);
+  dcl-s  d    like(STMF_t);
+
+  d = gr_dir();
+
+  assert(uc_load_named(d: 'rmscgrp_z1.yaml':
+    'start_cmd: /usr/bin/rmscgrp' + LF +
+    'check_alive: 55963' + LF +
+    'groups:' + LF +
+    '- zgrpaft_x' + LF: def): 'first fixture');
+  assert(uc_load_named(d: 'rmscgrp_z2.yaml':
+    'start_cmd: /usr/bin/rmscgrp' + LF +
+    'check_alive: 55964' + LF +
+    'groups:' + LF +
+    '- zgrpaft_y' + LF: def): 'second fixture');
+
+  SCCOLL_init(coll);
+  assert(SCCOLL_load_dir(coll: d): 'fixtures loaded');
+  iEqual(2: SCCOLL_count(coll): 'two definitions, and nothing else');
+
+  iEqual(3: SCEXEC_groups(coll: ''):
+         'zgrpaft_x, zgrpaft_y and the built-in system');
+
+  uc_remove_dir(d);
+
+end-proc;
+
+//==============================================================================
+// A definition that declares system is listed once, not twice
+//
+// The built-in is inserted into the same list the declared names go into, so
+// a definition declaring 'system' - which the definitions shipped under
+// system/ do, and which is why the built-in exists at all - is the collision
+// case. Four rows would be wrong by one, and it is a duplicate ROW in the
+// output of a command whose output is screen-scraped.
+//
+// Two definitions declare it, so an implementation that de-duplicates the
+// declared names against each other but not against the built-in still shows
+// up as one too many rather than two.
+//
+// The other two assertions are the same fixture asked the two questions the
+// gate's baselines cannot reach:
+//
+//   - with ignore_globals the BUILT-IN is not added, but a system group a
+//     definition declared for itself is still a group it declared. Two rows.
+//     INFERRED: the specification says the built-in entry is not added, not
+//     that the name is suppressed. An implementation that filters the name
+//     out of the answer instead of not adding the entry answers 1 here.
+//   - excluding 'system' takes both definitions out, so grpsys_m goes with
+//     them and no declared group is left - and the built-in is still
+//     printed, because it does not depend on any surviving member. One row.
+//     With ignore_globals as well there is nothing left to print at all.
+//==============================================================================
+
+dcl-proc test_groups_declared_system_listed_once export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t) inz(*likeds);
+  dcl-s  d    like(STMF_t);
+
+  d = gr_dir();
+
+  assert(uc_load_named(d: 'rmscgrp_s1.yaml':
+    'start_cmd: /usr/bin/rmscgrp' + LF +
+    'check_alive: 55965' + LF +
+    'groups:' + LF +
+    '- system' + LF: def): 'first fixture');
+  assert(uc_load_named(d: 'rmscgrp_s2.yaml':
+    'start_cmd: /usr/bin/rmscgrp' + LF +
+    'check_alive: 55966' + LF +
+    'groups:' + LF +
+    '- system' + LF +
+    '- grpsys_m' + LF: def): 'second fixture');
+
+  SCCOLL_init(coll);
+  assert(SCCOLL_load_dir(coll: d): 'fixtures loaded');
+  iEqual(2: SCCOLL_count(coll): 'two definitions, and nothing else');
+
+  iEqual(2: SCEXEC_groups(coll: ''):
+         'grpsys_m and system - system once, although two definitions ' +
+         'declare it and the built-in wants it too');
+
+  iEqual(2: SCEXEC_groups(coll: '': true):
+         'with ignore_globals the built-in is not added, but the system ' +
+         'the definitions declared is still a declared group');
+
+  iEqual(1: SCEXEC_groups(coll: 'system'):
+         'excluding system takes both definitions and grpsys_m with them, ' +
+         'and the built-in is printed with no member left');
+
+  iEqual(0: SCEXEC_groups(coll: 'system': true):
+         'and with ignore_globals as well, nothing is printed');
+
+  uc_remove_dir(d);
+
+end-proc;
+
+//==============================================================================
+// ignore_globals suppresses the built-in entry
+//
+// Upstream adds system only when it read the global directories, and
+// --ignore-globals says it did not. docs/parity.md records this as one of the
+// three differences that only became reachable once --ignore-globals was
+// parsed into something that read it - so it is exactly the kind of thing
+// that goes quietly wrong again.
+//
+// The control is the same collection with the parameter omitted. Without it
+// the assertion is satisfied by a procedure that never prints the built-in at
+// all, which is the neighbouring defect.
+//
+// The fixture declares no system group of its own, so the count moves by
+// exactly the one entry under test.
+//==============================================================================
+
+dcl-proc test_groups_ignore_globals_omits_builtin export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t) inz(*likeds);
+  dcl-s  d    like(STMF_t);
+
+  d = gr_dir();
+
+  assert(uc_load_named(d: 'rmscgrp_g1.yaml':
+    'start_cmd: /usr/bin/rmscgrp' + LF +
+    'check_alive: 55967' + LF +
+    'groups:' + LF +
+    '- grpbef_a' + LF: def): 'first fixture');
+  assert(uc_load_named(d: 'rmscgrp_g2.yaml':
+    'start_cmd: /usr/bin/rmscgrp' + LF +
+    'check_alive: 55968' + LF +
+    'groups:' + LF +
+    '- grpbef_b' + LF: def): 'second fixture');
+
+  SCCOLL_init(coll);
+  assert(SCCOLL_load_dir(coll: d): 'fixtures loaded');
+  iEqual(2: SCCOLL_count(coll): 'two definitions, and nothing else');
+
+  iEqual(3: SCEXEC_groups(coll: '': false):
+         'control - ignore_globals off is the same as omitting it');
+
+  iEqual(2: SCEXEC_groups(coll: '': true):
+         'the two declared groups, and no built-in system');
+
+  uc_remove_dir(d);
+
+end-proc;
+
+//==============================================================================
+// A group whose only members are excluded is not listed
+//
+// The exclusion names SERVICES to leave out, and the groups of what is LEFT
+// are then collected - the same reading SCCOLL.TEST pins for the collection's
+// own group list. So excluding grpbef_a removes the only definition that
+// declared it, and the name goes with the service rather than surviving as an
+// empty group.
+//
+// Then the case that separates the built-in from everything else: exclude
+// both groups and every service is gone, yet one row is still printed. An
+// implementation that adds the built-in only when it has something else to
+// print answers 0; one that adds it before applying the filter, and filters
+// the finished list, also answers 0 for the 'system' exclusion in
+// test_groups_declared_system_listed_once above.
+//
+// Excluding 'all' is the same thing reached through the implicit group every
+// definition belongs to, and is what a bare `groups` with the default
+// exclusions does on a system where every service is in an excluded group.
+//==============================================================================
+
+dcl-proc test_groups_excluded_service_takes_its_group export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t) inz(*likeds);
+  dcl-s  d    like(STMF_t);
+
+  d = gr_dir();
+
+  assert(uc_load_named(d: 'rmscgrp_f1.yaml':
+    'start_cmd: /usr/bin/rmscgrp' + LF +
+    'check_alive: 55969' + LF +
+    'groups:' + LF +
+    '- grpbef_a' + LF: def): 'first fixture');
+  assert(uc_load_named(d: 'rmscgrp_f2.yaml':
+    'start_cmd: /usr/bin/rmscgrp' + LF +
+    'check_alive: 55970' + LF +
+    'groups:' + LF +
+    '- grpbef_b' + LF: def): 'second fixture');
+
+  SCCOLL_init(coll);
+  assert(SCCOLL_load_dir(coll: d): 'fixtures loaded');
+  iEqual(2: SCCOLL_count(coll): 'two definitions, and nothing else');
+
+  iEqual(3: SCEXEC_groups(coll: ''):
+         'control - both declared groups and the built-in');
+
+  iEqual(2: SCEXEC_groups(coll: 'grpbef_a'):
+         'the sole declarer of grpbef_a is excluded, so grpbef_a is not ' +
+         'a group any more');
+
+  iEqual(1: SCEXEC_groups(coll: 'grpbef_a,grpbef_b'):
+         'both excluded, so only the built-in is left');
+
+  iEqual(1: SCEXEC_groups(coll: 'all'):
+         'and the same through the implicit group all');
+
+  uc_remove_dir(d);
+
+end-proc;

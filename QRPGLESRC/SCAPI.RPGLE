@@ -190,7 +190,15 @@ dcl-proc ignored_by;
       rest = '';
     else;
       part = %trim(%subst(rest: 1: comma - 1));
-      rest = %trim(%subst(rest: comma + 1));
+
+      // As in SCCOLL_in_groups, which this duplicates: a comma in the last
+      // position leaves nothing after it and %SUBST rejects the start. Fixing
+      // one copy of a splitter and not the other is how the defect returns.
+      if comma < %len(rest);
+        rest = %trim(%subst(rest: comma + 1));
+      else;
+        rest = '';
+      endif;
     endif;
 
     if %len(part) > 0 and SCDEF_in_group(def: part);

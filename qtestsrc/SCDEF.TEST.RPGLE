@@ -338,6 +338,39 @@ dcl-proc test_check_alive_sequence export;
 end-proc;
 
 //==============================================================================
+// MEASURED - a trailing comma in check_alive loads, with one criterion
+//
+//   check_alive: rmscrevq1,
+//
+// abends RMSC (RNX0100). Upstream loads the definition and reports the service
+// NOT RUNNING, so the empty element after the comma is absent rather than a
+// second, blank criterion.
+//
+// This is the one of its family that reaches RMSC from a definition FILE
+// rather than from a command line, which makes it the likeliest of the set to
+// be met in real use - and one service written this way stops the entire walk,
+// not just itself.
+//
+// criteria_count is asserted before criteria(1) is read. A blank second
+// criterion is the natural wrong answer here, and reading only the first
+// criterion would not notice one.
+//==============================================================================
+
+dcl-proc test_check_alive_trailing_comma export;
+
+  dcl-ds def likeds(SCDEF_t);
+
+  assert(load_fixture('trailcomma.yaml':
+    'start_cmd: /usr/bin/webproxy' + LF +
+    'check_alive: rmscrevq1,' + LF: def): 'load');
+
+  iEqual(1: def.criteria_count: 'one criterion, not two');
+  aEqualV(SCDEF_CHECK_JOB: def.criteria(1).kind: 'kind is JOB');
+  aEqualV('RMSCREVQ1': def.criteria(1).job_name: 'job name, upper-cased');
+
+end-proc;
+
+//==============================================================================
 // The deprecated spelling still works
 //==============================================================================
 

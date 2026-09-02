@@ -307,7 +307,17 @@ dcl-proc split_commas;
       rest = '';
     else;
       part = %trim(%subst(rest: 1: comma - 1));
-      rest = %trim(%subst(rest: comma + 1));
+
+      // A comma in the last position leaves nothing after it, and %SUBST
+      // rejects a start beyond the end of the string. 'check_alive: name,'
+      // abended the whole command where upstream loads the definition and
+      // reports the service normally - and this one arrives in a file rather
+      // than on a command line, so it is the likelier of the two to be met.
+      if comma < %len(rest);
+        rest = %trim(%subst(rest: comma + 1));
+      else;
+        rest = '';
+      endif;
     endif;
 
     if %len(part) > 0;

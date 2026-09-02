@@ -1719,3 +1719,233 @@ dcl-proc test_groups_filter_empty_collection export;
   iEqual(0: n: 'ignoring all on an empty collection is still zero');
 
 end-proc;
+
+
+//==============================================================================
+// fil_get - one definition out of the filter fixture
+//
+// Defined here rather than prototyped at the top of the suite, the way
+// SCEXEC.TEST's uc_ helpers are: every caller is below it.
+//
+// It asserts the find, so a fixture that failed to load fails the test that
+// needed it instead of handing it an empty definition to agree with.
+//==============================================================================
+
+dcl-proc fil_get;
+  dcl-pi *n;
+    name like(SCDEF_NAME_t) const;
+    def  likeds(SCDEF_t);
+  end-pi;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+
+  fil_load(coll);
+  nEqual(true: SCCOLL_find(coll: name: def):
+         'fixture definition ' + %trim(name) + ' found');
+
+end-proc;
+
+
+//==============================================================================
+// A TRAILING COMMA IS AN EMPTY ELEMENT, AND AN EMPTY ELEMENT IS DISCARDED
+//
+// EXPECTED RED until the splitter behind SCCOLL_in_groups is fixed. And red
+// as an ERROR, not a FAILURE: the list is walked comma to comma and the
+// element after the last one is taken as a substring starting past the end of
+// the value, which raises RNX0100 (substring out of range). iRPGUnit reports
+// an unhandled exception as an ERROR for the test case, so a reader looking
+// for five red FAILURES will not find them - and every assertion in a
+// procedure after the call that abends is never reached, which is why the
+// control assertions in each test below come FIRST and are not tidied into
+// one test of their own.
+//
+// Upstream sc is Java and splits the list with String.split, which with the
+// default limit discards trailing empty elements: "a,".split(",") is
+// ["a"], "a,,".split(",") is ["a"], and ",".split(",") is empty. So
+// 'filgrp_mx,' must behave EXACTLY as 'filgrp_mx' does, and a list of
+// nothing but separators must behave exactly as a blank one does - which the
+// specification already says matches nothing.
+//
+// Where the trailing comma comes from is worth saying, because it is not a
+// contrived value: it is what a shell or a config file leaves behind when a
+// list is built up a value at a time, and what a user types when they delete
+// the last group from --ignore-groups=a,b and stop at the comma. A crash is
+// the worst of the three possible answers.
+//
+// The fixture is fil_setup's, reused as-is:
+//   rmscfil_a  filgrp_zx, filgrp_mx
+//   rmscfil_b  filgrp_ax
+//   rmscfil_f  no groups at all
+//
+// Commas in the MIDDLE of a list, blanks, case folding and the prefix
+// collision between filgrp_a and filgrp_ax are all pinned already by the
+// test_groups_filter_* tests above, which reach the same splitter through
+// SCCOLL_groups. Nothing here repeats them; each test below pairs its
+// trailing-comma call with the identical list WITHOUT the comma, so a
+// failure separates 'the trailing comma broke it' from 'this list never
+// matched in the first place'.
+//==============================================================================
+
+dcl-proc test_in_groups_trailing_comma_matches export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  grp like(SCDEF_NAME_t);
+
+  fil_get('rmscfil_a': def);
+
+  grp = 'filgrp_mx';
+  nEqual(true: SCCOLL_in_groups(def: grp):
+         'control - rmscfil_a declares filgrp_mx');
+
+  grp = 'filgrp_mx,';
+  nEqual(true: SCCOLL_in_groups(def: grp):
+         'the trailing element is empty and is discarded, so this answers ' +
+         'exactly as filgrp_mx does');
+
+  grp = 'all,';
+  nEqual(true: SCCOLL_in_groups(def: grp):
+         'and the built-in all is reached through the same split');
+
+end-proc;
+
+
+//==============================================================================
+// A trailing comma on a list that matches NOTHING is still an answer
+//
+// The half that a crash hides most easily. False and RNX0100 look the same
+// from a caller that only ever asks whether the answer was true, and the
+// group filter is exactly such a caller.
+//
+// EXPECTED RED, as an ERROR - see the block comment above.
+//==============================================================================
+
+dcl-proc test_in_groups_trailing_comma_no_match export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  grp like(SCDEF_NAME_t);
+
+  fil_get('rmscfil_b': def);
+
+  grp = 'filgrp_mx';
+  nEqual(false: SCCOLL_in_groups(def: grp):
+         'control - rmscfil_b declares filgrp_ax and nothing else');
+
+  grp = 'filgrp_mx,';
+  nEqual(false: SCCOLL_in_groups(def: grp):
+         'a list that does not match is an answer, not a crash');
+
+  // A definition with no groups key at all is the other shape of no match,
+  // and the one where an implementation that walks the DECLARED groups
+  // rather than the filter never reaches the bad substring.
+  fil_get('rmscfil_f': def);
+
+  grp = 'filgrp_mx,';
+  nEqual(false: SCCOLL_in_groups(def: grp):
+         'and a definition declaring no groups answers too');
+
+end-proc;
+
+
+//==============================================================================
+// A trailing comma after several elements
+//
+// The first test's list has one element and the empty one; this has three and
+// the empty one, so an implementation that special-cases a single value, or
+// that only ever looks at the first or the last element, is separated from
+// one that discards the empty element wherever it falls.
+//
+// Both directions, because the count of elements is not what decides the
+// answer: the same three-element shape is asserted true when the match is the
+// LAST real element, and false when none of the real elements matches.
+//
+// EXPECTED RED, as an ERROR - see the block comment above.
+//==============================================================================
+
+dcl-proc test_in_groups_trailing_comma_after_several export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  grp like(SCDEF_NAME_t);
+
+  fil_get('rmscfil_a': def);
+
+  grp = 'filgrp_9x,filgrp__x,filgrp_mx';
+  nEqual(true: SCCOLL_in_groups(def: grp):
+         'control - the third of three is declared by rmscfil_a');
+
+  grp = 'filgrp_9x,filgrp__x,filgrp_mx,';
+  nEqual(true: SCCOLL_in_groups(def: grp):
+         'a fourth, empty element does not change that');
+
+  grp = 'filgrp_9x,filgrp__x,';
+  nEqual(false: SCCOLL_in_groups(def: grp):
+         'and where no real element matches, the empty one does not ' +
+         'match either');
+
+end-proc;
+
+
+//==============================================================================
+// A list of nothing but a separator is an empty list
+//
+// ',' is two empty elements, both trailing, so Java's split gives an array of
+// length zero and the answer is the blank-list answer: matches nothing.
+//
+// The control is the zero-length list rather than *blanks. SCDEF_NAME_t is
+// varying, so the two are different values - test_groups_filter_blank makes
+// the same point - and the zero-length one is the value a caller really
+// passes.
+//
+// EXPECTED RED, as an ERROR - see the block comment above.
+//==============================================================================
+
+dcl-proc test_in_groups_comma_only export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  grp like(SCDEF_NAME_t);
+
+  fil_get('rmscfil_a': def);
+
+  grp = '';
+  nEqual(false: SCCOLL_in_groups(def: grp):
+         'control - a zero-length list matches nothing');
+
+  grp = ',';
+  nEqual(false: SCCOLL_in_groups(def: grp):
+         'and a list of nothing but a separator is the same list');
+
+end-proc;
+
+
+//==============================================================================
+// Two trailing commas are two empty elements, and both are discarded
+//
+// The case that separates 'ignore the last element if it is empty' from
+// 'ignore every empty element'. A splitter fixed by testing only for a comma
+// in the last position answers this one wrongly, or crashes on it.
+//
+// ',,' is asserted as well: three empty elements, no real one, and still the
+// blank-list answer rather than a crash.
+//
+// EXPECTED RED, as an ERROR - see the block comment above.
+//==============================================================================
+
+dcl-proc test_in_groups_two_trailing_commas export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  grp like(SCDEF_NAME_t);
+
+  fil_get('rmscfil_a': def);
+
+  grp = 'filgrp_mx';
+  nEqual(true: SCCOLL_in_groups(def: grp):
+         'control - rmscfil_a declares filgrp_mx');
+
+  grp = 'filgrp_mx,,';
+  nEqual(true: SCCOLL_in_groups(def: grp):
+         'two empty elements are discarded, not one');
+
+  grp = ',,';
+  nEqual(false: SCCOLL_in_groups(def: grp):
+         'and separators alone are an empty list');
+
+end-proc;
