@@ -16,6 +16,7 @@ ctl-opt text('RMSC: Service definition collection');
 /include 'SCCOLL_D.rpgleinc'
 /include 'SCDEF_D.rpgleinc'
 /include 'SCDIRS_D.rpgleinc'
+/include 'SCOUT_D.rpgleinc'
 /include 'include/RMIFS_D.rpgleinc'
 /include 'include/RMLIST_D.rpgleinc'
 /include 'include/RMPATH_D.rpgleinc'
@@ -124,6 +125,7 @@ dcl-proc SCCOLL_load_dir export;
   dcl-s handle   pointer;
   dcl-s filename like(IFS_DIR_FILENAME_t);
   dcl-s path     like(STMF_t);
+  dcl-s prefix   like(STMF_t);
   dcl-s rrn      like(INTEGER_t);
   dcl-s key      like(SCCOLL_KEY_t);
   dcl-ds def     likeds(SCDEF_t);
@@ -133,6 +135,18 @@ dcl-proc SCCOLL_load_dir export;
     return false;
   endif;
 
+  // Built once, and with any trailing separator removed. Concatenating blindly
+  // doubled it when the caller supplied one - which is what shell tab
+  // completion gives you - and the path is printed in 'Defined in:' and in the
+  // skip warning, both compared against upstream, which normalises.
+  prefix = %trim(dir);
+  dow %len(prefix) > 1 and %subst(prefix: %len(prefix): 1) = '/';
+    prefix = %subst(prefix: 1: %len(prefix) - 1);
+  enddo;
+  if prefix <> '/';
+    prefix += '/';
+  endif;
+
   dow IFS_readdir(handle: filename);
 
     // readdir yields these first; walking into them would not terminate
@@ -140,7 +154,11 @@ dcl-proc SCCOLL_load_dir export;
       iter;
     endif;
 
-    path = %trim(dir) + '/' + %trim(filename);
+    // The name exactly as readdir gave it. Trimming here let a file whose
+    // name ends in a blank pass the rule below - a name upstream rejects -
+    // and then opened a path that is not the file on disk, turning a silent
+    // skip into a load failure with the wrong text on the wrong stream.
+    path = prefix + filename;
 
     // Skipped, not walked. Upstream's loader does the same
     // - 'if (f.isDirectory()) { continue; }' - and reaches the definitions
@@ -153,6 +171,17 @@ dcl-proc SCCOLL_load_dir export;
     endif;
 
     if not is_yaml(filename);
+      // Upstream names every file it skips, one line each, on stderr. Only
+      // files reach here - '.', '..' and directories were skipped above and
+      // are not warned about, which matters because the global directory
+      // holds system/ and oss_common/ and warning about those would bury the
+      // one line that means something.
+      // Not %trim(path): a trailing blank belongs to the file's name, and
+      // trimming it here would undo, one line later, the whole point of
+      // building the path from the untrimmed name. path is a varchar built by
+      // concatenation and carries no padding, so there is nothing else for a
+      // trim to remove.
+      SCOUT_warnln('WARNING: Ignoring file: ' + path);
       iter;
     endif;
 
@@ -209,19 +238,44 @@ dcl-proc is_yaml;
     filename like(IFS_DIR_FILENAME_t) const;
   end-pi;
 
-  dcl-s lower like(IFS_DIR_FILENAME_t);
+  dcl-s name like(IFS_DIR_FILENAME_t);
+  dcl-s base like(IFS_DIR_FILENAME_t);
 
-  lower = STRING_lower(%trim(filename));
+  // Upstream matches the whole name against ^[a-z\-_0-9]+\.y[a]{0,1}ml$, so
+  // the extension must be lower case and the base name may hold only
+  // lower-case letters, digits, hyphen and underscore. Lower-casing the name
+  // before testing the extension, which is what this used to do, accepted
+  // 'Service.yaml' - measured: upstream ignores that file and RMSC loaded it,
+  // so a service existed here that does not exist there.
+  //
+  // %CHECK against an explicit alphabet rather than a range test: this is
+  // EBCDIC, where a-z is not contiguous, and 'c >= a and c <= z' would also
+  // accept the characters sitting in the gaps.
+  dcl-c NAME_CHARS const('abcdefghijklmnopqrstuvwxyz0123456789-_');
 
-  if %len(lower) > 5 and %subst(lower: %len(lower) - 4) = '.yaml';
-    return true;
+  // Not %trim: a blank is not in the allowed set, so a name carrying one must
+  // fail the rule rather than be tidied into passing it.
+  name = filename;
+
+  if %len(name) > 5 and %subst(name: %len(name) - 4) = '.yaml';
+    base = %subst(name: 1: %len(name) - 5);
+  elseif %len(name) > 4 and %subst(name: %len(name) - 3) = '.yml';
+    base = %subst(name: 1: %len(name) - 4);
+  else;
+    return false;
   endif;
 
-  if %len(lower) > 4 and %subst(lower: %len(lower) - 3) = '.yml';
-    return true;
+  // Defence in depth rather than a live path: the length tests above already
+  // exclude the only two names that could leave an empty base ('.yaml' and
+  // '.yml'), so no input reaches here with one and no test can cover it. Kept
+  // because %CHECK on a zero-length string returns 0, which reads as "nothing
+  // wrong with it" - the wrong answer to arrive at by accident if those length
+  // tests are ever loosened.
+  if %len(base) = 0;
+    return false;
   endif;
 
-  return false;
+  return (%check(NAME_CHARS: base) = 0);
 
 end-proc;
 

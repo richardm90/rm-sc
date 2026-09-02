@@ -117,7 +117,15 @@ dcl-proc SCDEF_from_doc export;
 
   def.defined_at = stmf;
 
-  // Upstream takes the short name from the file name, lower-cased
+  // Upstream takes the short name from the file name, lower-cased.
+  //
+  // Not dead code, though discovery now makes it look it: SCCOLL only ever
+  // hands this procedure names that already passed upstream's filename regex,
+  // which admits no capitals, so via that path the lower-casing changes
+  // nothing. SCDEF_load is also called directly - by the bound-call API and by
+  // the suites - and those callers can pass any path at all. Removing this
+  // would leave those callers with a short name that no longer matches how
+  // every other part of RMSC spells it.
   def.short_name = STRING_lower(PATH_name(stmf));
 
   // A cluster definition is rejected rather than silently half-honoured:

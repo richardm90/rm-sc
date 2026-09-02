@@ -59,6 +59,23 @@ dcl-pr fil_load;
   coll likeds(SCCOLL_t);
 end-pr;
 
+dcl-s g_nam like(STMF_t);
+
+dcl-pr nam_setup end-pr;
+
+dcl-pr nam_teardown end-pr;
+
+dcl-s g_blk like(STMF_t);
+
+dcl-pr blk_setup end-pr;
+
+dcl-pr blk_teardown end-pr;
+
+dcl-pr blk_entry_len like(INTEGER_t);
+  dir_path like(STMF_t) const;
+  prefix   varchar(64) const;
+end-pr;
+
 dcl-pr cp_before like(BOOLEAN_t);
   a_val varchar(512) const;
   b_val varchar(512) const;
@@ -153,6 +170,8 @@ dcl-proc setUpSuite export;
 
   ord_setup();
   fil_setup();
+  nam_setup();
+  blk_setup();
 
 end-proc;
 
@@ -161,6 +180,8 @@ dcl-proc tearDownSuite export;
   remove_tree();
   ord_teardown();
   fil_teardown();
+  nam_teardown();
+  blk_teardown();
 
 end-proc;
 
@@ -1947,5 +1968,460 @@ dcl-proc test_in_groups_two_trailing_commas export;
   grp = ',,';
   nEqual(false: SCCOLL_in_groups(def: grp):
          'and separators alone are an empty list');
+
+end-proc;
+
+
+//##############################################################################
+//##                                                                          ##
+//##  THE FILENAME RULE                                                       ##
+//##                                                                          ##
+//##############################################################################
+//
+// MEASURED - upstream decides what is a definition file by its NAME, with a
+// regex over the whole filename:
+//
+//     ^[a-z\-_0-9]+\.y[a]{0,1}ml$
+//
+// So the base name may hold only lower-case letters, digits, hyphen and
+// underscore, and the extension must be exactly '.yaml' or '.yml'. Every
+// other file in the directory is skipped, with one line per skipped file on
+// stderr:
+//
+//     WARNING: Ignoring file: /full/path/to/the/file
+//
+// RMSC accepts names upstream rejects, so a file upstream ignores becomes a
+// service in RMSC's output. Measured on the box: rmscgate_Ignored.yaml, with
+// a capital I, loads in RMSC as 'rmscgate_ignored' and appears in check.
+// Upstream ignores it and warns.
+//
+// Finding MORE services than upstream is the harder direction to notice,
+// because nothing looks missing - the same argument the test_discovery header
+// already makes about not walking subdirectories.
+//
+// EVERY FILE BELOW HOLDS THE SAME VALID DEFINITION. That is the point of the
+// fixture: content cannot explain any difference in the result, so the only
+// thing that can decide which become services is the name. A fixture whose
+// rejected files were also malformed would pass against a loader that applied
+// no name rule at all.
+//
+// ITS OWN DIRECTORY, like the ordering and filter fixtures, because the
+// assertion is a COUNT. Sharing g_dir would make it a count of whatever else
+// had been written there, and under ORDER(*API) nothing says which test runs
+// first.
+//
+// WHAT IS NOT ASSERTED: the stderr warning. Standard error is not observable
+// from inside the ILE job, so there is nothing here that could check it and
+// an assertion pretending otherwise could not fail. The wording is measured
+// and belongs to the output comparison against upstream instead.
+//==============================================================================
+
+//------------------------------------------------------------------------------
+// nam_setup - nine files, three of them legal names
+//
+// TWO OF THE SIX REJECTS PROVE LESS THAN THE OTHERS, and it is worth saying
+// so rather than letting a later reader count them as six pieces of evidence:
+//
+//   nodots         has no extension, and
+//   .hidden.yaml   begins with a dot
+//
+// Both are expected to be skipped whatever the name rule does - a loader
+// looking only for a '.yaml' or '.yml' suffix already drops 'nodots', and
+// '.hidden.yaml' may be dropped by whatever handles dot entries. They are
+// included because upstream's regex rejects them and a complete transcription
+// of the rule is worth having, not because either discriminates.
+//
+// The four that DO discriminate are Bad.yaml, UPPER.YAML, has.dot.yaml and
+// backup.yaml.bak.
+//------------------------------------------------------------------------------
+dcl-proc nam_setup;
+
+  dcl-s y like(STRING_t);
+
+  g_nam = '/tmp/rmsc-sccoll-name-' + %trim(psds.current_user);
+
+  IFS_crtdir(g_nam);
+
+  // One definition, written under nine names. Valid, so that nothing but the
+  // name can decide the outcome.
+  y = 'start_cmd: /usr/bin/rmscnam' + LF;
+  y += 'check_alive: 8120' + LF;
+
+  // Legal names - these three must become services
+  write_file(%trim(g_nam) + '/good.yaml': y);
+  write_file(%trim(g_nam) + '/also.yml': y);
+  write_file(%trim(g_nam) + '/under_score-dash9.yaml': y);
+
+  // Illegal names - these six must not
+  write_file(%trim(g_nam) + '/Bad.yaml': y);          // capital in base name
+  write_file(%trim(g_nam) + '/UPPER.YAML': y);        // capitals in both
+  write_file(%trim(g_nam) + '/has.dot.yaml': y);      // dot inside base name
+  write_file(%trim(g_nam) + '/backup.yaml.bak': y);   // extension is .bak
+  write_file(%trim(g_nam) + '/nodots': y);            // no extension
+  write_file(%trim(g_nam) + '/.hidden.yaml': y);      // leading dot
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// nam_teardown - remove the fixture and prove it went
+//
+// The readdir filter skips '.' and '..' only, so '.hidden.yaml' is removed
+// like any other entry. IFS_dltdir fails silently on a non-empty directory,
+// which is why the postcondition is asserted rather than assumed.
+//------------------------------------------------------------------------------
+dcl-proc nam_teardown;
+
+  dcl-s dir      pointer;
+  dcl-s filename like(IFS_DIR_FILENAME_t);
+
+  dir = IFS_opendir(g_nam);
+  if dir <> *null;
+    dow IFS_readdir(dir: filename);
+      if filename <> '.' and filename <> '..';
+        IFS_remove_file(%trim(g_nam) + '/' + %trim(filename));
+      endif;
+    enddo;
+    IFS_closedir(dir);
+    IFS_dltdir(g_nam);
+  endif;
+
+  assert((not IFS_isa_directory(g_nam)):
+         'Filename fixture tree ' + %trim(g_nam) + ' not removed');
+
+end-proc;
+
+//==============================================================================
+// Only a legal filename becomes a service
+//
+// The count is the assertion that covers all nine files at once. The names
+// are asserted as well because a count of three would also be produced by a
+// loader that took the wrong three - and one that accepted Bad.yaml while
+// rejecting good.yaml would be exactly as wrong and exactly as quiet.
+//
+// 'bad' and 'upper' are asserted absent by name because those are the two
+// whose short name is predictable when the rule is not applied: RMSC lower-
+// cases a short name taken from the filename, which is how rmscgate_Ignored
+// .yaml was measured arriving as 'rmscgate_ignored'. The other four rejects
+// are covered by the count, since what they would be CALLED if wrongly
+// loaded is not worth guessing at.
+//==============================================================================
+
+dcl-proc test_filename_rule export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t) inz(*likeds);
+
+  SCCOLL_init(coll);
+  assert(SCCOLL_load_dir(coll: g_nam): 'filename fixture loaded');
+
+  // good.yaml, also.yml, under_score-dash9.yaml - and nothing else
+  iEqual(3: SCCOLL_count(coll): 'three of the nine files are definitions');
+
+  nEqual(true: SCCOLL_find(coll: 'good': def):
+         'a plain lower-case name loads');
+  nEqual(true: SCCOLL_find(coll: 'also': def):
+         '.yml is as legal an extension as .yaml');
+  nEqual(true: SCCOLL_find(coll: 'under_score-dash9': def):
+         'underscore, hyphen and digits are all legal in a base name');
+
+  nEqual(false: SCCOLL_find(coll: 'bad': def):
+         'a capital letter in the base name is not legal');
+  nEqual(false: SCCOLL_find(coll: 'upper': def):
+         'and neither is a capitalised extension');
+
+end-proc;
+
+
+//##############################################################################
+//##                                                                          ##
+//##  A BLANK IN THE FILENAME                                                 ##
+//##                                                                          ##
+//##############################################################################
+//
+// MEASURED - the name rule must be applied to the filename AS IT IS ON DISK,
+// not to a trimmed copy of it. A blank is not in [a-z\-_0-9], so upstream
+// rejects a name carrying one and warns with the blank intact:
+//
+//     WARNING: Ignoring file: /path/trail.yaml
+//
+// RMSC trims first, so 'trail.yaml ' passes the check as 'trail.yaml'. It then
+// tries to open the trimmed path - a file that is not the one on disk - and
+// fails with a load error in its own wording. Upstream never opens it at all.
+//
+// A SEPARATE DIRECTORY from the nam_ fixture, deliberately. The two could
+// share one, since every file added here is meant to be ignored and the count
+// would stay at three - but the nam_ count is a clean statement about the
+// character-class rule, and these files carry a fixture-creation risk that
+// the character-class files do not. Keeping them apart means that if a blank
+// ever fails to reach disk intact, only this test is affected and
+// test_filename_rule stays trustworthy.
+//
+// THE FIXTURE IS VERIFIED BEFORE IT IS TRUSTED. If a trailing blank were
+// trimmed on the way to disk, the file would land as 'trail.yaml' - a legal
+// name - and load as service 'trail'. That is indistinguishable from the
+// defect by its result: both give a service called 'trail'. So the test reads
+// the directory back and asserts the blank is really there before it asserts
+// anything about loading. Without that, a red result could mean either the
+// defect or a broken fixture, and CLAUDE.md is explicit that a suite must not
+// report something it has not established.
+//
+// The risk is not symmetric. IFS paths are varchar, so a LEADING blank is
+// carried by any implementation; a TRAILING one is lost by anything that
+// applies %trimr on the way to the API. The trailing case is the one that
+// needed proving, and it is the one measured as accepted.
+//==============================================================================
+
+//------------------------------------------------------------------------------
+// blk_setup - one legal name and three that carry a blank
+//------------------------------------------------------------------------------
+dcl-proc blk_setup;
+
+  dcl-s y like(STRING_t);
+
+  g_blk = '/tmp/rmsc-sccoll-blank-' + %trim(psds.current_user);
+
+  IFS_crtdir(g_blk);
+
+  y = 'start_cmd: /usr/bin/rmscblk' + LF;
+  y += 'check_alive: 8130' + LF;
+
+  // The only legal name here. Its presence proves the loader ran at all, so
+  // that a count of one cannot be confused with a count of none.
+  write_file(%trim(g_blk) + '/plain.yaml': y);
+
+  // Trailing blank - accepted by RMSC today, rejected upstream. The literal
+  // below really does end in a blank and that is not a typo; STMF_t is
+  // varchar, so the length is carried and the blank reaches the API.
+  write_file(%trim(g_blk) + '/trail.yaml ': y);
+
+  // Leading blank - the same rule, the other end of the name
+  write_file(%trim(g_blk) + '/ lead.yaml': y);
+
+  // CONTROL - a blank in the MIDDLE, which no trimming touches and which is
+  // already rejected. It is what shows the defect is specifically about
+  // trimming rather than about blanks in general.
+  write_file(%trim(g_blk) + '/x y.yaml': y);
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// blk_teardown - remove the fixture, without trimming the names
+//
+// NOTE THE MISSING %trim ON filename. Every other teardown in this suite
+// writes %trim(filename), which is correct there and would be a bug here: it
+// would ask for 'trail.yaml' and leave 'trail.yaml ' on disk, so the directory
+// would never empty, IFS_dltdir would fail silently, and the next run would
+// inherit a fixture it did not write. IFS_DIR_FILENAME_t is varchar, so the
+// untrimmed value is the exact name.
+//------------------------------------------------------------------------------
+dcl-proc blk_teardown;
+
+  dcl-s dir      pointer;
+  dcl-s filename like(IFS_DIR_FILENAME_t);
+
+  dir = IFS_opendir(g_blk);
+  if dir <> *null;
+    dow IFS_readdir(dir: filename);
+      if filename <> '.' and filename <> '..';
+        IFS_remove_file(%trim(g_blk) + '/' + filename);
+      endif;
+    enddo;
+    IFS_closedir(dir);
+    IFS_dltdir(g_blk);
+  endif;
+
+  assert((not IFS_isa_directory(g_blk)):
+         'Blank-name fixture tree ' + %trim(g_blk) + ' not removed');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// blk_entry_len - the LENGTH of the first directory entry starting with prefix
+//
+// Length, not existence, because an RPG comparison blank-pads the shorter
+// operand: 'trail.yaml' and 'trail.yaml ' compare EQUAL, so no equality test
+// can tell them apart. The length can, and it is the only thing that can.
+// Returns 0 when nothing matches.
+//------------------------------------------------------------------------------
+dcl-proc blk_entry_len;
+  dcl-pi *n like(INTEGER_t);
+    dir_path like(STMF_t) const;
+    prefix   varchar(64) const;
+  end-pi;
+
+  dcl-s dir      pointer;
+  dcl-s filename like(IFS_DIR_FILENAME_t);
+  dcl-s found    like(INTEGER_t) inz(0);
+
+  dir = IFS_opendir(dir_path);
+  if dir = *null;
+    return 0;
+  endif;
+
+  dow IFS_readdir(dir: filename);
+    if %len(filename) >= %len(prefix)
+       and %subst(filename: 1: %len(prefix)) = prefix;
+      found = %len(filename);
+      leave;
+    endif;
+  enddo;
+
+  IFS_closedir(dir);
+
+  return found;
+
+end-proc;
+
+//==============================================================================
+// A blank in the filename is not trimmed away before the rule is applied
+//
+// coll.bad_count IS THE ASSERTION THAT CARRIES THIS TEST. Everything else here
+// passes whether the rule works or not, and this test shipped green once
+// because it had only the rest.
+//
+// The reason is that the right answer and the wrong one end in the same place.
+// Correct: the name is rejected, the file is skipped, no service. Today: the
+// trimmed name passes the rule, RMSC opens /dir/trail.yaml, which is not the
+// file on disk, the open fails - and still no service. A count of services, or
+// an absence-by-name, cannot tell those apart. That is precisely the shape
+// CLAUDE.md records as having hidden three defects here: an assertion true of
+// both the behaviour wanted and the behaviour present.
+//
+// What separates them is whether anything was RECORDED. A file rejected by the
+// filename rule is skipped in silence. A file accepted and then failing to
+// open is a load failure, and lands in the collection's bad-definition list -
+// the same list test_broken_definition_recorded reads, and what SCMAIN prints
+// as WARNING. So the correct behaviour leaves bad_count at zero and the defect
+// cannot.
+//
+// Expect 2 today, not 1: '%trim' takes blanks off BOTH ends, so ' lead.yaml'
+// is accepted and fails to open exactly as 'trail.yaml ' does. 'x y.yaml' adds
+// nothing to it - trimming does not touch a blank in the middle, so the rule
+// rejects it and it is skipped silently, which is the control working.
+//
+// ORDER. The two fixture-integrity assertions come first: they establish the
+// blanks reached disk, without which nothing below is about a fixture that
+// exists. bad_count comes next, ahead of the service count, because it is the
+// one that discriminates and the report should say so before it says anything
+// weaker.
+//==============================================================================
+
+dcl-proc test_filename_blank_not_trimmed export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t) inz(*likeds);
+
+  // FIXTURE INTEGRITY - 'trail.yaml ' is eleven characters, not ten
+  iEqual(11: blk_entry_len(g_blk: 'trail.yaml'):
+         'the trailing blank reached disk - if this fails the rest of ' +
+         'this test is meaningless, and nothing below it is evidence');
+
+  // FIXTURE INTEGRITY - ' lead.yaml' still begins with a blank
+  iEqual(10: blk_entry_len(g_blk: ' lead'):
+         'the leading blank reached disk');
+
+  SCCOLL_init(coll);
+  assert(SCCOLL_load_dir(coll: g_blk): 'blank-name fixture loaded');
+
+  // THE DISCRIMINATING ASSERTION. A name the rule rejects is skipped without
+  // a word; a name it accepts and then cannot open is recorded here. Only
+  // this tells the two apart - see the header.
+  iEqual(0: coll.bad_count:
+         'a blank in the name is rejected silently, not accepted and then ' +
+         'recorded as a definition that would not load');
+
+  // plain.yaml, and nothing else
+  iEqual(1: SCCOLL_count(coll): 'one of the four files is a definition');
+
+  nEqual(true: SCCOLL_find(coll: 'plain': def):
+         'the legal name loads, so the loader did run');
+
+  nEqual(false: SCCOLL_find(coll: 'trail': def):
+         'a trailing blank is part of the name, and not legal in one');
+  nEqual(false: SCCOLL_find(coll: 'lead': def):
+         'nor is a leading blank');
+
+end-proc;
+
+//##############################################################################
+//##                                                                          ##
+//##  A DIRECTORY PATH ENDING IN A SEPARATOR                                  ##
+//##                                                                          ##
+//##############################################################################
+//
+// FIXED. This test was written red and is kept as the regression guard.
+//
+// WHAT IT WAS. Given a directory that already ended in '/', RMSC concatenated
+// and doubled the separator:
+//
+//     RMSC:      /tmp/x/slash//somefile.yaml
+//     upstream:  /tmp/x/slash/somefile.yaml
+//
+// A trailing slash is what shell tab-completion produces, so it was easy to
+// arrive at without meaning to. The defect was pre-existing rather than
+// introduced by this work.
+//
+// WHAT IT IS NOW. Measured after the fix, with the directory given as
+// '/tmp/x/':
+//
+//     Defined in: /tmp/x/rmscslash.yaml
+//
+// byte-identical on both implementations, and the skip warning likewise. So
+// the stored path itself was measured correct, not merely the property this
+// test asserts.
+//
+// WHAT THIS TEST CAN AND CANNOT SEE. SCDEF_t exposes no field holding the file
+// a definition was read from - nothing in any suite reads one, and there is no
+// SCDEF accessor for it - so the doubled path itself could not be asserted
+// from inside the job. SCDEF_effective_dir is the nearest observable: with no
+// 'dir' key present it yields the definition file's own directory, which
+// test_effective_dir_absent in SCDEF.TEST already pins.
+//
+// So this asserts the PROPERTY rather than the path: a trailing separator on
+// the directory must not change anything RMSC derives from it. Comparing the
+// two loads against each other rather than against a literal also means the
+// test does not drift if the fixture directory moves.
+//
+// WHAT A GREEN RESULT PROVES, AND WHAT IT DOES NOT. Green here shows that
+// effective_dir is unaffected by a trailing separator. It does NOT by itself
+// establish that the stored path is right, because effective_dir could in
+// principle normalise where a stored path does not - so if this test is ever
+// the only evidence, it is not enough. That reasoning still stands and is why
+// the paragraph is kept; it is simply no longer the whole picture, since the
+// stored path was measured directly above.
+//
+// NOT DOCUMENTED IN parity.md. docs/parity.md does mention the 'Defined in:'
+// line, but about a different difference that happens to share the output
+// line - the two implementations naming their own copy of the same file. It
+// never recorded the separator doubling, and a reader sent there would come
+// away thinking this had already been accounted for.
+//==============================================================================
+
+dcl-proc test_trailing_slash_directory export;
+
+  dcl-ds bare  likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds slash likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def   likeds(SCDEF_t) inz(*likeds);
+
+  dcl-s bare_dir  varchar(512);
+  dcl-s slash_dir varchar(512);
+
+  SCCOLL_init(bare);
+  assert(SCCOLL_load_dir(bare: g_nam): 'loaded without a trailing slash');
+  nEqual(true: SCCOLL_find(bare: 'good': def): 'good found');
+  bare_dir = SCDEF_effective_dir(def);
+
+  SCCOLL_init(slash);
+  assert(SCCOLL_load_dir(slash: %trim(g_nam) + '/'):
+         'loaded with a trailing slash');
+  nEqual(true: SCCOLL_find(slash: 'good': def):
+         'the same service is found either way');
+  slash_dir = SCDEF_effective_dir(def);
+
+  iEqual(SCCOLL_count(bare): SCCOLL_count(slash):
+         'the same directory, so the same definitions');
+
+  aEqualV(bare_dir: slash_dir:
+          'a trailing separator changes nothing RMSC derives from the path');
 
 end-proc;
