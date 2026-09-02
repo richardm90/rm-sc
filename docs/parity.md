@@ -148,6 +148,49 @@ embedded SQL reads the `ACTIVE_JOB_INFO` performance columns directly"*. That is
 of the plan asked for *"every `QueryUtils` query as embedded SQL"*. Nothing explains twelve lines
 where upstream prints sixty-six, so the narrower output is undocumented rather than designed.
 
+## Beyond the operations — RMSC does not narrate
+
+Upstream reports what it is doing while it does it. RMSC is silent. This affects every
+**state-changing** operation - `start`, `stop`, `kill`, `restart` - for a single service and for
+a group alike; the read-only operations narrate on neither side.
+
+Measured against sc 1.7.1 with one definition, same command both sides:
+
+    $ sc  start rmprog_one          $ scr start rmprog_one
+    Performing operation 'START'    (nothing)
+      on service 'rmprog_one'
+
+    $ sc  stop rmprog_one           $ scr stop rmprog_one
+    Performing operation 'STOP'     (nothing)
+      on service 'rmprog_one'
+    Service 'Prog one' is
+      already stopped
+
+So `scr stop x` succeeds while appearing to do nothing at all.
+
+The family, taken from the message catalogue in `sc.jar` and wider than the two lines above:
+
+| kind | upstream, on stdout |
+|---|---|
+| progress | `Performing operation '%s' on service '%s'`, and an `(asynchronously)` variant |
+| outcome | `Service '%s' successfully started` / `successfully stopped` |
+| no-op | `Service '%s' is already running` / `is already stopped` |
+| partial | `Service '%s' is already partially running. You may need to restart if this operation fails.` |
+| dependency | `Attempting to stop dependent service '%s'...` |
+| refusal | `No start command specified for service '%s'`, `ERROR: No running jobs for service '%s'` |
+
+Note which name each uses: the progress line names the service by its **short** name, the status
+lines by its **friendly** name. Measured, not inferred.
+
+**This is undecided rather than intentional.** Nothing in the plan asks for silence, and no
+reason has been recorded for it - RMSC simply never implemented the narration. It is written down
+here because a divergence with no stated reason is the kind this document exists to catch.
+
+The cost of closing it is that these are new lines on **stdout**, which the consumer parses by
+column position. They do not yield three fields, so a parser that drops malformed rows is
+unaffected - but that is a property of the consumer, not of the output, and is worth confirming
+before the lines are added.
+
 ## Beyond the operations — specifiers
 
 Two differences the gate cannot currently see, because it only exercises defined services.
