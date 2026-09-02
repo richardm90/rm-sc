@@ -19,6 +19,16 @@
 dcl-c SCCOLL_MAX_GROUPS  const(64);
 dcl-c SCCOLL_MAX_ORDER   const(64);
 
+// Two services claiming one criterion is a configuration mistake, not a
+// routine shape. Both truncate SILENTLY when exceeded, as bad_name above
+// does, and silence is the reason these are not smaller: an operator shown
+// sixteen of twenty claimants fixes sixteen and believes the job is done.
+// A family of services sharing one job name is the realistic way to exceed
+// it, and that is not far-fetched. About 70KB of automatic storage at these
+// sizes, which is not worth economising on against that failure.
+dcl-c SCCOLL_MAX_CONFLICTS const(32);
+dcl-c SCCOLL_MAX_CLAIMANTS const(32);
+
 ///
 // A loaded set of service definitions.
 //
@@ -27,6 +37,13 @@ dcl-c SCCOLL_MAX_ORDER   const(64);
 // of static storage.
 ///
 
+// Rows are held in key order. SCCOLL_load_dir is the only thing that adds
+// one, and it sorts after each directory, so a walk by index is a walk in
+// ascending short-name order. Several things rely on that rather than sorting
+// again - the conflict warning's claimant list among them - so a future
+// procedure that adds or moves a row must restore the order before returning.
+// Breaking it would surface only as output in the wrong sequence, and for the
+// conflict block not even that, because upstream's own order is unordered.
 dcl-ds SCCOLL_t qualified template inz;
   list  likeds(LIST_t);
   count like(INTEGER_t) inz(0);
@@ -222,4 +239,55 @@ dcl-pr SCCOLL_start_order like(BOOLEAN_t);
   coll  likeds(SCCOLL_t);
   name  like(SCDEF_NAME_t) const;
   order likeds(SCCOLL_ORDER_t);
+end-pr;
+
+///
+// Services claiming the same liveliness criterion.
+//
+// Two definitions declaring the same job name or port are almost always a
+// mistake: 'check' will report both as running when only one is, and 'stop'
+// on either will end the other's job. Upstream warns about it on every
+// invocation; RMSC said nothing at all until this was added.
+//
+// Finding is separated from reporting because the warning goes to standard
+// ERROR, which a test running inside the job cannot see. A procedure that
+// only printed would be a procedure no test could check - the shape that let
+// three defects survive here behind assertions that could not fail.
+///
+
+dcl-ds SCCOLL_CONFLICT_t qualified template inz;
+  // As SCDEF_criterion_text renders it: 'JOBNAME:MYJOB' or 'PORT:8080'.
+  criterion like(SCDEF_NAME_t) inz('');
+  count     like(INTEGER_t) inz(0);
+  // Short names, ascending by code point.
+  //
+  // Upstream's own order is NOT stable - the same fixture run twice lists the
+  // same services in different orders, because it iterates a hash. So the set
+  // is upstream's contract and the sequence is not, and sorting here diverges
+  // from nothing: no comparison can tell a sorted list from an unsorted one
+  // when the other side is different every time. A stable answer is simply
+  // better to live with, and it is the only one a test can assert.
+  name      like(SCDEF_NAME_t) dim(SCCOLL_MAX_CLAIMANTS);
+end-ds;
+
+dcl-ds SCCOLL_CONFLICTS_t qualified template inz;
+  count like(INTEGER_t) inz(0);
+  item  likeds(SCCOLL_CONFLICT_t) dim(SCCOLL_MAX_CONFLICTS);
+end-ds;
+
+///
+// Every criterion claimed by more than one service.
+//
+// A definition repeating a criterion does not conflict with itself: upstream
+// does not warn for 'check_alive: X,X', and neither does this - the claimants
+// are counted per definition, not per criterion instance.
+//
+// @param the collection
+// @param the conflicts found, cleared on entry
+// @return how many criteria are claimed by more than one service
+///
+
+dcl-pr SCCOLL_conflicts like(INTEGER_t);
+  coll      likeds(SCCOLL_t);
+  conflicts likeds(SCCOLL_CONFLICTS_t);
 end-pr;

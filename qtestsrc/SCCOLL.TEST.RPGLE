@@ -76,6 +76,33 @@ dcl-pr blk_entry_len like(INTEGER_t);
   prefix   varchar(64) const;
 end-pr;
 
+dcl-s g_cfl like(STMF_t);
+
+dcl-pr cfl_setup end-pr;
+
+dcl-pr cfl_teardown end-pr;
+
+dcl-pr cfl_rmdir;
+  path like(STMF_t) const;
+end-pr;
+
+dcl-pr cfl_write;
+  suffix   varchar(32) const;
+  short    varchar(64) const;
+  friendly varchar(64) const;
+  criteria varchar(128) const;
+end-pr;
+
+dcl-pr cfl_load;
+  suffix varchar(32) const;
+  coll   likeds(SCCOLL_t);
+end-pr;
+
+dcl-pr cfl_index like(INTEGER_t);
+  conflicts likeds(SCCOLL_CONFLICTS_t) const;
+  want      varchar(64) const;
+end-pr;
+
 dcl-pr cp_before like(BOOLEAN_t);
   a_val varchar(512) const;
   b_val varchar(512) const;
@@ -172,6 +199,7 @@ dcl-proc setUpSuite export;
   fil_setup();
   nam_setup();
   blk_setup();
+  cfl_setup();
 
 end-proc;
 
@@ -182,6 +210,7 @@ dcl-proc tearDownSuite export;
   fil_teardown();
   nam_teardown();
   blk_teardown();
+  cfl_teardown();
 
 end-proc;
 
@@ -2423,5 +2452,478 @@ dcl-proc test_trailing_slash_directory export;
 
   aEqualV(bare_dir: slash_dir:
           'a trailing separator changes nothing RMSC derives from the path');
+
+end-proc;
+
+
+//##############################################################################
+//##                                                                          ##
+//##  CONFLICTING LIVELINESS CRITERIA                                         ##
+//##                                                                          ##
+//##############################################################################
+//
+// MEASURED - upstream warns when two or more services declare the SAME
+// liveliness criterion. RMSC says nothing at all. On stderr, on every
+// operation alike - check, list, groups, info - so it happens once after the
+// load rather than per operation, and -q suppresses it:
+//
+//     WARNING: the following services all have conflicting definitions for
+//     liveliness check 'JOBNAME:RMSCP9DEADJOB':
+//         rmscp9_alpha (Alpha svc)
+//         rmscp9_bravo (Bravo svc)
+//
+// A header line, then one indented line per service: four spaces, short name,
+// then the friendly name in parentheses. Two separate conflicting criteria
+// produce two separate blocks. A single definition repeating one criterion
+// does not warn - a service cannot conflict with itself.
+//
+// FINDING IS SPLIT FROM PRINTING, because stderr is not observable from inside
+// the ILE job. These tests exercise SCCOLL_conflicts; the warning text, its
+// stream and its suppression by -q belong to the output comparison.
+//
+// WHY EXACT MEMBER ORDER IS ASSERTED HERE, WHICH IS NOT USUAL. Upstream's
+// order is NOT a contract: the identical fixture run twice gave the five
+// services in two different orders, because it is Java hash iteration order.
+// The SET is upstream's contract and the sequence is not. RMSC sorts instead,
+// on the grounds that deterministic output is easier to live with and no
+// comparison against upstream can tell the difference. That divergence is what
+// makes an exact order assertion legitimate - mimicking upstream faithfully
+// would have meant asserting membership only.
+//
+// WHAT IS NOT ASSERTED: the order of the CONFLICTS themselves. Only member
+// order is specified, so the tests look conflicts up by criterion text through
+// cfl_index rather than assuming item(1) is the one they mean. Asserting an
+// order nothing specifies would invent a contract and go red on a change
+// nobody agreed was wrong.
+//
+// WHICH TESTS CATCH WHICH DIRECTION OF WRONGNESS. Six of these eight fail
+// against a finder that UNDER-reports; two cannot, and that is by design
+// rather than by oversight:
+//
+//     test_conflicts_none          expects 0
+//     test_conflicts_self_repeat   expects 0
+//
+// Both pass against a finder that has not been written - a stub returning zero
+// satisfies them - which was confirmed by running this group against exactly
+// such a stub. They are here for the OTHER direction: a finder that
+// OVER-reports. test_conflicts_self_repeat is the one that catches counting
+// criteria rather than distinct services, which is the plausible wrong answer
+// and one no other test here would notice.
+//
+// So neither is redundant, and neither should be deleted for passing early.
+// Read the two lists together: the six prove a wrong answer is detected, the
+// two prove a right answer is not over-reported.
+//
+// THE SORT FIXTURE DISCRIMINATES BY COLLATION, deliberately. Its four names
+// differ at one character, chosen so code point and EBCDIC disagree:
+//
+//     code point   9one, _two, athree, zulu
+//     EBCDIC       _two, athree, zulu, 9one
+//
+// and they are written in a third order again. Names differing only in
+// letters would have proved nothing, since every collation agrees about those
+// - the same trap the ord_ fixture header records.
+//==============================================================================
+
+//------------------------------------------------------------------------------
+// cfl_setup - one subdirectory per case
+//
+// SCCOLL_load_dir does not recurse, which test_discovery pins, so each
+// subdirectory is a collection of its own and each test's counts are its own.
+// A single shared directory could not express "no conflicts at all" or "two
+// conflicts and no more" at the same time as the rest.
+//------------------------------------------------------------------------------
+dcl-proc cfl_setup;
+
+  g_cfl = '/tmp/rmsc-sccoll-conflict-' + %trim(psds.current_user);
+  IFS_crtdir(g_cfl);
+
+  IFS_crtdir(%trim(g_cfl) + '/job');
+  IFS_crtdir(%trim(g_cfl) + '/port');
+  IFS_crtdir(%trim(g_cfl) + '/sort');
+  IFS_crtdir(%trim(g_cfl) + '/two');
+  IFS_crtdir(%trim(g_cfl) + '/none');
+  IFS_crtdir(%trim(g_cfl) + '/self');
+  IFS_crtdir(%trim(g_cfl) + '/mixed');
+  IFS_crtdir(%trim(g_cfl) + '/case');
+
+  // Two services sharing a job criterion. Written bravo first so that the
+  // expected order is not the creation order.
+  cfl_write('job': 'rmsccfl_bravo': 'Bravo svc': 'rmsccfldeadjob');
+  cfl_write('job': 'rmsccfl_alpha': 'Alpha svc': 'rmsccfldeadjob');
+
+  // Two services sharing a port. Written delta first, for the same reason.
+  cfl_write('port': 'rmsccfl_delta':   'Delta svc':   '55401');
+  cfl_write('port': 'rmsccfl_charlie': 'Charlie svc': '55401');
+
+  // Four services on one criterion. Write order is athree, zulu, 9one, _two -
+  // neither the code-point order nor the EBCDIC one. See the header.
+  cfl_write('sort': 'rmsccfl_athree': 'A three': 'rmsccflsortjob');
+  cfl_write('sort': 'rmsccfl_zulu':   'Zulu':    'rmsccflsortjob');
+  cfl_write('sort': 'rmsccfl_9one':   'Nine one':'rmsccflsortjob');
+  cfl_write('sort': 'rmsccfl__two':   'Under two':'rmsccflsortjob');
+
+  // Two separate conflicts in one collection, one job and one port
+  cfl_write('two': 'rmsccfl_india': 'India svc': 'rmsccfltwojob');
+  cfl_write('two': 'rmsccfl_hotel': 'Hotel svc': 'rmsccfltwojob');
+  cfl_write('two': 'rmsccfl_kilo':  'Kilo svc':  '55402');
+  cfl_write('two': 'rmsccfl_juliet':'Juliet svc':'55402');
+
+  // Nothing shared
+  cfl_write('none': 'rmsccfl_lima': 'Lima svc': 'rmsccflnonejob');
+  cfl_write('none': 'rmsccfl_mike': 'Mike svc': '55403');
+
+  // One definition naming the same criterion twice, and one unrelated
+  // service so the collection is not a single row
+  cfl_write('self': 'rmsccfl_november': 'November svc':
+            'rmsccflselfjob,rmsccflselfjob');
+  cfl_write('self': 'rmsccfl_oscar': 'Oscar svc': '55404');
+
+  // One shared criterion and one unique one on the same service
+  cfl_write('mixed': 'rmsccfl_papa':   'Papa svc':
+            'rmsccflsharedjob,55405');
+  cfl_write('mixed': 'rmsccfl_quebec': 'Quebec svc': 'rmsccflsharedjob');
+
+  // The same job name written in two cases
+  cfl_write('case': 'rmsccfl_sierra': 'Sierra svc': 'rmsccflcasejob');
+  cfl_write('case': 'rmsccfl_romeo':  'Romeo svc':  'RMSCCFLCASEJOB');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// cfl_write - one definition, in one of the case subdirectories
+//------------------------------------------------------------------------------
+dcl-proc cfl_write;
+  dcl-pi *n;
+    suffix   varchar(32) const;
+    short    varchar(64) const;
+    friendly varchar(64) const;
+    criteria varchar(128) const;
+  end-pi;
+
+  dcl-s y like(STRING_t);
+
+  y = 'name: ' + %trim(friendly) + LF;
+  y += 'start_cmd: /usr/bin/rmsccfl' + LF;
+  y += 'check_alive: ' + %trim(criteria) + LF;
+
+  write_file(%trim(g_cfl) + '/' + %trim(suffix) + '/' +
+             %trim(short) + '.yaml': y);
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// cfl_load - load one case subdirectory into a fresh collection
+//------------------------------------------------------------------------------
+dcl-proc cfl_load;
+  dcl-pi *n;
+    suffix varchar(32) const;
+    coll   likeds(SCCOLL_t);
+  end-pi;
+
+  SCCOLL_init(coll);
+  assert(SCCOLL_load_dir(coll: %trim(g_cfl) + '/' + %trim(suffix)):
+         'conflict fixture ' + %trim(suffix) + ' loaded');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// cfl_index - which conflict carries this criterion? 0 if none does
+//
+// Used instead of assuming item(1) is the one a test means. Conflict order is
+// not specified, so a test that assumed one would be asserting a contract
+// nobody has agreed.
+//------------------------------------------------------------------------------
+dcl-proc cfl_index;
+  dcl-pi *n like(INTEGER_t);
+    conflicts likeds(SCCOLL_CONFLICTS_t) const;
+    want      varchar(64) const;
+  end-pi;
+
+  dcl-s i like(INTEGER_t);
+
+  for i = 1 to conflicts.count;
+    if %trimr(conflicts.item(i).criterion) = %trimr(want);
+      return i;
+    endif;
+  endfor;
+
+  return 0;
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// cfl_rmdir - empty one directory and remove it
+//------------------------------------------------------------------------------
+dcl-proc cfl_rmdir;
+  dcl-pi *n;
+    path like(STMF_t) const;
+  end-pi;
+
+  dcl-s dir      pointer;
+  dcl-s filename like(IFS_DIR_FILENAME_t);
+
+  dir = IFS_opendir(path);
+  if dir = *null;
+    return;
+  endif;
+
+  dow IFS_readdir(dir: filename);
+    if filename <> '.' and filename <> '..';
+      IFS_remove_file(%trim(path) + '/' + filename);
+    endif;
+  enddo;
+
+  IFS_closedir(dir);
+  IFS_dltdir(path);
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// cfl_teardown - the subdirectories first, then the parent
+//------------------------------------------------------------------------------
+dcl-proc cfl_teardown;
+
+  cfl_rmdir(%trim(g_cfl) + '/job');
+  cfl_rmdir(%trim(g_cfl) + '/port');
+  cfl_rmdir(%trim(g_cfl) + '/sort');
+  cfl_rmdir(%trim(g_cfl) + '/two');
+  cfl_rmdir(%trim(g_cfl) + '/none');
+  cfl_rmdir(%trim(g_cfl) + '/self');
+  cfl_rmdir(%trim(g_cfl) + '/mixed');
+  cfl_rmdir(%trim(g_cfl) + '/case');
+
+  IFS_dltdir(g_cfl);
+
+  assert((not IFS_isa_directory(g_cfl)):
+         'Conflict fixture tree ' + %trim(g_cfl) + ' not removed');
+
+end-proc;
+
+//==============================================================================
+// Two services sharing a job criterion are one conflict with two members
+//
+// The criterion is rendered upper-cased, as SCDEF_criterion_text does
+// everywhere else - test_criterion_text_upper_cases_job in SCDEF.TEST pins
+// that separately.
+//==============================================================================
+
+dcl-proc test_conflicts_job export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds cf   likeds(SCCOLL_CONFLICTS_t) inz(*likeds);
+  dcl-s  n    like(INTEGER_t);
+
+  cfl_load('job': coll);
+
+  iEqual(1: SCCOLL_conflicts(coll: cf): 'one conflicting criterion');
+  iEqual(1: cf.count: 'and the structure agrees');
+
+  n = cfl_index(cf: 'JOBNAME:RMSCCFLDEADJOB');
+  assert((n > 0): 'the shared job criterion is reported, upper-cased');
+
+  iEqual(2: cf.item(n).count: 'claimed by two services');
+  aEqualV('rmsccfl_alpha': cf.item(n).name(1): 'first member');
+  aEqualV('rmsccfl_bravo': cf.item(n).name(2): 'second member');
+
+end-proc;
+
+//==============================================================================
+// A shared port renders as PORT:<n>
+//==============================================================================
+
+dcl-proc test_conflicts_port export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds cf   likeds(SCCOLL_CONFLICTS_t) inz(*likeds);
+  dcl-s  n    like(INTEGER_t);
+
+  cfl_load('port': coll);
+
+  iEqual(1: SCCOLL_conflicts(coll: cf): 'one conflicting criterion');
+
+  n = cfl_index(cf: 'PORT:55401');
+  assert((n > 0): 'the shared port criterion is reported as PORT:55401');
+
+  iEqual(2: cf.item(n).count: 'claimed by two services');
+  aEqualV('rmsccfl_charlie': cf.item(n).name(1): 'first member');
+  aEqualV('rmsccfl_delta':   cf.item(n).name(2): 'second member');
+
+end-proc;
+
+//==============================================================================
+// More than two services, and the member order is code point ascending
+//
+// The four names are written athree, zulu, 9one, _two. EBCDIC would order them
+// _two, athree, zulu, 9one; code point orders them as asserted below. Neither
+// is the write order, so readdir order alone cannot produce a pass and nor can
+// the wrong collation.
+//==============================================================================
+
+dcl-proc test_conflicts_sorted_members export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds cf   likeds(SCCOLL_CONFLICTS_t) inz(*likeds);
+  dcl-s  n    like(INTEGER_t);
+
+  cfl_load('sort': coll);
+
+  iEqual(1: SCCOLL_conflicts(coll: cf): 'one conflicting criterion');
+
+  n = cfl_index(cf: 'JOBNAME:RMSCCFLSORTJOB');
+  assert((n > 0): 'the shared criterion is reported');
+
+  iEqual(4: cf.item(n).count: 'all four services listed');
+  aEqualV('rmsccfl_9one':   cf.item(n).name(1): 'digit sorts first');
+  aEqualV('rmsccfl__two':   cf.item(n).name(2): 'then underscore');
+  aEqualV('rmsccfl_athree': cf.item(n).name(3): 'then a');
+  aEqualV('rmsccfl_zulu':   cf.item(n).name(4): 'then z');
+
+end-proc;
+
+//==============================================================================
+// Two separate conflicts are two separate entries
+//
+// Looked up by criterion, not by position: see the group header on why
+// conflict order is not asserted.
+//==============================================================================
+
+dcl-proc test_conflicts_two_separate export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds cf   likeds(SCCOLL_CONFLICTS_t) inz(*likeds);
+  dcl-s  j    like(INTEGER_t);
+  dcl-s  p    like(INTEGER_t);
+
+  cfl_load('two': coll);
+
+  iEqual(2: SCCOLL_conflicts(coll: cf): 'two conflicting criteria');
+
+  j = cfl_index(cf: 'JOBNAME:RMSCCFLTWOJOB');
+  p = cfl_index(cf: 'PORT:55402');
+  assert((j > 0): 'the job conflict is reported');
+  assert((p > 0): 'the port conflict is reported');
+  assert((j <> p): 'and they are two entries, not one');
+
+  iEqual(2: cf.item(j).count: 'two services on the job');
+  aEqualV('rmsccfl_hotel': cf.item(j).name(1): 'job member 1');
+  aEqualV('rmsccfl_india': cf.item(j).name(2): 'job member 2');
+
+  iEqual(2: cf.item(p).count: 'two services on the port');
+  aEqualV('rmsccfl_juliet': cf.item(p).name(1): 'port member 1');
+  aEqualV('rmsccfl_kilo':   cf.item(p).name(2): 'port member 2');
+
+end-proc;
+
+//==============================================================================
+// Nothing shared is no conflict
+//==============================================================================
+
+dcl-proc test_conflicts_none export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds cf   likeds(SCCOLL_CONFLICTS_t) inz(*likeds);
+
+  cfl_load('none': coll);
+
+  iEqual(0: SCCOLL_conflicts(coll: cf): 'no conflicts');
+  iEqual(0: cf.count: 'and nothing recorded');
+
+end-proc;
+
+//==============================================================================
+// A service cannot conflict with itself
+//
+// 'check_alive: X,X' is one service naming one criterion twice. Upstream does
+// not warn about it, and a finder that counted criteria rather than distinct
+// SERVICES would report it - which is the plausible wrong answer here, and the
+// reason this case is worth its own fixture.
+//==============================================================================
+
+dcl-proc test_conflicts_self_repeat export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds cf   likeds(SCCOLL_CONFLICTS_t) inz(*likeds);
+
+  cfl_load('self': coll);
+
+  iEqual(0: SCCOLL_conflicts(coll: cf):
+         'one service repeating a criterion is not a conflict');
+  iEqual(0: cf.count: 'and nothing recorded');
+
+end-proc;
+
+//==============================================================================
+// Only the shared criterion is reported, not the whole service
+//
+// rmsccfl_papa declares a shared job criterion AND a port nobody else uses.
+// The conflict is the criterion, not the service, so the unique port must
+// appear nowhere - asserted explicitly, because a finder that reported every
+// criterion belonging to a conflicted service would still pass the count.
+//==============================================================================
+
+dcl-proc test_conflicts_only_the_shared_criterion export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds cf   likeds(SCCOLL_CONFLICTS_t) inz(*likeds);
+  dcl-s  n    like(INTEGER_t);
+
+  cfl_load('mixed': coll);
+
+  iEqual(1: SCCOLL_conflicts(coll: cf): 'one conflict, not two');
+
+  n = cfl_index(cf: 'JOBNAME:RMSCCFLSHAREDJOB');
+  assert((n > 0): 'the shared criterion is reported');
+  iEqual(2: cf.item(n).count: 'claimed by two services');
+  aEqualV('rmsccfl_papa':   cf.item(n).name(1): 'first member');
+  aEqualV('rmsccfl_quebec': cf.item(n).name(2): 'second member');
+
+  iEqual(0: cfl_index(cf: 'PORT:55405'):
+         'the criterion nobody shares is not reported anywhere');
+
+end-proc;
+
+//==============================================================================
+// MEASURED - two spellings of one job name are one criterion
+//
+// Upstream upper-cases a job criterion as it parses, which is pinned by
+// test_criterion_text_upper_cases_job in SCDEF.TEST. Two services writing the
+// same job name in different cases therefore collide, because by the time they
+// are compared both have been folded.
+//
+// Written as DERIVED - that last step was inference, no fixture having been
+// run with two services differing only in case - and promoted when it was
+// measured against sc 1.7.1:
+//
+//     rmsccase_upper   check_alive: RMSCCASEJOB
+//     rmsccase_lower   check_alive: rmsccasejob
+//
+//     WARNING: ... conflicting definitions for liveliness check
+//     'JOBNAME:RMSCCASEJOB':
+//         rmsccase_upper (Upper case)
+//         rmsccase_lower (Lower case)
+//
+// They collide, and the criterion renders upper-cased. The inference held.
+// It was still worth labelling: the one derived expectation in this work that
+// did NOT hold, the [a,,b] flow sequence in SCYAML.TEST, was also one short
+// step from a measured fact, and looked no less safe than this one.
+//==============================================================================
+
+dcl-proc test_conflicts_case_insensitive export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds cf   likeds(SCCOLL_CONFLICTS_t) inz(*likeds);
+  dcl-s  n    like(INTEGER_t);
+
+  cfl_load('case': coll);
+
+  iEqual(1: SCCOLL_conflicts(coll: cf):
+         'the same job name in two cases is one criterion');
+
+  n = cfl_index(cf: 'JOBNAME:RMSCCFLCASEJOB');
+  assert((n > 0): 'reported once, upper-cased');
+  iEqual(2: cf.item(n).count: 'claimed by both services');
+  aEqualV('rmsccfl_romeo':  cf.item(n).name(1): 'first member');
+  aEqualV('rmsccfl_sierra': cf.item(n).name(2): 'second member');
 
 end-proc;

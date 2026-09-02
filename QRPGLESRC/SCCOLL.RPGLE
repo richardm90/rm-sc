@@ -600,6 +600,99 @@ dcl-proc SCCOLL_sorts_before export;
 end-proc;
 
 //==============================================================================
+// SCCOLL_conflicts
+//   Every criterion claimed by more than one service
+//
+// Two definitions naming the same job or port is a configuration mistake with
+// quiet consequences: 'check' reports both as running when only one is, and
+// 'stop' on either ends the other's job. Upstream warns on every invocation.
+//
+// The claimants come out in ascending short-name order without a sort here,
+// because the collection is already in that order - it is sorted once when
+// each directory is read, and every walk of it inherits that. Sorting again
+// would be a second answer to a question already answered, which is how the
+// group ordering came to differ from the collection's in the first place.
+//==============================================================================
+
+dcl-proc SCCOLL_conflicts export;
+  dcl-pi *n like(INTEGER_t);
+    coll      likeds(SCCOLL_t);
+    conflicts likeds(SCCOLL_CONFLICTS_t);
+  end-pi;
+
+  dcl-ds def   likeds(SCDEF_t) inz(*likeds);
+  dcl-ds other likeds(SCDEF_t) inz(*likeds);
+  dcl-ds cand  likeds(SCCOLL_CONFLICT_t) inz(*likeds);
+  dcl-s i      like(INTEGER_t);
+  dcl-s j      like(INTEGER_t);
+  dcl-s c      like(INTEGER_t);
+  dcl-s k      like(INTEGER_t);
+  dcl-s text   like(SCDEF_NAME_t);
+  dcl-s seen   like(BOOLEAN_t);
+  dcl-s claims like(BOOLEAN_t);
+
+  clear conflicts;
+
+  for i = 1 to coll.count;
+    if not SCCOLL_get(coll: i: def);
+      iter;
+    endif;
+
+    for c = 1 to def.criteria_count;
+      text = SCDEF_criterion_text(def.criteria(c));
+
+      // Recorded already, either from an earlier definition or from an
+      // earlier criterion of this one. An earlier definition sharing this
+      // criterion must have recorded it, because this definition claiming it
+      // too makes the count at least two.
+      seen = false;
+      for k = 1 to conflicts.count;
+        if conflicts.item(k).criterion = text;
+          seen = true;
+          leave;
+        endif;
+      endfor;
+      if seen;
+        iter;
+      endif;
+
+      clear cand;
+      cand.criterion = text;
+
+      for j = 1 to coll.count;
+        if not SCCOLL_get(coll: j: other);
+          iter;
+        endif;
+
+        // Once per DEFINITION, not once per criterion. 'check_alive: X,X' is
+        // one service naming one thing twice, and upstream does not treat a
+        // service as conflicting with itself.
+        claims = false;
+        for k = 1 to other.criteria_count;
+          if SCDEF_criterion_text(other.criteria(k)) = text;
+            claims = true;
+            leave;
+          endif;
+        endfor;
+
+        if claims and cand.count < SCCOLL_MAX_CLAIMANTS;
+          cand.count += 1;
+          cand.name(cand.count) = other.short_name;
+        endif;
+      endfor;
+
+      if cand.count >= 2 and conflicts.count < SCCOLL_MAX_CONFLICTS;
+        conflicts.count += 1;
+        conflicts.item(conflicts.count) = cand;
+      endif;
+    endfor;
+  endfor;
+
+  return conflicts.count;
+
+end-proc;
+
+//==============================================================================
 // SCCOLL_in_groups
 //   Is this definition in any of these groups?
 //==============================================================================

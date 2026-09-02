@@ -348,6 +348,9 @@ dcl-proc SCMAIN_run export;
   dcl-s shown    like(INTEGER_t);
   dcl-s unusable like(INTEGER_t) inz(0);
   dcl-s bad      like(BOOLEAN_t) inz(false);
+  dcl-s j        like(INTEGER_t);
+  dcl-ds conflicts likeds(SCCOLL_CONFLICTS_t) inz(*likeds);
+  dcl-ds cdef      likeds(SCDEF_t) inz(*likeds);
 
   // Anything the parse stage had to say has been said by now. Left in place
   // it would be reported a second time when this stage returns, which is the
@@ -365,6 +368,31 @@ dcl-proc SCMAIN_run export;
       SCOUT_writeln('WARNING: ' + %trim(coll.bad_name(i)) + ': ' +
                     %trim(coll.bad_err(i)));
     endfor;
+
+    // Two services claiming one criterion. Reported on every operation, as
+    // upstream does - it is a property of the collection, not of whatever is
+    // being asked of it.
+    //
+    // On stderr, which is where upstream puts it and where a warning belongs:
+    // stdout is parsed by column position by the consumer. The load failures
+    // immediately above still go to stdout, which is wrong for the same
+    // reason and is the separate piece of work recorded as D4 - not folded in
+    // here, because moving those is a change to output that is byte-compared
+    // and deserves its own diff.
+    if SCCOLL_conflicts(coll: conflicts) > 0;
+      for i = 1 to conflicts.count;
+        SCOUT_warnln('WARNING: the following services all have conflicting ' +
+                     'definitions for liveliness check ''' +
+                     %trim(conflicts.item(i).criterion) + ''':');
+
+        for j = 1 to conflicts.item(i).count;
+          if SCCOLL_find(coll: conflicts.item(i).name(j): cdef);
+            SCOUT_warnln('    ' + %trim(cdef.short_name) +
+                         ' (' + %trim(cdef.friendly) + ')');
+          endif;
+        endfor;
+      endfor;
+    endif;
   endif;
 
   // Operations over the whole collection

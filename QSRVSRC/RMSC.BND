@@ -110,4 +110,6 @@ STRPGMEXP PGMLVL(*CURRENT) SIGNATURE('RMSC 0.1.0')
   EXPORT SYMBOL(SCCOLL_sorts_before)
   /* Group membership, asked the same way by check, list and groups */
   EXPORT SYMBOL(SCCOLL_in_groups)
+  /* Two services claiming one criterion - found here, reported by SCMAIN */
+  EXPORT SYMBOL(SCCOLL_conflicts)
 ENDPGMEXP
