@@ -108,4 +108,6 @@ STRPGMEXP PGMLVL(*CURRENT) SIGNATURE('RMSC 0.1.0')
   EXPORT SYMBOL(SCDEF_criterion_usable)
   /* The one ordering rule - code point, as upstream sorts */
   EXPORT SYMBOL(SCCOLL_sorts_before)
+  /* Group membership, asked the same way by check, list and groups */
+  EXPORT SYMBOL(SCCOLL_in_groups)
 ENDPGMEXP

@@ -109,7 +109,10 @@ end-pr;
 // upstream only adds the built-in entry when it read them.
 ///
 
-dcl-pr SCEXEC_groups;
+// Returns how many group rows it printed, as SCEXEC_list and
+// SCEXEC_check_all do - and for the same reason: it is the only thing about
+// this procedure a test inside the job can see.
+dcl-pr SCEXEC_groups like(INTEGER_t);
   coll           likeds(SCCOLL_t);
   ignore_groups  like(SCDEF_NAME_t) const;
   ignore_globals like(BOOLEAN_t) const options(*nopass);

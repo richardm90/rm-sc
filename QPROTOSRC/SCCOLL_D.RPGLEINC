@@ -165,16 +165,40 @@ dcl-pr SCCOLL_find like(BOOLEAN_t);
 end-pr;
 
 ///
+// Is this definition in any of these groups?
+//
+// The list is comma separated and matched whole and case-insensitively - a
+// filter of 'filgrp_a' does not exclude a service in 'filgrp_ax'. Measured
+// against sc 1.7.1, which excludes on the whole name.
+//
+// Lives here rather than in SCEXEC because it is a question about a
+// definition, and because two callers asking it two different ways is how the
+// group sort came to differ from the collection's in the first place.
+///
+
+dcl-pr SCCOLL_in_groups like(BOOLEAN_t);
+  def    likeds(SCDEF_t) const;
+  groups like(SCDEF_NAME_t) const;
+end-pr;
+
+///
 // Every distinct group the definitions declare.
 //
 // Built-in groups are not included: 'all' is implicit and upstream does not
 // list it, and whether 'system' should appear depends on what the caller is
 // filtering, which is the caller's business.
+//
+// ignore_groups names SERVICES to leave out, not names to leave out of the
+// answer. A group declared only by excluded services disappears; one an
+// excluded service shared with a surviving one stays, because the survivor
+// still declares it. Omit it, or pass blanks, to describe the whole
+// collection.
 ///
 
 dcl-pr SCCOLL_groups like(INTEGER_t);
-  coll   likeds(SCCOLL_t);
-  groups likeds(SCCOLL_GROUPS_t);
+  coll          likeds(SCCOLL_t);
+  groups        likeds(SCCOLL_GROUPS_t);
+  ignore_groups like(SCDEF_NAME_t) const options(*nopass);
 end-pr;
 
 ///

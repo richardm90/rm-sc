@@ -29,11 +29,6 @@ dcl-pr delay;
   seconds like(INTEGER_t) const;
 end-pr;
 
-dcl-pr ignored like(BOOLEAN_t);
-  def           likeds(SCDEF_t) const;
-  ignore_groups like(SCDEF_NAME_t) const;
-end-pr;
-
 dcl-pr stop_one like(BOOLEAN_t);
   def  likeds(SCDEF_t) const;
   kill like(BOOLEAN_t) const;
@@ -190,41 +185,6 @@ dcl-proc SCEXEC_check export;
 
 end-proc;
 
-//==============================================================================
-// ignored
-//   Is this service in a group the caller asked to skip?
-//==============================================================================
-
-dcl-proc ignored;
-  dcl-pi *n like(BOOLEAN_t);
-    def           likeds(SCDEF_t) const;
-    ignore_groups like(SCDEF_NAME_t) const;
-  end-pi;
-
-  dcl-s rest  like(SCDEF_NAME_t);
-  dcl-s part  like(SCDEF_NAME_t);
-  dcl-s comma like(INTEGER_t);
-
-  rest = STRING_lower(%trim(ignore_groups));
-
-  dow %len(rest) > 0;
-    comma = %scan(',': rest);
-    if comma = 0;
-      part = %trim(rest);
-      rest = '';
-    else;
-      part = %trim(%subst(rest: 1: comma - 1));
-      rest = %trim(%subst(rest: comma + 1));
-    endif;
-
-    if %len(part) > 0 and SCDEF_in_group(def: part);
-      return true;
-    endif;
-  enddo;
-
-  return false;
-
-end-proc;
 
 //==============================================================================
 // SCEXEC_check_all
@@ -244,7 +204,7 @@ dcl-proc SCEXEC_check_all export;
   dcl-s bad   like(BOOLEAN_t) inz(false);
 
   for i = 1 to SCCOLL_count(coll);
-    if SCCOLL_get(coll: i: def) and not ignored(def: ignore_groups);
+    if SCCOLL_get(coll: i: def) and not SCCOLL_in_groups(def: ignore_groups);
       SCEXEC_check(def: bad);
       if bad;
         wrong += 1;
@@ -299,7 +259,7 @@ dcl-proc SCEXEC_list export;
       if not SCDEF_in_group(def: only);
         iter;
       endif;
-    elseif ignored(def: ignore_groups);
+    elseif SCCOLL_in_groups(def: ignore_groups);
       iter;
     endif;
 
@@ -318,88 +278,64 @@ end-proc;
 //==============================================================================
 
 dcl-proc SCEXEC_groups export;
-  dcl-pi *n;
+  dcl-pi *n like(INTEGER_t);
     coll           likeds(SCCOLL_t);
     ignore_groups  like(SCDEF_NAME_t) const;
     ignore_globals like(BOOLEAN_t) const options(*nopass);
   end-pi;
 
   dcl-ds groups likeds(SCCOLL_GROUPS_t) inz(*likeds);
-  dcl-ds def    likeds(SCDEF_t) inz(*likeds);
   dcl-s i    like(INTEGER_t);
   dcl-s j    like(INTEGER_t);
-  dcl-s k    like(INTEGER_t);
   dcl-s seen like(BOOLEAN_t);
-  dcl-s swap like(SCDEF_NAME_t);
-  dcl-s skip_builtin like(BOOLEAN_t);
+  dcl-s skip_builtin like(BOOLEAN_t) inz(false);
 
-  // Groups of the services the caller can see. A group that exists only on
-  // ignored services is not something they asked about.
-  for i = 1 to SCCOLL_count(coll);
-    if not SCCOLL_get(coll: i: def) or ignored(def: ignore_groups);
-      iter;
-    endif;
+  // The distinct groups of the services the caller can see. Asked of the
+  // collection rather than gathered again here: two loops building the same
+  // list is how this one's sort came to differ from the collection's.
+  SCCOLL_groups(coll: groups: ignore_groups);
 
-    for j = 1 to def.group_count;
-      seen = false;
-      for k = 1 to groups.count;
-        if groups.name(k) = def.groups(j);
-          seen = true;
-          leave;
-        endif;
-      endfor;
-      if not seen and groups.count < SCCOLL_MAX_GROUPS;
-        groups.count += 1;
-        groups.name(groups.count) = def.groups(j);
-      endif;
-    endfor;
-  endfor;
-
-  // 'system' is built in and is listed even when its members are filtered
-  // out. 'all' is built in too but upstream does not list it.
-  //
-  // Not, however, when the global directories were skipped: upstream adds
-  // the built-in entry only on the path that read them, so 'groups
-  // --ignore-globals' prints nothing at all.
-  skip_builtin = false;
+  // 'system' is built in and is listed even when every one of its members has
+  // been filtered out - but NOT when the global directories were skipped,
+  // since upstream adds the built-in entry only on the path that read them.
   if %parms() >= 3 and %addr(ignore_globals) <> *null;
     skip_builtin = ignore_globals;
   endif;
 
   if not skip_builtin;
     seen = false;
-    for k = 1 to groups.count;
-      if groups.name(k) = 'system';
+    for i = 1 to groups.count;
+      if groups.name(i) = 'system';
         seen = true;
         leave;
       endif;
     endfor;
+
+    // Inserted in its place rather than appended and re-sorted: the list came
+    // back sorted, and one element does not justify sorting it again.
     if not seen and groups.count < SCCOLL_MAX_GROUPS;
+      i = 1;
+      dow i <= groups.count and SCCOLL_sorts_before(groups.name(i): 'system');
+        i += 1;
+      enddo;
+      for j = groups.count downto i;
+        groups.name(j + 1) = groups.name(j);
+      endfor;
+      groups.name(i) = 'system';
       groups.count += 1;
-      groups.name(groups.count) = 'system';
     endif;
   endif;
-
-  // Alphabetical as upstream lists them - and by the SAME rule the collection
-  // is sorted by, not a native comparison. A native '<' compares EBCDIC, where
-  // a group named web2 sorts AFTER webserver while upstream puts it first.
-  // Measured: three groups declared ax, 9x, __x came back 9x, _x, ax from
-  // upstream and _x, ax, 9x from here.
-  for i = 1 to groups.count - 1;
-    for j = i + 1 to groups.count;
-      if SCCOLL_sorts_before(groups.name(j): groups.name(i));
-        swap = groups.name(i);
-        groups.name(i) = groups.name(j);
-        groups.name(j) = swap;
-      endif;
-    endfor;
-  endfor;
 
   for i = 1 to groups.count;
     SCOUT_writeln(groups.name(i));
   endfor;
 
   SCOUT_writeln('');
+
+  // How many rows were printed, as SCEXEC_list and SCEXEC_check_all report.
+  // It is what makes this procedure answerable from a test at all - stdout is
+  // not reachable from inside the job.
+  return groups.count;
 
 end-proc;
 

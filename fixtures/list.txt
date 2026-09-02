@@ -1,4 +1,4 @@
-webproxy (Web Proxy)
-jobrunner (Job Runner)
-cache (Cache Service)
 apidaemon (API Daemon)
+cache (Cache Service)
+jobrunner (Job Runner)
+webproxy (Web Proxy)

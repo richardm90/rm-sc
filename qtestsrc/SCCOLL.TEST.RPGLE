@@ -44,6 +44,21 @@ dcl-pr ord_setup end-pr;
 
 dcl-pr ord_teardown end-pr;
 
+dcl-s g_fil like(STMF_t);
+
+dcl-pr fil_setup end-pr;
+
+dcl-pr fil_teardown end-pr;
+
+dcl-pr fil_has like(BOOLEAN_t);
+  grp  likeds(SCCOLL_GROUPS_t) const;
+  want varchar(64) const;
+end-pr;
+
+dcl-pr fil_load;
+  coll likeds(SCCOLL_t);
+end-pr;
+
 dcl-pr cp_before like(BOOLEAN_t);
   a_val varchar(512) const;
   b_val varchar(512) const;
@@ -137,6 +152,7 @@ dcl-proc setUpSuite export;
   write_file(%trim(g_sub) + '/db.yaml': y);
 
   ord_setup();
+  fil_setup();
 
 end-proc;
 
@@ -144,6 +160,7 @@ dcl-proc tearDownSuite export;
 
   remove_tree();
   ord_teardown();
+  fil_teardown();
 
 end-proc;
 
@@ -977,5 +994,728 @@ dcl-proc test_search_path_is_ordered export;
 
     prev = cur;
   endfor;
+
+end-proc;
+
+//==============================================================================
+// Filter fixture set-up
+//
+// Six definitions, five distinct declared groups, in a directory of this
+// fixture set's own.
+//
+//   rmscfil_a   filgrp_zx, filgrp_mx
+//   rmscfil_b   filgrp_ax
+//   rmscfil_c   filgrp_9x
+//   rmscfil_d   filgrp__x
+//   rmscfil_e   filgrp_mx, filgrp_ax
+//   rmscfil_f   (no groups at all)
+//
+// Two things are being controlled at once.
+//
+// THE GROUP NAMES DISCRIMINATE THE TWO COLLATIONS. They differ at one
+// character, chosen from the four the measurement on the box used:
+// code point puts them 9x _x ax mx zx (0x39 0x5F 0x61 0x6D 0x7A), the job's
+// EBCDIC collation puts them _x ax mx zx 9x (0x6D 0x81 0x94 0xA9 0xF9). A
+// fixture of alpha/middle/zebra would agree under both and prove nothing -
+// which is exactly why the group-sort defect survived so long, every group
+// name on this system being letters only.
+//
+// THE MEMBERSHIP IS ARRANGED SO THE FILTER CASES SEPARATE. Each filtered
+// case below leaves behind a group that only an EXCLUDED service declared
+// (which must vanish) and a group an excluded service SHARED with a
+// survivor (which must remain). Without the second, filtering services and
+// filtering the answer's group names give the same result and the test
+// cannot tell the two implementations apart.
+//
+// THE WRITE ORDER IS DELIBERATE AND MUST NOT BE TIDIED, for the same reason
+// ord_setup's is: directory read order follows creation order. Written
+// e c a f d b, so neither the read order nor its reverse is any expected
+// answer. Groups are also listed WITHIN each definition in an order that is
+// not the expected one - rmscfil_a declares zx before mx - so the sequence
+// in which group names are first encountered is:
+//
+//   unfiltered            zx mx ax 9x _x      expected  9x _x ax mx zx
+//   ignoring filgrp_mx    ax 9x _x            expected  9x _x ax
+//   ignoring zx and _x    ax 9x mx            expected  9x ax mx
+//
+// and in each case the encounter order, its reverse, the EBCDIC order and
+// the expected order are four different sequences. No test below can pass by
+// accident, and a failure says which mechanism produced the answer.
+//==============================================================================
+
+dcl-proc fil_setup;
+
+  dcl-s y like(STRING_t);
+
+  g_fil = '/tmp/rmsc-sccoll-filter-' + %trim(psds.current_user);
+
+  IFS_crtdir(g_fil);
+
+  // 1st written. Declares filgrp_mx and filgrp_ax - it is excluded by the
+  // filgrp_mx filter, and filgrp_ax must survive it because rmscfil_b
+  // declares that too. This is the shared-group case.
+  y = 'name: Filter echo' + LF;
+  y += 'start_cmd: /usr/bin/rmscfil-e' + LF;
+  y += 'check_alive: 8115' + LF;
+  y += 'groups:' + LF;
+  y += '- filgrp_mx' + LF;
+  y += '- filgrp_ax' + LF;
+  write_file(%trim(g_fil) + '/rmscfil_e.yaml': y);
+
+  // 2nd written. The only declarer of filgrp_9x.
+  y = 'name: Filter charlie' + LF;
+  y += 'start_cmd: /usr/bin/rmscfil-c' + LF;
+  y += 'check_alive: 8113' + LF;
+  y += 'groups:' + LF;
+  y += '- filgrp_9x' + LF;
+  write_file(%trim(g_fil) + '/rmscfil_c.yaml': y);
+
+  // 3rd written. The only declarer of filgrp_zx, and a second declarer of
+  // filgrp_mx. Excluding it by filgrp_zx must take filgrp_zx away while
+  // leaving filgrp_mx, which rmscfil_e also declares; excluding it by
+  // filgrp_mx must take filgrp_zx away too, because nothing else declares
+  // that. filgrp_zx is listed FIRST so the encounter order is not the
+  // expected one.
+  y = 'name: Filter alpha' + LF;
+  y += 'start_cmd: /usr/bin/rmscfil-a' + LF;
+  y += 'check_alive: 8111' + LF;
+  y += 'groups:' + LF;
+  y += '- filgrp_zx' + LF;
+  y += '- filgrp_mx' + LF;
+  write_file(%trim(g_fil) + '/rmscfil_a.yaml': y);
+
+  // 4th written. No groups key at all. It contributes no group name, and
+  // must not contribute a blank one either.
+  y = 'name: Filter foxtrot' + LF;
+  y += 'start_cmd: /usr/bin/rmscfil-f' + LF;
+  y += 'check_alive: 8116' + LF;
+  write_file(%trim(g_fil) + '/rmscfil_f.yaml': y);
+
+  // 5th written. The only declarer of filgrp__x.
+  y = 'name: Filter delta' + LF;
+  y += 'start_cmd: /usr/bin/rmscfil-d' + LF;
+  y += 'check_alive: 8114' + LF;
+  y += 'groups:' + LF;
+  y += '- filgrp__x' + LF;
+  write_file(%trim(g_fil) + '/rmscfil_d.yaml': y);
+
+  // 6th written. Keeps filgrp_ax alive across every filter that excludes
+  // rmscfil_e.
+  y = 'name: Filter bravo' + LF;
+  y += 'start_cmd: /usr/bin/rmscfil-b' + LF;
+  y += 'check_alive: 8112' + LF;
+  y += 'groups:' + LF;
+  y += '- filgrp_ax' + LF;
+  write_file(%trim(g_fil) + '/rmscfil_b.yaml': y);
+
+end-proc;
+
+
+//==============================================================================
+// Filter fixture tear-down
+//
+// Flat, so no subdirectory to empty first. Asserts the removal for the
+// reason ord_teardown does: a leftover rmscfil_* file lands in the directory
+// in a DIFFERENT creation order on the next run, and creation order is one
+// of the variables these fixtures exist to control.
+//==============================================================================
+
+dcl-proc fil_teardown;
+
+  dcl-s dir      pointer;
+  dcl-s filename like(IFS_DIR_FILENAME_t);
+
+  dir = IFS_opendir(g_fil);
+  if dir <> *null;
+    dow IFS_readdir(dir: filename);
+      if filename <> '.' and filename <> '..';
+        IFS_remove_file(%trim(g_fil) + '/' + %trim(filename));
+      endif;
+    enddo;
+    IFS_closedir(dir);
+    IFS_dltdir(g_fil);
+  endif;
+
+  assert((not IFS_isa_directory(g_fil)):
+         'Filter fixture tree ' + %trim(g_fil) + ' not removed');
+
+end-proc;
+
+
+//==============================================================================
+// fil_load - load the filter fixture into a fresh collection
+//
+// Every test below starts the same way. Asserting the load here means a
+// missing fixture FAILS the test that needed it rather than quietly giving
+// it an empty collection to agree with.
+//==============================================================================
+
+dcl-proc fil_load;
+  dcl-pi *n;
+    coll likeds(SCCOLL_t);
+  end-pi;
+
+  SCCOLL_init(coll);
+  assert(SCCOLL_load_dir(coll: g_fil): 'filter fixture loaded');
+  iEqual(6: SCCOLL_count(coll): 'six definitions in the filter fixture');
+
+end-proc;
+
+
+//==============================================================================
+// fil_has - is a group name anywhere in the result?
+//
+// Position-independent, for asserting ABSENCE. A group that must not be
+// there has no position to assert about, and 'name(4) is not filgrp_zx' is
+// satisfied by filgrp_zx sitting at name(2).
+//
+// Compares with plain RPG for the reason aEqualV exists: grp.name(n) is a
+// varying-length array element, and anything reading it through an
+// operational descriptor reads element N with element N-1's length.
+//==============================================================================
+
+dcl-proc fil_has;
+  dcl-pi *n like(BOOLEAN_t);
+    grp  likeds(SCCOLL_GROUPS_t) const;
+    want varchar(64) const;
+  end-pi;
+
+  dcl-s i like(INTEGER_t);
+
+  for i = 1 to grp.count;
+    if %trimr(grp.name(i)) = %trimr(want);
+      return true;
+    endif;
+  endfor;
+
+  return false;
+
+end-proc;
+
+
+//==============================================================================
+// With no filter, the answer is every distinct group declared, sorted by
+// code point
+//
+// The baseline the filtered cases are measured against, and the assertion
+// that the new optional parameter has not disturbed the two-argument form.
+// It is the existing contract restated on a fixture that can actually see a
+// collation mistake, which test_groups' data/web/autostart cannot.
+//
+// Also pins three things the filter work could break in passing:
+//
+//   - rmscfil_f declares no groups at all and must contribute nothing, not
+//     a blank entry. A loop that appends before testing for a name gives
+//     six groups, one of them empty, and the count assertion alone would
+//     catch that only by luck of the array bound.
+//   - the implicit group 'all', which every definition belongs to and which
+//     the filter matches on, is NOT part of the answer. test_groups already
+//     says built-in groups are the caller's decision; teaching the filter
+//     about 'all' is the change most likely to leak it into the result.
+//   - the returned count is the count that was filled.
+//==============================================================================
+
+dcl-proc test_groups_filter_omitted export;
+
+  dcl-ds coll   likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds groups likeds(SCCOLL_GROUPS_t) inz(*likeds);
+  dcl-s  n like(INTEGER_t);
+  dcl-s  i like(INTEGER_t);
+
+  fil_load(coll);
+
+  n = SCCOLL_groups(coll: groups);
+
+  iEqual(5: groups.count: 'five distinct groups declared');
+  iEqual(groups.count: n: 'the returned count is the count filled');
+
+  aEqualV('filgrp_9x': groups.name(1):
+          'group 1 - digit, code point 0x39 (EBCDIC would put it LAST)');
+  aEqualV('filgrp__x': groups.name(2):
+          'group 2 - underscore, code point 0x5F');
+  aEqualV('filgrp_ax': groups.name(3):
+          'group 3 - letter a, code point 0x61 (declared twice, listed once)');
+  aEqualV('filgrp_mx': groups.name(4):
+          'group 4 - letter m, code point 0x6D (declared twice, listed once)');
+  aEqualV('filgrp_zx': groups.name(5):
+          'group 5 - letter z, code point 0x7A (encountered FIRST)');
+
+  nEqual(false: fil_has(groups: 'all'):
+         'the implicit group all is not part of the answer');
+
+  for i = 1 to groups.count;
+    assert((%len(%trimr(groups.name(i))) > 0):
+           'group ' + %char(i) + ' has a name - the definition with no ' +
+           'groups key contributed nothing, not a blank');
+  endfor;
+
+end-proc;
+
+
+//==============================================================================
+// A blank filter excludes nothing
+//
+// Same expectation as the omitted form, reached down the other path. The
+// two are different code: %parms tells you the argument is THERE, and
+// something separate has to decide it is empty. An implementation that
+// checks only %parms treats a blank filter as a list of one nameless group
+// and, depending on how it matches, either excludes nothing (right, by
+// luck) or excludes every service whose group list is empty (wrong, and
+// invisible until a definition has no groups - which rmscfil_f does).
+//
+// Both blanks and a zero-length value, because they are two different
+// values, not one: if SCDEF_NAME_t is varying then *blanks sets the field
+// to its full declared length of blanks while '' sets it to length zero, so
+// a test for %len(ignore) = 0 passes one and fails the other, and a test
+// that scans for a comma without trimming first sees a very long token.
+// SCEXEC_list(coll: '') is already called this way by SCEXEC.TEST, so the
+// zero-length form is one a caller really does pass.
+//==============================================================================
+
+dcl-proc test_groups_filter_blank export;
+
+  dcl-ds coll   likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds groups likeds(SCCOLL_GROUPS_t) inz(*likeds);
+  dcl-s  n      like(INTEGER_t);
+  dcl-s  nofilt like(SCDEF_NAME_t);
+
+  fil_load(coll);
+
+  nofilt = *blanks;
+  n = SCCOLL_groups(coll: groups: nofilt);
+
+  iEqual(5: groups.count: 'a blank filter excludes nothing');
+  iEqual(groups.count: n: 'the returned count is the count filled');
+
+  aEqualV('filgrp_9x': groups.name(1): 'group 1 - and still sorted');
+  aEqualV('filgrp__x': groups.name(2): 'group 2');
+  aEqualV('filgrp_ax': groups.name(3): 'group 3');
+  aEqualV('filgrp_mx': groups.name(4): 'group 4');
+  aEqualV('filgrp_zx': groups.name(5): 'group 5');
+
+  // The zero-length form of the same thing
+  n = SCCOLL_groups(coll: groups: '');
+
+  iEqual(5: groups.count: 'and neither does a zero-length one');
+  iEqual(groups.count: n: 'the returned count is the count filled');
+  aEqualV('filgrp_9x': groups.name(1): 'group 1');
+  aEqualV('filgrp_zx': groups.name(5): 'group 5');
+
+end-proc;
+
+
+//==============================================================================
+// The filter names SERVICES to leave out, not groups to leave out of the
+// answer
+//
+// The heart of it. Ignoring filgrp_mx excludes rmscfil_a and rmscfil_e,
+// and the groups of what is LEFT are then collected:
+//
+//   filgrp_mx  gone    - the filtered group itself
+//   filgrp_zx  gone    - declared ONLY by rmscfil_a, which was excluded
+//   filgrp_ax  PRESENT - rmscfil_e declared it and was excluded, but
+//                        rmscfil_b declares it and survives
+//   filgrp_9x  present - rmscfil_c, untouched
+//   filgrp__x  present - rmscfil_d, untouched
+//
+// filgrp_zx is what separates the two readings. An implementation that
+// takes the full group list and drops the names in the filter returns four
+// groups including filgrp_zx, and passes every other assertion here.
+// filgrp_ax is the other half: an implementation that drops a group as soon
+// as any declarer is excluded loses it, and also passes everything else.
+//
+// The three survivors are also the three that reverse between the
+// collations, so this is the filtered sort test as well - EBCDIC would
+// answer _x ax 9x.
+//==============================================================================
+
+dcl-proc test_groups_filter_excludes_services export;
+
+  dcl-ds coll   likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds groups likeds(SCCOLL_GROUPS_t) inz(*likeds);
+  dcl-s  n      like(INTEGER_t);
+  dcl-s  ignore like(SCDEF_NAME_t);
+
+  fil_load(coll);
+
+  ignore = 'filgrp_mx';
+  n = SCCOLL_groups(coll: groups: ignore);
+
+  iEqual(3: groups.count: 'three groups survive');
+  iEqual(groups.count: n: 'the returned count is the count filled');
+
+  aEqualV('filgrp_9x': groups.name(1):
+          'group 1 - digit first, so filtering did not lose the code-point ' +
+          'sort (EBCDIC would answer filgrp__x here)');
+  aEqualV('filgrp__x': groups.name(2): 'group 2');
+  aEqualV('filgrp_ax': groups.name(3):
+          'group 3 - declared by the excluded rmscfil_e AND the surviving ' +
+          'rmscfil_b, so it stays');
+
+  nEqual(false: fil_has(groups: 'filgrp_zx'):
+         'filgrp_zx was declared only by rmscfil_a, which the filter ' +
+         'excluded - a filter on GROUP NAMES would have left it here');
+  nEqual(false: fil_has(groups: 'filgrp_mx'):
+         'the filtered group itself is gone');
+  nEqual(true: fil_has(groups: 'filgrp_ax'):
+         'the shared group is not gone');
+
+end-proc;
+
+
+//==============================================================================
+// The filter is a comma-separated list
+//
+// Ignoring filgrp_zx and filgrp__x excludes rmscfil_a and rmscfil_d.
+// rmscfil_a also declared filgrp_mx, which rmscfil_e keeps alive - so this
+// is a second, independent instance of the shared-group case, reached
+// through the other element of the list rather than the first.
+//
+//   filgrp_zx  gone    - rmscfil_a excluded, sole declarer
+//   filgrp__x  gone    - rmscfil_d excluded, sole declarer
+//   filgrp_mx  PRESENT - rmscfil_a excluded, rmscfil_e survives
+//   filgrp_9x  present
+//   filgrp_ax  present
+//
+// A split that keeps only the first token leaves filgrp__x here; one that
+// keeps only the last leaves filgrp_zx. Neither is caught by the count
+// alone if the other happens to remove something, so both are named.
+//==============================================================================
+
+dcl-proc test_groups_filter_multiple export;
+
+  dcl-ds coll   likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds groups likeds(SCCOLL_GROUPS_t) inz(*likeds);
+  dcl-s  n      like(INTEGER_t);
+  dcl-s  ignore like(SCDEF_NAME_t);
+
+  fil_load(coll);
+
+  ignore = 'filgrp_zx,filgrp__x';
+  n = SCCOLL_groups(coll: groups: ignore);
+
+  iEqual(3: groups.count: 'three groups survive two filter values');
+  iEqual(groups.count: n: 'the returned count is the count filled');
+
+  aEqualV('filgrp_9x': groups.name(1):
+          'group 1 - digit first, still code point (EBCDIC would answer ' +
+          'filgrp_ax here)');
+  aEqualV('filgrp_ax': groups.name(2): 'group 2');
+  aEqualV('filgrp_mx': groups.name(3):
+          'group 3 - rmscfil_a declared it and was excluded, rmscfil_e ' +
+          'declares it and survives');
+
+  nEqual(false: fil_has(groups: 'filgrp_zx'):
+         'the first value in the list took its sole declarer out');
+  nEqual(false: fil_has(groups: 'filgrp__x'):
+         'and so did the last - a split that keeps one end fails here');
+
+end-proc;
+
+
+//==============================================================================
+// Matching is case-insensitive
+//
+// Same fixture, same filter, typed in upper case: the answer must not
+// change. The existing code lowercases the filter, so what this pins is
+// that the comparison it feeds is against a group name treated the same
+// way.
+//
+// The fixture group names are all lower case on purpose. Whether a group
+// name declared in UPPER CASE in a YAML file is itself folded is a separate
+// question this change does not touch, and asserting it here would be
+// asserting something nobody has stated.
+//==============================================================================
+
+dcl-proc test_groups_filter_case_insensitive export;
+
+  dcl-ds coll   likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds groups likeds(SCCOLL_GROUPS_t) inz(*likeds);
+  dcl-s  n      like(INTEGER_t);
+  dcl-s  ignore like(SCDEF_NAME_t);
+
+  fil_load(coll);
+
+  ignore = 'FILGRP_MX';
+  n = SCCOLL_groups(coll: groups: ignore);
+
+  iEqual(3: groups.count: 'upper case filters the same three out');
+  iEqual(groups.count: n: 'the returned count is the count filled');
+
+  aEqualV('filgrp_9x': groups.name(1): 'group 1');
+  aEqualV('filgrp__x': groups.name(2): 'group 2');
+  aEqualV('filgrp_ax': groups.name(3): 'group 3');
+
+  nEqual(false: fil_has(groups: 'filgrp_zx'):
+         'and it really did exclude the services, not just fail to match');
+
+end-proc;
+
+
+//==============================================================================
+// A filter naming a group nothing declares excludes nothing
+//
+// Two shapes, because they fail differently. Alone, a name that matches
+// nothing must be a no-op rather than an error or an empty answer. Beside a
+// name that does match, it must not disturb the one that does - which is
+// where a splitter that stops at the first unmatched token, or that
+// compares the whole string rather than each value, gives itself away.
+//==============================================================================
+
+dcl-proc test_groups_filter_unknown_group export;
+
+  dcl-ds coll   likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds groups likeds(SCCOLL_GROUPS_t) inz(*likeds);
+  dcl-s  n      like(INTEGER_t);
+  dcl-s  ignore like(SCDEF_NAME_t);
+
+  fil_load(coll);
+
+  ignore = 'filgrp_nosuchgroup';
+  n = SCCOLL_groups(coll: groups: ignore);
+
+  iEqual(5: groups.count: 'a group nothing declares excludes nothing');
+  iEqual(groups.count: n: 'the returned count is the count filled');
+  aEqualV('filgrp_9x': groups.name(1): 'and the answer is the unfiltered one');
+  aEqualV('filgrp_zx': groups.name(5): 'right through to the last');
+
+  // Beside one that does match
+  ignore = 'filgrp_nosuchgroup,filgrp_mx';
+  n = SCCOLL_groups(coll: groups: ignore);
+
+  iEqual(3: groups.count:
+         'an unmatched value does not stop the next one matching');
+  iEqual(groups.count: n: 'the returned count is the count filled');
+  nEqual(false: fil_has(groups: 'filgrp_zx'):
+         'rmscfil_a was still excluded');
+
+end-proc;
+
+
+//==============================================================================
+// Every definition belongs to the implicit group all, so a filter of all
+// excludes everything
+//
+// The answer is an empty result and a zero count, not the unfiltered list.
+// An implementation that only ever compares the filter against the groups a
+// definition DECLARES never matches 'all', because no definition declares
+// it, and returns all five.
+//
+// Asserted in both cases as a zero count rather than by reading name(1),
+// which after a clear holds blanks and would compare equal to a good many
+// things.
+//
+// INFERRED: that 'all' is matched case-insensitively like any other value.
+// The brief says the whole filter is lowercased and gives 'all' as a value
+// in it; nothing makes 'all' special in that respect.
+//==============================================================================
+
+dcl-proc test_groups_filter_all export;
+
+  dcl-ds coll   likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds groups likeds(SCCOLL_GROUPS_t) inz(*likeds);
+  dcl-s  n      like(INTEGER_t);
+  dcl-s  ignore like(SCDEF_NAME_t);
+
+  fil_load(coll);
+
+  ignore = 'all';
+  n = SCCOLL_groups(coll: groups: ignore);
+
+  iEqual(0: groups.count: 'ignoring all leaves no service, so no group');
+  iEqual(0: n: 'and the returned count says so too');
+
+  ignore = 'ALL';
+  n = SCCOLL_groups(coll: groups: ignore);
+
+  iEqual(0: groups.count: 'in upper case as well');
+  iEqual(0: n: 'and the returned count says so too');
+
+  // Beside a value that matches only some services, all still takes the lot
+  ignore = 'filgrp_mx,all';
+  n = SCCOLL_groups(coll: groups: ignore);
+
+  iEqual(0: groups.count: 'and as one value of several');
+  iEqual(0: n: 'and the returned count says so too');
+
+end-proc;
+
+
+//==============================================================================
+// A filter value matches a whole group name, not part of one
+//
+// 'filgrp_a' is a prefix of 'filgrp_ax' and of nothing else. If the match
+// is a %scan of the group name against the comma-separated string - the
+// obvious way to write it, and the reason this is worth a test - then
+// filtering on 'filgrp_a' silently excludes rmscfil_b and rmscfil_e.
+//
+// The reverse is asserted too: a filter value that CONTAINS a real group
+// name must not match it either, which is the same defect with the scan the
+// other way round.
+//
+// INFERRED. The brief says a service is excluded when it belongs to a group
+// NAMED in the filter, which reads as the whole name; it does not say so in
+// as many words. If upstream turns out to match on substrings this test is
+// the one to change, and it should be changed deliberately.
+//==============================================================================
+
+dcl-proc test_groups_filter_matches_whole_name export;
+
+  dcl-ds coll   likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds groups likeds(SCCOLL_GROUPS_t) inz(*likeds);
+  dcl-s  n      like(INTEGER_t);
+  dcl-s  ignore like(SCDEF_NAME_t);
+
+  fil_load(coll);
+
+  ignore = 'filgrp_a';
+  n = SCCOLL_groups(coll: groups: ignore);
+
+  iEqual(5: groups.count:
+         'a prefix of a group name is not that group name');
+  iEqual(groups.count: n: 'the returned count is the count filled');
+  nEqual(true: fil_has(groups: 'filgrp_ax'):
+         'filgrp_ax is untouched by a filter on filgrp_a');
+
+  ignore = 'filgrp_axtra';
+  n = SCCOLL_groups(coll: groups: ignore);
+
+  iEqual(5: groups.count:
+         'nor does a longer value that contains a real group name match it');
+  nEqual(true: fil_has(groups: 'filgrp_ax'): 'filgrp_ax still there');
+
+end-proc;
+
+
+//==============================================================================
+// Asking for a filtered answer does not change the collection
+//
+// coll is passed by reference, not const, and the cheapest way to write
+// this change is to drop the excluded definitions and then run the existing
+// loop. That would leave the caller holding a collection with services
+// missing from it - and SCEXEC_groups, the caller this parameter exists
+// for, is one command among several sharing one loaded collection.
+//
+// A silent one, too: `scr groups --ignore-groups=x` would print correctly
+// and the damage would show up in whatever the same job asked next.
+//
+// INFERRED: the brief does not say the collection is left alone. It says
+// the command asks the model for what it needs, which a destructive filter
+// would satisfy while being wrong.
+//==============================================================================
+
+dcl-proc test_groups_filter_leaves_collection_alone export;
+
+  dcl-ds coll   likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds groups likeds(SCCOLL_GROUPS_t) inz(*likeds);
+  dcl-ds def    likeds(SCDEF_t) inz(*likeds);
+  dcl-s  ignore like(SCDEF_NAME_t);
+
+  fil_load(coll);
+
+  ignore = 'filgrp_mx';
+  SCCOLL_groups(coll: groups: ignore);
+
+  iEqual(6: SCCOLL_count(coll):
+         'all six definitions are still in the collection');
+  nEqual(true: SCCOLL_find(coll: 'rmscfil_a': def):
+         'the excluded rmscfil_a is still there');
+  aEqualV('Filter alpha': def.friendly: 'and is still itself');
+  nEqual(true: SCCOLL_find(coll: 'rmscfil_e': def):
+         'and so is the excluded rmscfil_e');
+
+  // The unfiltered answer, asked afterwards, is still the unfiltered answer
+  SCCOLL_groups(coll: groups);
+  iEqual(5: groups.count:
+         'and the collection still answers with all five groups');
+
+end-proc;
+
+
+//==============================================================================
+// The result structure is filled, not added to
+//
+// Both directions through the same structure, because they break
+// differently. Wide-then-narrow leaves stale names above the new count, and
+// a count that is not reset reports them; narrow-then-wide is the case
+// where a count that is added to rather than assigned runs the array past
+// its bound.
+//
+// The caller this parameter exists for does exactly this - SCEXEC_groups
+// holds one result structure - and note that `clear` on a data structure
+// resets it to blanks, not to the template's inz, so a clear-and-refill
+// implementation is not automatically safe either.
+//
+// INFERRED: the brief does not say the structure is reset. It does say the
+// count returned agrees with what was filled, which this is the awkward
+// case of.
+//==============================================================================
+
+dcl-proc test_groups_filter_result_not_accumulated export;
+
+  dcl-ds coll   likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds groups likeds(SCCOLL_GROUPS_t) inz(*likeds);
+  dcl-s  n      like(INTEGER_t);
+  dcl-s  ignore like(SCDEF_NAME_t);
+
+  fil_load(coll);
+
+  // Wide, then narrow, through the SAME structure
+  n = SCCOLL_groups(coll: groups);
+  iEqual(5: n: 'five unfiltered');
+
+  ignore = 'filgrp_mx';
+  n = SCCOLL_groups(coll: groups: ignore);
+
+  iEqual(3: groups.count: 'three filtered - not eight, and not still five');
+  iEqual(groups.count: n: 'the returned count is the count filled');
+  aEqualV('filgrp_9x': groups.name(1): 'and the right three, in order');
+  aEqualV('filgrp__x': groups.name(2): 'group 2');
+  aEqualV('filgrp_ax': groups.name(3): 'group 3');
+  nEqual(false: fil_has(groups: 'filgrp_zx'):
+         'no leftover from the wider answer is counted');
+
+  // Narrow, then wide, through the same structure again
+  n = SCCOLL_groups(coll: groups);
+
+  iEqual(5: groups.count: 'five again afterwards');
+  iEqual(groups.count: n: 'the returned count is the count filled');
+  aEqualV('filgrp_9x': groups.name(1): 'group 1');
+  aEqualV('filgrp_zx': groups.name(5): 'through to group 5');
+
+end-proc;
+
+
+//==============================================================================
+// An empty collection with a filter answers zero
+//
+// The degenerate case, and the one a loop written to run at least once gets
+// wrong. Nothing is loaded, so nothing can be excluded and nothing can be
+// collected; the filter must not turn that into a failure or into a stray
+// entry. SCCOLL_init is called and load_dir is not, deliberately - see the
+// note in docs/testing-notes.md about what an uninitialised likeds()
+// structure contains.
+//==============================================================================
+
+dcl-proc test_groups_filter_empty_collection export;
+
+  dcl-ds coll   likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds groups likeds(SCCOLL_GROUPS_t) inz(*likeds);
+  dcl-s  n      like(INTEGER_t);
+  dcl-s  ignore like(SCDEF_NAME_t);
+
+  SCCOLL_init(coll);
+  iEqual(0: SCCOLL_count(coll): 'nothing loaded');
+
+  ignore = 'filgrp_mx';
+  n = SCCOLL_groups(coll: groups: ignore);
+
+  iEqual(0: groups.count: 'no definitions, no groups');
+  iEqual(0: n: 'and the returned count says so too');
+
+  ignore = 'all';
+  n = SCCOLL_groups(coll: groups: ignore);
+
+  iEqual(0: n: 'ignoring all on an empty collection is still zero');
 
 end-proc;

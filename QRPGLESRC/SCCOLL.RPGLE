@@ -342,8 +342,9 @@ end-proc;
 
 dcl-proc SCCOLL_groups export;
   dcl-pi *n like(INTEGER_t);
-    coll   likeds(SCCOLL_t);
-    groups likeds(SCCOLL_GROUPS_t);
+    coll          likeds(SCCOLL_t);
+    groups        likeds(SCCOLL_GROUPS_t);
+    ignore_groups like(SCDEF_NAME_t) const options(*nopass);
   end-pi;
 
   dcl-ds def  likeds(SCDEF_t);
@@ -353,10 +354,24 @@ dcl-proc SCCOLL_groups export;
   dcl-s seen  like(BOOLEAN_t);
   dcl-s swap  like(SCDEF_NAME_t);
 
+  dcl-s exclude like(SCDEF_NAME_t) inz('');
+
+  if %parms() >= 3 and %addr(ignore_groups) <> *null;
+    exclude = ignore_groups;
+  endif;
+
   clear groups;
 
   for i = 1 to coll.count;
     if not SCCOLL_get(coll: i: def);
+      iter;
+    endif;
+
+    // The filter names SERVICES to leave out, not names to leave out of the
+    // answer. A group declared only by excluded services disappears; one an
+    // excluded service shared with a surviving one stays, because the
+    // survivor still declares it.
+    if exclude <> '' and SCCOLL_in_groups(def: exclude);
       iter;
     endif;
 
@@ -527,5 +542,43 @@ dcl-proc SCCOLL_sorts_before export;
   b_utf = b_name;
 
   return (a_utf < b_utf);
+
+end-proc;
+
+//==============================================================================
+// SCCOLL_in_groups
+//   Is this definition in any of these groups?
+//==============================================================================
+
+dcl-proc SCCOLL_in_groups export;
+  dcl-pi *n like(BOOLEAN_t);
+    def    likeds(SCDEF_t) const;
+    groups like(SCDEF_NAME_t) const;
+  end-pi;
+
+  dcl-s rest  like(SCDEF_NAME_t);
+  dcl-s part  like(SCDEF_NAME_t);
+  dcl-s comma like(INTEGER_t);
+
+  rest = STRING_lower(%trim(groups));
+
+  dow %len(rest) > 0;
+    comma = %scan(',': rest);
+    if comma = 0;
+      part = %trim(rest);
+      rest = '';
+    else;
+      part = %trim(%subst(rest: 1: comma - 1));
+      rest = %trim(%subst(rest: comma + 1));
+    endif;
+
+    // Whole name, via SCDEF_in_group - not a scan of the comma string, which
+    // would let 'filgrp_a' match a service in 'filgrp_ax'.
+    if %len(part) > 0 and SCDEF_in_group(def: part);
+      return true;
+    endif;
+  enddo;
+
+  return false;
 
 end-proc;
