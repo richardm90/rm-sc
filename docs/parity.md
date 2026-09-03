@@ -70,7 +70,7 @@ that step asks for.
 | `stop` | not gated | — | as above |
 | `kill` | not gated | — | as above |
 | `restart` | not gated | — | as above |
-| `reload` | n/a | **out of scope** | cluster-only upstream; RMSC rejects it with a clear message rather than faking one |
+| `reload` | n/a | **out of scope** | cluster-only upstream. RMSC does not recognise the verb at all — see below |
 
 Nine of the thirteen operations RMSC accepts are gated. Four are undecided, and that is what
 keeps Verification step 8 open.
@@ -125,20 +125,33 @@ reports something different under the same verb; the plan chose this meaning del
 
 ## Differences still undecided
 
+The exact texts, and what is measured versus merely captured, are in **`docs/messages.md`** — the
+D2 catalogue. This section says which differences exist and why they are still open; that one says
+what upstream's bytes actually are.
+
 None of these is on the `check` path, so none affects a figure in `performance.md` or the
 byte-exact gate. That is also why they went unnoticed until the gate was widened past the three
 operations that are.
 
-**`loginfo`** — one trailing blank line. One line of code either way.
+**`loginfo`** — **not a formatting difference at all: the text matches and the STREAM differs.**
+Upstream writes `<name>: <unknown> (try checking in log directory <dir>)` to **stderr** and leaves
+a single blank line on stdout; RMSC writes the whole thing to stdout. Measured 3 September.
+
+This was recorded here as "one trailing blank line" until then, and the reason is worth keeping:
+`tools/fidelity-gate.sh:135` merges stderr into the comparison with `2>&1`, so a line that moves
+between streams reads as identical and the only residue is a blank line somewhere unexpected. **A
+merged comparison cannot see a stream difference.** Every formatting difference this document
+records for a stream-merged operation should be re-read with that in mind.
 
 **`jobinfo`** — a layout difference only, since the job *set* was corrected. Upstream prints a
 header then indented jobs; RMSC prints one `name: job` line each.
 
-**`info`** — the largest of the formatting cases. RMSC omits the `Inherits environment
-variables?` and `Custom environment variables:` block and the closing separator, adds a `Group:`
-line upstream does not print, and resolves the working directory rather than showing the raw
-value. The `Defined in:` path also differs, but harmlessly — both resolve to byte-identical
-copies of the same file.
+**`info`** — eight measured differences, listed in full in `docs/messages.md`. The two that are
+shape rather than spelling: upstream prints `Depends on the following services:` once and indents
+the list where RMSC repeats a `Depends on:` label per dependency, and upstream omits
+`Working Directory:` entirely when `dir` is unset where RMSC prints a resolved one always. RMSC
+also omits the environment block and the closing separator, prints a `Group:` line upstream does
+not, and differs in blank-line counts at three places.
 
 **`perfinfo`** — the only one where the plan looks like it settles the matter and does not. It
 calls the operation *"Improved — drops upstream's optional Python 3 + `ibm_db` dependency, since
