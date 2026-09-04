@@ -185,9 +185,12 @@ The divergence is in the safe direction: RMSC **shows** a service upstream hides
 would be far worse, and was in fact the defect this rule was first implemented with - a `yes`
 equality test rather than a `y` prefix test, which hid `enabled: yeah` and `enabled: yep`.
 
-## Beyond the operations — RMSC does not narrate
+## Beyond the operations — narration, CLOSED 3 September
 
-Upstream reports what it is doing while it does it. RMSC is silent. This affects every
+**Read this section as history.** It records the divergence as it stood, and the decision and its
+outcome are at the foot of it. RMSC narrates now.
+
+Upstream reports what it is doing while it does it. RMSC was silent. This affected every
 **state-changing** operation - `start`, `stop`, `kill`, `restart` - for a single service and for
 a group alike; the read-only operations narrate on neither side.
 
@@ -219,9 +222,20 @@ The family, taken from the message catalogue in `sc.jar` and wider than the two 
 Note which name each uses: the progress line names the service by its **short** name, the status
 lines by its **friendly** name. Measured, not inferred.
 
-**This is undecided rather than intentional.** Nothing in the plan asks for silence, and no
-reason has been recorded for it - RMSC simply never implemented the narration. It is written down
-here because a divergence with no stated reason is the kind this document exists to catch.
+**DECIDED 3 September, AND IMPLEMENTED. RMSC narrates.** It was undecided rather than
+intentional — nothing in the plan asked for silence and no reason was ever recorded for it; RMSC
+simply never implemented it. Richard's standing principle settled it: the output should be the
+same as upstream's unless there is a very good reason, and there was none.
+
+The measured family is in `docs/messages.md` § "Narration" — every text, which name each line
+uses, which stream each goes to, the order they appear in, the trailing blank line, and the fact
+that `-q` does **not** suppress any of it. `tools/narration-test.sh` pins it end to end, and the
+wording is pinned separately by `qtestsrc/SCOUT.TEST.RPGLE` because the nine `SCOUT` procedures
+return their line rather than printing it.
+
+**The section above, describing RMSC as silent, is what this looked like before the work.** It is
+left standing because the comparison is the useful part: RMSC was silent for no recorded reason,
+and it took writing the divergence down to notice that nobody had ever chosen it.
 
 The cost of closing it is that these are new lines on **stdout**, which the consumer parses by
 column position. They do not yield three fields, so a parser that drops malformed rows is

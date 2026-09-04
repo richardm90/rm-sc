@@ -94,7 +94,7 @@ suppresses the whole thing. Splitting the line the way upstream does fixes the w
 `-q` behaviour in one change; fixing `-q` first would mean deciding whether RMSC's single line is
 an error or a warning, which is exactly the question the split answers.
 
-## Narration — the family RMSC does not have
+## Narration — the family, now implemented
 
 **Measured 3 September** with `tools/d2-probe.sh --narrate`, against a staged service that
 genuinely comes up — its start command binds the port it is checked on, so `successfully started`
@@ -103,12 +103,13 @@ blank line after each command.**
 
 | observed | upstream |
 |---|---|
-| progress, every operation | `Performing operation 'START' on service '<short>'` — verb **upper-cased**, **short** name |
+| progress, every operation | `Performing operation '<VERB>' on service '<short>'` — verb **upper-cased**, **short** name. All four verbs captured verbatim: `START`, `STOP`, `KILL`, `RESTART` |
 | started | `Service '<friendly>' successfully started` |
 | stopped | `Service '<friendly>' successfully stopped` |
 | already up | `Service '<friendly>' is already running` |
 | already down | `Service '<friendly>' is already stopped` |
-| restart | one progress line, then `successfully stopped`, then `successfully started` |
+| restart, from up | one `RESTART` progress line, then `successfully stopped`, then `successfully started` |
+| restart, from down | one `RESTART` progress line, then **`is already stopped`**, then `successfully started` |
 | start-side dependency | `Attempting to start service dependency '<short>' (<friendly>)...` |
 | stop-side dependent | `Attempting to stop dependent service '<friendly>'...` |
 
@@ -121,6 +122,166 @@ wrong by making them match.
 say `ERROR: No running jobs for service '%s'`. Where that message comes from is still `unmeasured`;
 it is in the jar's catalogue but nothing probed reaches it.
 
+**Every service in the walk gets its own outcome line, dependencies included.** Starting a service
+whose dependency must be started first prints four lines, not two:
+
+    Performing operation 'START' on service 'rmscd2_parent'
+    Attempting to start service dependency 'rmscd2_depsvc' (RMSC D2 depsvc)...
+    Service 'RMSC D2 depsvc' successfully started
+    Service 'RMSC D2 parent' successfully started
+
+So the outcome line belongs to each service the operation touches, not to the one that was named.
+
+**The dependency line is unconditional.** It is printed even when the dependency is already
+running and nothing is done:
+
+    Attempting to start service dependency 'rmscd2_depsvc' (RMSC D2 depsvc)...
+    Service 'RMSC D2 depsvc' is already running
+
+It announces that a dependency is being *considered*, not that work is being done — which is the
+opposite of what the wording suggests, and the reading an implementer would naturally take.
+
+**`restart` has no special case of its own.** It is `stop`'s narration followed by `start`'s,
+under one `RESTART` progress line — including the dependency walk, and including `is already
+stopped` when there was nothing to stop.
+
+*An earlier capture appeared to show `restart` printing `successfully stopped` for a service that
+was down, which would have been a quirk worth copying. It was not: the service was up, because
+the `stop` that was supposed to precede the case had silently failed. The re-probe captures
+`check` immediately before each `restart` and shows the state the answer belongs to. **A probe
+that does not capture its own precondition cannot tell you which question it answered.***
+
+**No narration line carries trailing whitespace.** Worth stating because the `check` row's
+trailing space *is* the contract and is documented as such, so house style here pulls the wrong
+way. The captures can testify to this: `d2-probe.sh` renders through `cat -A` and strips only the
+terminal `$`, so a trailing space survives into the log as a space — and it does, on the `check`
+row captured in the same run:
+
+    [  RUNNING            | rmscd2_batch (RMSC D2 batch) ]      <- trailing space present
+    [Service 'RMSC D2 narrate' successfully started]            <- none
+
+The control is the point: the method demonstrably shows a trailing space where one exists, so its
+absence on every narration line is evidence rather than silence.
+
+**The blank line is per-command on stdout and per-error on stderr**, and the asymmetry is real.
+A command's narration ends with exactly one blank line however many services it touched; a group
+operation that produced three errors wrote a blank line after **each** of them on stderr.
+
+**`-q` does not suppress narration.** Measured on both `start` and `stop`, in both the
+success and the already-in-that-state forms. `-q` is documented as suppressing *warnings*, and
+these are not warnings — they go to stdout and they report success.
+
+**The stop-side walk is measured now, with work actually done.** Dependent line, dependent
+outcome, then the named service's outcome:
+
+    Performing operation 'STOP' on service 'rmscg_base'
+    Attempting to stop dependent service 'RMSC gap user'...
+    Service 'RMSC gap user' successfully stopped
+    Service 'RMSC gap base' successfully stopped
+
+Until this capture every observation of that line came from a transcript where both services were
+already down, so the order was composed rather than measured and "dependents first" could not be
+told from "whichever came first in the collection". It can now.
+
+### The fifth state, and three messages nobody had seen
+
+`docs/parity.md` carries `Service '%s' is already partially running…` from the jar's catalogue and
+this section did not mention it. Measured 3 September against a service with two criteria, one
+satisfiable and one not — and the fifth state is **not** a fifth sibling of the four above:
+
+| line | stream |
+|---|---|
+| `Service '<friendly>' is already partially running. You may need to restart if this operation fails.` | **stderr** |
+| `WARNING: Service '<friendly>' only <n>/<m> started [failed to start --> [not running at -->JOBNAME:X]]` | **stderr** |
+| `ERROR: Timed out waiting for service '<friendly>' to start` | stderr |
+| `For details, see log file at: <path>` | **stdout** |
+
+The four states in the table above are on stdout; **this one is on stderr**, with a different
+shape. An implementation that grew `SCOUT_svc_state` by a fifth constant would put it on the wrong
+stream.
+
+`For details, see log file at: <path>` is a **stdout** line that is in no catalogue anyone had
+read. It is the reason to probe a failure path rather than only a success path: three of these
+four were invisible until a service was made to fail.
+
+**It is not printed on every failure, and the gate is the LOG FILE HAVING CONTENT.**
+
+This took three attempts to get right, and the two wrong ones are worth keeping because they were
+wrong in instructive ways.
+
+*First reading — "any failed start prints where to look."* The natural reading of a sentence
+offering help after a failure. Contradicted by upstream immediately.
+
+*Second reading — "the service was already partially running."* Measured, apparently carefully,
+across three attempts of a half-up service and three of one that never comes up. **The fixture
+moved two things at once:** the log gained content on the same attempt the service became partial,
+so the partial-state rule and the log-content rule predicted identically on every row. The table
+below was recorded as proof that the log file was *not* the gate, and it proved nothing of the
+kind — the log existing is not the log having content.
+
+*Third reading, and the measured one.* Review separated them with a service that **never runs**
+and whose start command **prints one line** before failing:
+
+| fixture | log file | upstream |
+|---|---|---|
+| never running, start command silent | 0 bytes | no line |
+| never running, start command prints a line | 40 bytes | **the line** |
+| half up, start command silent | 0 bytes | **no line** |
+
+Row 2 is the one the partial-state rule cannot explain, and row 3 is the one it wrongly predicts.
+There is no point telling anyone to read an empty file, which is what the rule amounts to.
+
+**RMSC's log path carries no timestamp where upstream's does** — `~/.sc/logs/<svc>.log` against
+`~/.sc/logs/2026-09-04-13.10.03.<svc>.log`. So this line cannot match upstream byte for byte even
+with the gate right. That is a property of `SCLOG_path`, pre-dating all of this, and belongs with
+the log-naming divergence rather than here.
+
+**A single-service `start` that fails exits 253**, where a group start exits 0 whatever happens.
+Both measured, and **RMSC already matched on both** — checked afterwards by review against a plain
+timeout, a partial timeout, a dependency timeout and a failed restart.
+
+**The trailing blank line follows the EXIT STATUS, not the command.** Upstream ends a
+state-changing command with one blank line only when it exits 0; a failed single-service command
+gets none. Measured by review across five failure scenarios, after a first implementation printed
+it on both paths. A group command always exits 0, so it always gets the blank — which is why "one
+blank per command" fitted every observation until a failing single-service command was looked
+at.
+
+**Bonus, and it settles an open item in the plan.** The same run captured `PARTIAL` live for the
+first time:
+
+    PARTIAL (1/2)      | rmscg_part (RMSC gap partial) [not running at -->JOBNAME:ZZNOSUCHJOB]
+
+Exactly the shape the plan predicted from upstream's source — `String.format("PARTIAL (%d/%d)")`
+padded to 18, then the `[not running at -->…]` suffix after the trailing space — and exactly what
+RMSC does not do, returning a bare `PARTIAL`. This is **on the byte-exact `check` path**. It now
+has a reproducible fixture, which is what it never had: no service on the box is ever half up.
+
+**A service made PARTIAL by a FOREIGN process is reported differently.** Found by the tester while
+building the log-detail fixtures, and not asserted anywhere — it is recorded here because nothing
+else records it.
+
+Where a service is partial because something *not started by sc* holds one of its criteria — a
+listener belonging to another program on the port it checks — RMSC prints both
+`Service '<f>' is already partially running…` and `WARNING: Service '<f>' only 1/2 started …` on
+stderr, and **upstream prints neither**. Where the service is partial because its own earlier
+start bound the port, both implementations print both.
+
+So upstream appears to distinguish "half up because of me" from "half up because of something
+else", and RMSC does not. Unmeasured beyond that one comparison, and not enough to say what the
+rule is — but enough to say there is one.
+
+**Upstream narrates a service it cannot find; RMSC does not.** `sc start <nonexistent>` prints
+`Performing operation 'START' on service '<name>'` on stdout before failing. RMSC resolves the
+name before it reaches the progress line, so it prints nothing. Found by review, measured, and
+left as it is for now: it is harmless to a column-parsing consumer, and the accompanying stderr
+difference (`Could not find definition for service 'x'` against RMSC's `sc: Unknown service x`)
+is a pre-existing D2 row that should be closed with it rather than separately.
+
+**`batch_mode: true` does not produce the `(asynchronously)` progress variant.** A batch service
+starts, checks and stops with exactly the ordinary lines. Wherever that variant comes from, it is
+not batch mode alone, and it stays `unmeasured`.
+
 Failures during a group operation, on **stderr**, each followed by a blank line:
 
     ERROR: Timed out waiting for service '<friendly>' to start
@@ -131,25 +292,43 @@ The nested form embeds the whole inner message, `ERROR:` prefix included.
 **The group operation exits 0 even when a member fails**, which `tools/error-delivery-test.sh`
 already pins and warns must not be "fixed". Measured again here.
 
-**Ordering within a group is worth reading twice.** A group start printed its progress lines for
-every member first, and the dependency line arrived *after* the progress line of the service that
-needed it:
+**Ordering within a group is plain sequence**, one member fully handled before the next begins.
+The progress line comes from the dispatcher, the rest from the worker as it walks. Reading stdout
+alone makes this look stranger than it is — the failures below were on stderr, and with them put
+back the group start reads straight down:
 
     Performing operation 'START' on service 'rmscd2_dep'
+      (stderr: ERROR: Timed out waiting for service 'RMSC D2 dependency' to start)
     Performing operation 'START' on service 'rmscd2_labels'
     Attempting to start service dependency 'rmscd2_dep' (RMSC D2 dependency)...
+      (stderr: ERROR: Could not start dependency 'rmscd2_dep' for service 'RMSC D2 labels': …)
     Performing operation 'START' on service 'rmscd2_narrate'
     Service 'RMSC D2 narrate' is already running
 
-A group stop reached one member twice — once as a dependent of another member, once in its own
-right — and said `is already stopped` both times. Neither of these is something a reasonable
-implementation would arrive at independently, so both need copying rather than deriving.
+*This paragraph first said the progress lines came first and the dependency line arrived out of
+turn. That was an artefact of reading the two streams apart, and it is recorded here rather than
+quietly deleted because it is the same mistake in miniature that `loginfo` records at scale:
+**separating the streams shows you differences a merge hides, and hides orderings a merge shows**.
+Neither view is the whole truth.*
 
-**This is still a decision, not a defect list.** It is recorded as undecided in `docs/parity.md`,
-and `tools/error-delivery-test.sh` deliberately asserts stdout carries no ERROR line rather than
-asserting stdout is empty, so neither answer has to undo an assertion.
+A group stop does reach one member twice — once as a dependent of another member, once in its own
+right — and says `is already stopped` both times. That one is real:
 
-RMSC's own failure texts in this area, which would need aligning at the same time:
+    Performing operation 'STOP' on service 'rmscd2_dep'
+    Attempting to stop dependent service 'RMSC D2 labels'...
+    Service 'RMSC D2 labels' is already stopped
+    Service 'RMSC D2 dependency' is already stopped
+    Performing operation 'STOP' on service 'rmscd2_labels'
+    Service 'RMSC D2 labels' is already stopped
+    Performing operation 'STOP' on service 'rmscd2_narrate'
+    Service 'RMSC D2 narrate' successfully stopped
+
+**Decided 3 September, and implemented.** `tools/error-delivery-test.sh` deliberately asserted
+stdout carries no ERROR line rather than asserting stdout is empty, so that neither answer would
+have to undo an assertion — and it did not have to. `tools/narration-test.sh` now pins the family
+end to end.
+
+RMSC's own failure texts in this area, aligned with the narration in the same change:
 
 | RMSC (`SCEXEC`) | upstream | basis |
 |---|---|---|

@@ -71,12 +71,28 @@ end-pr;
 
 dcl-proc ensure_loaded;
 
+  dcl-s was like(BOOLEAN_t);
+
   if g_loaded;
     return;
   endif;
 
+  // Silent across the load. The loader writes 'WARNING: Ignoring file: ...'
+  // and 'WARNING: Unrecognized attribute ...' to stderr, which is stray text
+  // in the caller's job exactly as narration is. Saved and restored rather
+  // than cleared, so this cannot un-silence an enclosing call.
+  //
+  // The silence rather than SCCOLL_load's own `quiet` argument, deliberately:
+  // one switch covering both classes is the rule Richard asked for, and quiet
+  // means something narrower - it is -q, which upstream defines as suppressing
+  // warnings and not errors.
+  was = SCOUT_silent();
+  SCOUT_set_silent(*on);
+
   SCCOLL_load(g_coll);
   g_loaded = true;
+
+  SCOUT_set_silent(was);
 
 end-proc;
 
@@ -229,9 +245,21 @@ dcl-proc act_on;
   dcl-s ok    like(BOOLEAN_t) inz(true);
   dcl-s acted like(BOOLEAN_t) inz(false);
   dcl-s one   like(BOOLEAN_t);
+  dcl-s was_silent like(BOOLEAN_t);
 
   msg = '';
   ensure_loaded();
+
+  // Silent for the duration of this call. SCEXEC narrates - it is shared with
+  // the command line, which wants the narration - and SCAPI's contract says a
+  // caller must not find that text under its display file.
+  //
+  // SAVED AND RESTORED, not cleared: the flag is module state and lives for
+  // the activation, so clearing it unconditionally would un-silence at the
+  // first inner return and leave a green-screen job printing for the rest of
+  // its life. Every return below restores it.
+  was_silent = SCOUT_silent();
+  SCOUT_set_silent(*on);
 
   // 'group:x' is accepted so a caller that already builds that prefix for the
   // command line does not have to change how it does it
@@ -269,14 +297,17 @@ dcl-proc act_on;
 
     if not acted;
       msg = 'No services in group ' + %trim(group);
+      SCOUT_set_silent(was_silent);
       return false;
     endif;
 
+    SCOUT_set_silent(was_silent);
     return ok;
   endif;
 
   if not SCCOLL_find(g_coll: name: def);
     msg = 'Unknown service ' + %trim(name);
+    SCOUT_set_silent(was_silent);
     return false;
   endif;
 
@@ -295,6 +326,7 @@ dcl-proc act_on;
     msg = err;
   endif;
 
+  SCOUT_set_silent(was_silent);
   return ok;
 
 end-proc;

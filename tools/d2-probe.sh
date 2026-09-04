@@ -42,9 +42,51 @@ NARRATE=0
 
 [ -x "$SC" ] || { echo "d2-probe: no upstream sc at $SC (set SC=<path>)" >&2; exit 2; }
 
-mkdir -p "$WORK/services" || exit 2
-cleanup() { rm -rf "$WORK"; }
+# Clean up on entry as well as exit: a trap does not run if the process is
+# killed, so assume the last run left something.
+#
+# Removing the work directory is not enough. The narration cases START services,
+# and a started listener outlives the directory its definition came from - it
+# holds its port until its own sleep expires. The next run then fails to bind,
+# the fixture reports NOT RUNNING, and the capture is of a service that never
+# came up. Killing by the work-directory path rather than by the script name
+# means a listener belonging to some other work is left alone.
+kill_listeners() {
+  local d="$1" p
+  for p in $(ps -ef 2>/dev/null | grep -F "$d/listen.py" | grep -v grep | awk '{print $2}'); do
+    kill -9 "$p" 2>/dev/null
+  done
+}
+cleanup() { kill_listeners "$WORK"; rm -rf "$WORK"; }
 trap cleanup EXIT INT TERM
+
+# BEFORE $WORK IS CREATED, and skipping $WORK by name even so.
+#
+# The first version of this swept AFTER mkdir, and the glob matched $WORK
+# itself - so the script deleted its own directory, announced it as debris from
+# an earlier run, and then reported "stdout: empty / stderr: empty" for every
+# single case. A probe that measures nothing and says upstream is silent is
+# worse than one that crashes, and this one had no way to notice: it captures
+# absence, and absence is what a missing directory produces.
+for stale in "$HOME"/d2-probe.*; do
+  [ -d "$stale" ] || continue
+  [ "$stale" = "$WORK" ] && continue
+  echo "d2-probe: removing debris from an earlier run: $stale"
+  kill_listeners "$stale"
+  rm -rf "$stale"
+done
+
+mkdir -p "$WORK/services" || exit 2
+
+# A capture that cannot write is a capture that reports nothing. Prove the
+# directory is usable before any case runs, rather than letting every one of
+# them report an empty upstream.
+if ! ( : > "$WORK/.writable" ) 2>/dev/null; then
+  echo "d2-probe: cannot write to $WORK - refusing to report on captures that" >&2
+  echo "d2-probe: would all come back empty" >&2
+  exit 2
+fi
+rm -f "$WORK/.writable"
 
 # Upstream announces JAVA_TOOL_OPTIONS on stderr, which would otherwise read as
 # output from the command under test.
@@ -227,6 +269,72 @@ YEOF
   probe "narrate - restart"                       restart rmscd2_narrate
   probe "narrate - group start"                   start   "group:rmscd2"
   probe "narrate - group stop"                    stop    "group:rmscd2"
+
+  # ------------------------------------------------------------------------
+  # The four cases the implementation needs and the run above did not reach.
+  #
+  # Every one of them is a branch RMSC will have to take, and each would
+  # otherwise be written from a guess about what upstream "probably" does:
+  #
+  #   - a dependency that STARTS SUCCESSFULLY. The run above only reached a
+  #     dependency that timed out, so what a working dependency prints - and
+  #     whether it gets an outcome line of its own - is unknown.
+  #   - a dependency that is ALREADY RUNNING. Is the `Attempting to start
+  #     service dependency` line printed anyway, or only when work is done?
+  #   - `restart` on a service that is DOWN. The run above restarted one that
+  #     was up.
+  #   - a BATCH service, which is where the `(asynchronously)` variant of the
+  #     progress line lives. Nothing has ever produced it.
+  # ------------------------------------------------------------------------
+  cat > "$WORK/services/rmscd2_depsvc.yaml" <<YEOF
+name: RMSC D2 depsvc
+start_cmd: /QOpenSys/pkgs/bin/python3 $WORK/listen.py 65440
+check_alive: 65440
+startup_wait_time: 15
+stop_wait_time: 5
+YEOF
+
+  cat > "$WORK/services/rmscd2_parent.yaml" <<YEOF
+name: RMSC D2 parent
+start_cmd: /QOpenSys/pkgs/bin/python3 $WORK/listen.py 65441
+check_alive: 65441
+startup_wait_time: 15
+stop_wait_time: 5
+service_dependencies:
+  - rmscd2_depsvc
+YEOF
+
+  cat > "$WORK/services/rmscd2_batch.yaml" <<YEOF
+name: RMSC D2 batch
+start_cmd: /QOpenSys/pkgs/bin/python3 $WORK/listen.py 65442
+check_alive: 65442
+batch_mode: true
+sbmjob_jobname: RMSCD2BAT
+startup_wait_time: 15
+stop_wait_time: 5
+YEOF
+
+  # From a known-down state, so the dependency really is started by this call.
+  "$SC" stop rmscd2_parent  >/dev/null 2>&1
+  "$SC" stop rmscd2_depsvc  >/dev/null 2>&1
+  probe "deps - start a parent whose dependency must be started"  start rmscd2_parent
+  probe "deps - start it again, dependency already up"            start rmscd2_parent
+
+  # Parent down, dependency still up: does the dependency line appear when
+  # there is nothing for it to do?
+  "$SC" stop rmscd2_parent >/dev/null 2>&1
+  probe "deps - start a parent whose dependency is already running" start rmscd2_parent
+
+  "$SC" stop rmscd2_parent  >/dev/null 2>&1
+  "$SC" stop rmscd2_depsvc  >/dev/null 2>&1
+  probe "restart - on a service that is down"  restart rmscd2_parent
+  "$SC" stop rmscd2_parent  >/dev/null 2>&1
+  "$SC" stop rmscd2_depsvc  >/dev/null 2>&1
+
+  probe "batch - start a service submitted to batch"  start rmscd2_batch
+  probe "batch - check it"                            check rmscd2_batch
+  probe "batch - stop it"                             stop  rmscd2_batch
+  "$SC" stop rmscd2_batch >/dev/null 2>&1
 
   # `No start command specified for service '%s'` is NOT probed. A definition
   # with no start_cmd is rejected at load time by upstream - `Required attribute

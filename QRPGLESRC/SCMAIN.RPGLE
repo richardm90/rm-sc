@@ -48,6 +48,13 @@ dcl-pr run_reporting;
   def  likeds(SCDEF_t) const;
 end-pr;
 
+dcl-pr run_changing like(BOOLEAN_t);
+  opts likeds(SCMAIN_OPTS_t) const;
+  coll likeds(SCCOLL_t);
+  name like(SCDEF_NAME_t) const;
+  err  like(SCEXEC_ERR_t);
+end-pr;
+
 dcl-pr resolve_one like(BOOLEAN_t);
   opts likeds(SCMAIN_OPTS_t);
   coll likeds(SCCOLL_t);
@@ -472,26 +479,18 @@ dcl-proc SCMAIN_run export;
       select;
         when opts.operation = 'check';
           SCEXEC_check(def);
-        when opts.operation = 'start';
+        when opts.operation = 'start' or opts.operation = 'stop'
+          or opts.operation = 'kill' or opts.operation = 'restart';
           // Each member's failure goes to stderr, as upstream's does. The
           // exit status is NOT changed with it: upstream exits 0 from a group
           // operation even when every member fails, and RMSC already matches.
           // That half looks like a defect and is not.
-          if not SCEXEC_start(coll: def.short_name: err);
-            SCOUT_warnln('ERROR: ' + %trim(err));
-          endif;
-        when opts.operation = 'stop';
-          if not SCEXEC_stop(coll: def.short_name: false: err);
-            SCOUT_warnln('ERROR: ' + %trim(err));
-          endif;
-        when opts.operation = 'kill';
-          if not SCEXEC_stop(coll: def.short_name: true: err);
-            SCOUT_warnln('ERROR: ' + %trim(err));
-          endif;
-        when opts.operation = 'restart';
-          if not SCEXEC_restart(coll: def.short_name: err);
-            SCOUT_warnln('ERROR: ' + %trim(err));
-          endif;
+          //
+          // SCEXEC reports every failure itself now, on stderr, so nothing
+          // is printed here. err is still SET, for a caller that has no
+          // stream to read - see SCAPI.
+          SCOUT_writeln(SCOUT_op_progress(opts.operation: def.short_name));
+          run_changing(opts: coll: def.short_name: err);
         other;
           run_reporting(opts: def);
       endsl;
@@ -503,6 +502,14 @@ dcl-proc SCMAIN_run export;
     // nothing has been checked about them. list never reaches this point -
     // SCEXEC_list writes its own trailing blank line.
     if opts.operation = 'check';
+      SCOUT_writeln('');
+    endif;
+
+    // A state-changing command ends with one blank line however many members
+    // it touched - per COMMAND, where the errors on stderr are per ERROR.
+    // Measured; the asymmetry is upstream's.
+    if acted and (opts.operation = 'start' or opts.operation = 'stop'
+               or opts.operation = 'kill'  or opts.operation = 'restart');
       SCOUT_writeln('');
     endif;
 
@@ -547,26 +554,22 @@ dcl-proc SCMAIN_run export;
       // differential: stage 1 diffs a BARE check, which takes the other path
       // entirely, so a named check had never been run against upstream.
       SCOUT_writeln('');
-    when opts.operation = 'start';
-      if not SCEXEC_start(coll: def.short_name: err);
-        opts.err = err;
+    when opts.operation = 'start' or opts.operation = 'stop'
+      or opts.operation = 'kill' or opts.operation = 'restart';
+      SCOUT_writeln(SCOUT_op_progress(opts.operation: def.short_name));
+      if not run_changing(opts: coll: def.short_name: err);
+        // NO trailing blank here. Upstream prints it only when the command
+        // EXITS 0 - measured across five failure shapes after a first
+        // implementation printed it on both paths. A group command always
+        // exits 0, which is why "one blank per command" fitted every
+        // observation until a failing single-service command was looked at.
+        //
+        // opts.err is left EMPTY: SCEXEC has already reported the failure, in
+        // upstream's words and on upstream's streams. SCRUN's contract - a
+        // non-zero exit with no message is a failure that has reported itself.
         return SCMAIN_EXIT_FAILED;
       endif;
-    when opts.operation = 'stop';
-      if not SCEXEC_stop(coll: def.short_name: false: err);
-        opts.err = err;
-        return SCMAIN_EXIT_FAILED;
-      endif;
-    when opts.operation = 'kill';
-      if not SCEXEC_stop(coll: def.short_name: true: err);
-        opts.err = err;
-        return SCMAIN_EXIT_FAILED;
-      endif;
-    when opts.operation = 'restart';
-      if not SCEXEC_restart(coll: def.short_name: err);
-        opts.err = err;
-        return SCMAIN_EXIT_FAILED;
-      endif;
+      SCOUT_writeln('');
     when opts.operation = 'list';
       SCOUT_writeln(SCOUT_list_row(def.short_name: def.friendly));
     other;
@@ -574,6 +577,43 @@ dcl-proc SCMAIN_run export;
   endsl;
 
   return SCMAIN_EXIT_OK;
+
+end-proc;
+
+//==============================================================================
+// run_changing
+//   start / stop / kill / restart, dispatched one way for both callers
+//
+// One procedure rather than four branches duplicated between the group loop
+// and the single-service path. The narration made the duplication expensive:
+// the progress line, the failure handling and the trailing blank all had to
+// agree across eight places, and CLAUDE.md records what four copies of one
+// splitter cost when only one of them learned about quotes.
+//==============================================================================
+
+dcl-proc run_changing;
+  dcl-pi *n like(BOOLEAN_t);
+    opts likeds(SCMAIN_OPTS_t) const;
+    coll likeds(SCCOLL_t);
+    name like(SCDEF_NAME_t) const;
+    err  like(SCEXEC_ERR_t);
+  end-pi;
+
+  select;
+    when opts.operation = 'start';
+      return SCEXEC_start(coll: name: err);
+    when opts.operation = 'stop';
+      return SCEXEC_stop(coll: name: false: err);
+    when opts.operation = 'kill';
+      return SCEXEC_stop(coll: name: true: err);
+    when opts.operation = 'restart';
+      return SCEXEC_restart(coll: name: err);
+  endsl;
+
+  // Unreachable: both callers test the operation before calling. A false with
+  // no message would exit non-zero saying nothing, so say something.
+  err = 'Operation ' + %trim(opts.operation) + ' is not state-changing';
+  return false;
 
 end-proc;
 

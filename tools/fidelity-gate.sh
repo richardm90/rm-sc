@@ -40,6 +40,21 @@ DEPLOY="${DEPLOY:-$(dirname "$HERE")}"
 SCR="${SCR:-$DEPLOY/scripts/scr}"
 WORK="${WORK:-/tmp/fidelity-gate.$$}"
 
+# CLEAN UP ON ENTRY AS WELL AS ON EXIT.
+#
+# This script keeps its work directory deliberately - it prints the path so a
+# failure can be inspected afterwards - and nothing ever removed an old one.
+# Thirty-six of them had accumulated across /tmp before anyone looked, and the
+# rule they break is already written down in the plan: a trap does not run if
+# the process is killed, so the next run must assume the last one left debris.
+#
+# The two most recent are kept, so "inspect the artefacts" still works for the
+# run that just failed and the one before it. Only this script's own
+# directories are touched, by name, so a sibling harness's are left alone.
+ls -dt /tmp/fidelity-gate.* 2>/dev/null | tail -n +3 | while read -r stale; do
+  rm -rf "$stale" 2>/dev/null
+done
+
 # BASELINE has no default, deliberately. The obvious one - the tracked
 # fixtures/ directory - holds same-layout equivalents with INVENTED service
 # names, describing a different machine. A gate defaulting there would diff

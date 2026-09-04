@@ -368,32 +368,64 @@ dcl-proc SCEXEC_start export;
 
   dcl-ds order likeds(SCCOLL_ORDER_t) inz(*likeds);
   dcl-ds def   likeds(SCDEF_t) inz(*likeds);
+  dcl-ds ev    likeds(SCEXEC_EVAL_t) inz(*likeds);
   dcl-s i       like(INTEGER_t);
   dcl-s waited  like(INTEGER_t);
   dcl-s lerr    like(SCLAUNCH_ERR_t);
+  dcl-s timeout like(SCOUT_LINE_t);
+  dcl-s target  like(SCDEF_NAME_t);
+  dcl-s was_partial like(BOOLEAN_t) inz(*off);
+  dcl-s  log_path  like(STMF_t);
+  dcl-ds log_stats likeds(IFS_stats_t);
 
   err = '';
 
   if not SCCOLL_start_order(coll: name: order);
     err = order.err;
+    narrate_error(err);
     return false;
   endif;
+
+  // The service the caller named is last in the order; everything before it
+  // is a dependency being started on the way. Held so a dependency's failure
+  // can name the service it was being started FOR, as upstream's does.
+  target = order.name(order.count);
 
   for i = 1 to order.count;
     if not SCCOLL_find(coll: order.name(i): def);
       err = 'Unknown service ' + %trim(order.name(i));
+      narrate_error(err);
       return false;
     endif;
 
-    // Already up, including a dependency started by an earlier request
-    if SCEXEC_status(def) = SCOUT_RUNNING;
+    // Announced before it is looked at, not before work is done: upstream
+    // prints this even when the dependency is already running and nothing
+    // happens. Measured - see docs/messages.md.
+    if i < order.count;
+      SCOUT_writeln(SCOUT_dep_start(def.short_name: def.friendly));
+    endif;
+
+    SCEXEC_evaluate(def: ev);
+
+    // Already up, including a dependency started by an earlier request. Every
+    // service in the walk reports its own outcome, not only the named one.
+    if ev.state = SCOUT_RUNNING;
+      SCOUT_writeln(SCOUT_svc_state(def.friendly: SCOUT_ALREADY_RUNNING));
       iter;
+    endif;
+
+    // Half up. On stderr, where the four ordinary states are on stdout - the
+    // asymmetry is upstream's and SCOUT_svc_partial exists to keep it.
+    was_partial = (ev.state = SCOUT_PARTIAL);
+    if was_partial;
+      SCOUT_warnln(SCOUT_svc_partial(def.friendly));
     endif;
 
     SCLOG_ensure_dir(def);
 
     if not SCLAUNCH_start(def: SCLOG_path(def): lerr);
       err = 'Could not start ' + %trim(def.short_name) + ': ' + %trim(lerr);
+      narrate_error(err);
       return false;
     endif;
 
@@ -408,14 +440,122 @@ dcl-proc SCEXEC_start export;
       endif;
     enddo;
 
-    if SCEXEC_status(def) <> SCOUT_RUNNING;
-      err = %trim(def.short_name) + ' did not start within ' +
-            %char(def.startup_wait) + 's';
-      return false;
+    SCEXEC_evaluate(def: ev);
+
+    if ev.state = SCOUT_RUNNING;
+      SCOUT_writeln(SCOUT_svc_state(def.friendly: SCOUT_STARTED));
+      iter;
     endif;
+
+    // It did not come up. Upstream says how far short it fell before it says
+    // it timed out, and the shortfall line reuses the check row's rendering of
+    // the criteria rather than making a second one.
+    if ev.alive > 0 and ev.alive < ev.total;
+      SCOUT_warnln(SCOUT_only_started(def.friendly: ev.alive: ev.total:
+                   SCOUT_not_running_suffix(ev.failed_text)));
+    endif;
+
+    // Each ERROR on stderr is followed by a blank line - per ERROR, where the
+    // blank on stdout is per COMMAND. Measured; the asymmetry is upstream's,
+    // and the WARNING above deliberately does NOT get one.
+    timeout = SCOUT_err_timeout(def.friendly);
+    SCOUT_warnln(timeout);
+    SCOUT_warnln('');
+
+    // A dependency that would not start names the service it was needed for,
+    // and embeds the whole inner message, its own ERROR: prefix included.
+    if i < order.count;
+      SCOUT_warnln(SCOUT_err_dep_failed(def.short_name: friendly_of(coll:
+                   target): timeout));
+      SCOUT_warnln('');
+    endif;
+
+    // ONLY when the log file has something in it - there is no point telling
+    // anyone to go and read an empty file.
+    //
+    // THIS GATE WAS WRONG TWICE BEFORE. First it was "any failed start", which
+    // upstream contradicted. Then "the service was already partly up", from a
+    // probe that started a half-up service repeatedly - but that fixture moved
+    // TWO things at once, because the log gained content on the same attempt
+    // the service became partial, and both rules fit. Review separated them
+    // with a service that never runs and whose start command prints one line:
+    // upstream prints the line, and the partial-state rule does not predict it.
+    //
+    //   never running, start cmd silent    log 0 bytes   no line
+    //   never running, start cmd prints    log 40 bytes  LINE
+    //   partial,       start cmd silent    log 0 bytes   no line
+    //
+    // The path RMSC names is its own and carries no timestamp where upstream's
+    // does; docs/parity.md records that, and it is a property of SCLOG_path
+    // rather than of this line.
+    log_path  = SCLOG_path(def);
+    log_stats = IFS_stats(log_path);
+    if log_stats.st_size > 0;
+      SCOUT_writeln(SCOUT_log_detail(log_path));
+    endif;
+
+    // Reported here, in upstream's words and on upstream's streams. The
+    // message is STILL SET: SCMAIN does not print it, but SCAPI is silent and
+    // has nothing but the return value to tell its caller with. Emptying it
+    // lost the reason entirely for a bound-call caller, which is the kind of
+    // defect that shows up as a program reporting failure and not saying why.
+    err = %trim(def.short_name) + ' did not start within ' +
+          %char(def.startup_wait) + 's';
+    return false;
   endfor;
 
   return true;
+
+end-proc;
+
+//==============================================================================
+// narrate_error
+//   A failure RMSC has no measured upstream wording for
+//
+// SCEXEC is the ONE place a state-changing failure is reported. SCMAIN prints
+// nothing for these operations, so anything not said here is not said at all
+// on the command line - and `err` is still returned, because SCAPI is silent
+// and has only the return value to read.
+//
+// ERROR: on stderr followed by a blank line, which is the shape upstream uses
+// for the failures it does have wording for.
+//==============================================================================
+
+dcl-proc narrate_error;
+  dcl-pi *n;
+    text like(SCEXEC_ERR_t) const;
+  end-pi;
+
+  SCOUT_warnln('ERROR: ' + %trim(text));
+  SCOUT_warnln('');
+
+end-proc;
+
+//==============================================================================
+// friendly_of
+//   The friendly name for a short one, for a message that must use it
+//
+// The dependency-failure line names the DEPENDENCY by its short name and the
+// service it was needed for by its FRIENDLY one, so one message needs both
+// kinds of name for two different services. Measured; see docs/messages.md.
+//==============================================================================
+
+dcl-proc friendly_of;
+  dcl-pi *n like(SCOUT_LINE_t);
+    coll likeds(SCCOLL_t);
+    name like(SCDEF_NAME_t) const;
+  end-pi;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+
+  if SCCOLL_find(coll: name: def);
+    return def.friendly;
+  endif;
+
+  // Cannot happen on the path that calls this - the walk resolved every name
+  // in the order before starting anything - but returning the short name is a
+  // readable answer rather than a blank one if it ever does.
+  return name;
 
 end-proc;
 
@@ -443,6 +583,7 @@ dcl-proc SCEXEC_stop export;
 
   if not SCCOLL_find(coll: want: def);
     err = 'Unknown service ' + %trim(want);
+    narrate_error(err);
     return false;
   endif;
 
@@ -453,8 +594,12 @@ dcl-proc SCEXEC_stop export;
       iter;
     endif;
     for j = 1 to other.dep_count;
-      if other.deps(j) = want
-         and SCEXEC_status(other) <> SCOUT_NOT_RUNNING;
+      if other.deps(j) = want;
+        // Announced and visited whatever state it is in. This used to skip a
+        // dependent that was already stopped, which was harmless while
+        // nothing was printed - upstream announces it and then says it is
+        // already stopped, and stop_one returns immediately for one that is.
+        SCOUT_writeln(SCOUT_dep_stop(other.friendly));
         if not stop_one(other: kill: err);
           return false;
         endif;
@@ -488,6 +633,7 @@ dcl-proc stop_one;
   err = '';
 
   if SCEXEC_status(def) = SCOUT_NOT_RUNNING;
+    SCOUT_writeln(SCOUT_svc_state(def.friendly: SCOUT_ALREADY_STOPPED));
     return true;
   endif;
 
@@ -497,6 +643,7 @@ dcl-proc stop_one;
     if not SCLAUNCH_run_stop_cmd(def: SCLOG_path(def): lerr);
       err = 'Stop command failed for ' + %trim(def.short_name) +
             ': ' + %trim(lerr);
+      narrate_error(err);
       return false;
     endif;
   else;
@@ -511,11 +658,13 @@ dcl-proc stop_one;
     delay(SCEXEC_STOP_POLL);
     waited += SCEXEC_STOP_POLL;
     if SCEXEC_status(def) = SCOUT_NOT_RUNNING;
+      SCOUT_writeln(SCOUT_svc_state(def.friendly: SCOUT_STOPPED));
       return true;
     endif;
   enddo;
 
   if SCEXEC_status(def) = SCOUT_NOT_RUNNING;
+    SCOUT_writeln(SCOUT_svc_state(def.friendly: SCOUT_STOPPED));
     return true;
   endif;
 
@@ -525,6 +674,7 @@ dcl-proc stop_one;
   if used_stop_cmd;
     err = %trim(def.short_name) + ' did not stop within ' +
           %char(def.stop_wait) + 's';
+    narrate_error(err);
     return false;
   endif;
 
@@ -537,9 +687,11 @@ dcl-proc stop_one;
 
   if SCEXEC_status(def) <> SCOUT_NOT_RUNNING;
     err = %trim(def.short_name) + ' did not stop, even immediately';
+    narrate_error(err);
     return false;
   endif;
 
+  SCOUT_writeln(SCOUT_svc_state(def.friendly: SCOUT_STOPPED));
   return true;
 
 end-proc;

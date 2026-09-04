@@ -176,3 +176,225 @@ dcl-pr SCOUT_invalid_criteria like(SCOUT_LINE_t);
   friendly  like(SCOUT_LINE_t) const;
   criterion like(SCOUT_LINE_t) const;
 end-pr;
+
+///
+// NARRATION - what upstream says while it is doing something.
+//
+// Every text below was captured from sc 1.7.1 on the box, and the captures and
+// what they do and do not settle are in docs/messages.md. Read that before
+// changing a byte of any of them.
+//
+// These are procedures returning a line rather than literals at the point of
+// use, for the same reason SCOUT_check_row is: a returned string can be
+// asserted from iRPGUnit, and a literal buried in SCEXEC can only be checked
+// by a shell script comparing whole streams, where a one-byte difference is
+// reported as "stdout differs" and has to be read out of a diff.
+//
+// THE STREAMS ARE NOT UNIFORM AND THAT IS NOT AN OVERSIGHT. The progress line,
+// the four states, both dependency lines and the log-file detail go to STDOUT.
+// The partial-state line, the shortfall warning and both errors go to STDERR.
+// Upstream does this; RMSC copies it.
+///
+
+dcl-s SCOUT_STATE_t varchar(16) template;
+
+dcl-c SCOUT_STARTED         const('STARTED');
+dcl-c SCOUT_STOPPED         const('STOPPED');
+dcl-c SCOUT_ALREADY_RUNNING const('ALREADY RUNNING');
+dcl-c SCOUT_ALREADY_STOPPED const('ALREADY STOPPED');
+
+///
+// The progress line, printed once per service the command was asked about:
+//
+//   Performing operation 'START' on service 'rmscd2_parent'
+//
+// The verb is UPPER-CASED here rather than by the caller, so there is one
+// place it can be got wrong. The service is named by its SHORT name - every
+// other line in the family uses the friendly one, and that asymmetry is
+// upstream's, measured, not a slip to tidy.
+//
+// @param the operation, in any case
+// @param the service's short name
+// @return the line, without a trailing newline
+///
+
+dcl-pr SCOUT_op_progress like(SCOUT_LINE_t);
+  verb       like(SCOUT_LINE_t) const;
+  short_name like(SCOUT_LINE_t) const;
+end-pr;
+
+///
+// What became of a service, on STDOUT:
+//
+//   Service 'RMSC D2 narrate' successfully started
+//   Service 'RMSC D2 narrate' is already running
+//
+// One of these is printed for EVERY service the operation touches, including
+// a dependency started on the way - not only for the service that was named.
+//
+// @param the service's friendly name
+// @param one of SCOUT_STARTED, SCOUT_STOPPED, SCOUT_ALREADY_RUNNING,
+//        SCOUT_ALREADY_STOPPED
+// @return the line, without a trailing newline
+///
+
+dcl-pr SCOUT_svc_state like(SCOUT_LINE_t);
+  friendly like(SCOUT_LINE_t) const;
+  state    like(SCOUT_STATE_t) const;
+end-pr;
+
+///
+// A dependency about to be considered on the way to starting something:
+//
+//   Attempting to start service dependency 'rmscd2_depsvc' (RMSC D2 depsvc)...
+//
+// PRINTED EVEN WHEN THE DEPENDENCY IS ALREADY RUNNING and nothing is done.
+// Measured. The wording says "attempting", so the natural implementation
+// guards it behind having work to do; upstream prints it before it looks.
+//
+// @param the dependency's short name
+// @param the dependency's friendly name
+// @return the line, without a trailing newline
+///
+
+dcl-pr SCOUT_dep_start like(SCOUT_LINE_t);
+  short_name like(SCOUT_LINE_t) const;
+  friendly   like(SCOUT_LINE_t) const;
+end-pr;
+
+///
+// A dependent about to be stopped so the service under it can go down:
+//
+//   Attempting to stop dependent service 'RMSC D2 labels'...
+//
+// NOT THE MIRROR OF SCOUT_dep_start, and this is measured rather than assumed.
+// The start side names the service twice, short then friendly in parentheses;
+// this side names it once, friendly only. It also says "dependent", not
+// "dependency". Anyone making the two symmetrical is introducing a defect.
+//
+// @param the dependent's friendly name
+// @return the line, without a trailing newline
+///
+
+dcl-pr SCOUT_dep_stop like(SCOUT_LINE_t);
+  friendly like(SCOUT_LINE_t) const;
+end-pr;
+
+///
+// A service that never came up, on STDERR:
+//
+//   ERROR: Timed out waiting for service 'RMSC gap partial' to start
+//
+// @param the service's friendly name
+// @return the line, without a trailing newline
+///
+
+dcl-pr SCOUT_err_timeout like(SCOUT_LINE_t);
+  friendly like(SCOUT_LINE_t) const;
+end-pr;
+
+///
+// A dependency that would not start, on STDERR:
+//
+//   ERROR: Could not start dependency 'rmscd2_dep' for service 'RMSC D2 labels': ERROR: Timed out waiting for service 'RMSC D2 dependency' to start
+//
+// The nested message is embedded WHOLE, its own 'ERROR: ' prefix included, so
+// the line carries the word twice. Measured.
+//
+// @param the dependency's short name
+// @param the dependent service's friendly name
+// @param the inner message, already rendered
+// @return the line, without a trailing newline
+///
+
+dcl-pr SCOUT_err_dep_failed like(SCOUT_LINE_t);
+  short_name like(SCOUT_LINE_t) const;
+  friendly   like(SCOUT_LINE_t) const;
+  nested     like(SCOUT_LINE_t) const;
+end-pr;
+
+///
+// A service that is half up, on STDERR:
+//
+//   Service 'RMSC gap partial' is already partially running. You may need to restart if this operation fails.
+//
+// DELIBERATELY NOT A FIFTH SCOUT_svc_state CONSTANT. The four states go to
+// stdout and this one goes to stderr, so folding it into the enumeration
+// would put it on the wrong stream - a difference that has to be remembered
+// rather than one the code makes structural.
+//
+// @param the service's friendly name
+// @return the line, without a trailing newline
+///
+
+dcl-pr SCOUT_svc_partial like(SCOUT_LINE_t);
+  friendly like(SCOUT_LINE_t) const;
+end-pr;
+
+///
+// How far short a start fell, on STDERR:
+//
+//   WARNING: Service 'RMSC gap partial' only 1/2 started [failed to start --> [not running at -->JOBNAME:ZZNOSUCHJOB]]
+//
+// The inner bracket is byte-for-byte what SCOUT_not_running_suffix already
+// produces for a check row, so this composes that rather than rendering the
+// same criterion a second way. Two renderings of one thing in one codebase
+// drift apart, and this one is on a line nobody looks at until it matters.
+//
+// @param the service's friendly name
+// @param how many criteria were satisfied
+// @param how many there are
+// @param SCOUT_not_running_suffix's output for the ones that were not
+// @return the line, without a trailing newline
+///
+
+dcl-pr SCOUT_only_started like(SCOUT_LINE_t);
+  friendly like(SCOUT_LINE_t) const;
+  alive    like(INTEGER_t) const;
+  total    like(INTEGER_t) const;
+  failures like(SCOUT_LINE_t) const;
+end-pr;
+
+///
+// Where to look when a start failed, on STDOUT:
+//
+//   For details, see log file at: /home/x/.sc/logs/2026-09-03-17.57.56.svc.log
+//
+// This one is on the stream a consumer parses by column position, and it was
+// in no catalogue anyone had read - it was found only by making a start fail.
+//
+// @param the log file path
+// @return the line, without a trailing newline
+///
+
+dcl-pr SCOUT_log_detail like(SCOUT_LINE_t);
+  path like(SCOUT_LINE_t) const;
+end-pr;
+
+///
+// Whether anything is written at all.
+//
+// Off by default. It exists for SCAPI, whose header promises that a
+// green-screen caller will not find stray text under its display file -
+// narration is emitted from SCEXEC, which both entry points share, so that
+// promise became false the moment RMSC learned to narrate.
+//
+// SAVE AND RESTORE AROUND A CALL:
+//
+//   was = SCOUT_silent();
+//   SCOUT_set_silent(*on);
+//   ...
+//   SCOUT_set_silent(was);
+//
+// The flag is module state and lives for the ACTIVATION, not the call.
+// Clearing it unconditionally on the way out un-silences at the first inner
+// return, and SC_restart calls SC_stop and SC_start - so the naive version
+// stops being silent half way through itself.
+///
+
+dcl-pr SCOUT_set_silent;
+  enabled like(BOOLEAN_t) const;
+end-pr;
+
+dcl-pr SCOUT_silent like(BOOLEAN_t);
+end-pr;

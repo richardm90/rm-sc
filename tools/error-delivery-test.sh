@@ -86,6 +86,21 @@ DEPLOY="${DEPLOY:-$(dirname "$HERE")}"
 SCR="${SCR:-$DEPLOY/scripts/scr}"
 WORK="${WORK:-/tmp/error-delivery.$$}"
 
+# CLEAN UP ON ENTRY AS WELL AS ON EXIT.
+#
+# This script keeps its work directory deliberately - it prints the path so a
+# failure can be inspected afterwards - and nothing ever removed an old one.
+# Thirty-six of them had accumulated across /tmp before anyone looked, and the
+# rule they break is already written down in the plan: a trap does not run if
+# the process is killed, so the next run must assume the last one left debris.
+#
+# The two most recent are kept, so "inspect the artefacts" still works for the
+# run that just failed and the one before it. Only this script's own
+# directories are touched, by name, so a sibling harness's are left alone.
+ls -dt /tmp/error-delivery.* 2>/dev/null | tail -n +3 | while read -r stale; do
+  rm -rf "$stale" 2>/dev/null
+done
+
 # Opt-in, default off. See the state-ops-require-service case for what it runs
 # and why running it is a decision rather than a default.
 SWEEP_STATE_CHANGING="${SWEEP_STATE_CHANGING:-}"
@@ -904,11 +919,13 @@ fi
 #
 # STDOUT IS ASSERTED FREE OF ERROR LINES, NOT EMPTY, and the distinction is
 # load-bearing. Upstream also prints "Performing operation 'START' on service
-# 'x'" to stdout per member and RMSC prints nothing. WHETHER RMSC SHOULD GAIN
-# THOSE LINES IS OUTSTANDING WITH RICHARD AND IS NOT DECIDED HERE. Asserting an
-# empty stdout would silently settle it in the negative and would then have to
-# be undone; asserting only the absence of ERROR lines is true under either
-# answer. Do not read the absence of an assertion here as a decision.
+# 'x'" to stdout per member and RMSC prints nothing.
+#
+# DECIDED 3 September: RMSC WILL GAIN THOSE LINES. See docs/parity.md and
+# docs/messages.md. The assertion here does not change and did not need to:
+# asserting the absence of ERROR lines rather than an empty stdout was true
+# under either answer, which is why it was written that way. tools/
+# narration-test.sh pins what the lines themselves must say.
 GROUP_DIR="$WORK/staged-group"
 D4_GROUP=rmscd4grp
 mkdir -p "$GROUP_DIR"

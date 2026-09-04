@@ -114,4 +114,18 @@ STRPGMEXP PGMLVL(*CURRENT) SIGNATURE('RMSC 0.1.0')
   EXPORT SYMBOL(SCCOLL_conflicts)
   /* Reset a definition without losing its defaults - never use CLEAR */
   EXPORT SYMBOL(SCDEF_clear)
+  /* Narration - what upstream says while it works. docs/messages.md has the
+     captures. Appended, never inserted: the signature pins export ORDER. */
+  EXPORT SYMBOL(SCOUT_op_progress)
+  EXPORT SYMBOL(SCOUT_svc_state)
+  EXPORT SYMBOL(SCOUT_dep_start)
+  EXPORT SYMBOL(SCOUT_dep_stop)
+  EXPORT SYMBOL(SCOUT_err_timeout)
+  EXPORT SYMBOL(SCOUT_err_dep_failed)
+  EXPORT SYMBOL(SCOUT_svc_partial)
+  EXPORT SYMBOL(SCOUT_only_started)
+  EXPORT SYMBOL(SCOUT_log_detail)
+  /* Silence, for the bound-call API - see SCOUT_D. Appended, never inserted. */
+  EXPORT SYMBOL(SCOUT_set_silent)
+  EXPORT SYMBOL(SCOUT_silent)
 ENDPGMEXP
