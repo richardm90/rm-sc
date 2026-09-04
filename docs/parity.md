@@ -295,11 +295,69 @@ will otherwise find a property with no counterpart.
 
 ## Beyond the operations — colour
 
-`check` output is compared with colour off, since colour is suppressed whenever stdout is not a
-terminal and every comparison here runs that way. One difference is known to hide there:
-upstream wraps a partial service's `[not running at -->…]` suffix in its warning colour, and RMSC
-leaves that text uncoloured. The status field itself is coloured by both. **Undecided**, and it
-needs a person looking at a terminal rather than a diff — no byte-exact comparison can reach it.
+`check` is compared with colour off, because colour is suppressed whenever stdout is not a
+terminal and every comparison here runs that way. **Colour-off output is the contract and does not
+change**; everything below is about what a person at a terminal sees.
+
+This section said for weeks that the difference "needs a person looking at a terminal rather than
+a diff — no byte-exact comparison can reach it." **That was wrong, and it is worth recording why
+it was believable.** Colour is invisible through a pipe, so the obvious instrument cannot see it
+and the obvious conclusion is that no instrument can. The right instrument is a pseudo-terminal,
+which captures the escape sequences as bytes and compares them exactly — better evidence than an
+eye, because it catches a wrong shade that "looks about right" would pass.
+
+**Upstream's gate**, read from the bytecode of `com.github.theprez.jcmdutils.StringUtils`:
+
+    System.console() != null  AND  System.getenv("SSH_TTY") non-empty
+                              AND  NOT Boolean.getBoolean("jcmdutils.disablecolors")
+
+So upstream colours over **ssh with a tty** and not on a local console, and a PTY alone is not
+enough to reproduce it — `SSH_TTY` must be set too. A first probe that set only the PTY saw zero
+escapes and suggested upstream never colours at all, which is the opposite of the truth.
+
+**The reporting operations are a different matter, and one of them is now internally
+inconsistent.** Measured escape bytes, upstream against RMSC: `info` 20 against 0, `perfinfo` 54
+against 0, `jobinfo` 2 against 0; `loginfo` and the usage block are 0 on both sides. Upstream
+colours `info`'s field labels cyan and its rule lines white `37`.
+
+The one that matters is `info`'s header, `short_name (Friendly)`, which upstream colours **cyan
+`36` — exactly as it colours a `list` row**. RMSC builds that header by hand at
+`QRPGLESRC/SCEXEC.RPGLE:732` rather than through `SCOUT_list_row`, so the identical construct is
+now coloured in `list` and plain in `info`. The divergence pre-dates this work; what is new is
+that it is an inconsistency *within* RMSC rather than a gap against upstream. `info`, `jobinfo`
+and `perfinfo` are all `undecided` in the gate already, and this belongs with them.
+
+**RMSC's gate is in the shell, not in RPG.** `scripts/scr` adds `--colors` when `[ -t 1 ]`;
+`SCOUT_is_tty` is a stub returning false, so RMSC never detects a terminal itself. That division
+is defensible — the test is one token in shell and awkward in ILE — but it was never written down
+as a decision, and it means RMSC's rule and upstream's rule are differently shaped: RMSC colours
+on any terminal, upstream only on an ssh one.
+
+**Four differences were measured through a PTY, and all four are CLOSED.** RMSC now matches
+upstream byte for byte on `check`, `list` and `groups`, on a terminal and through a pipe:
+
+| | upstream | RMSC before | RMSC now |
+|---|---|---|---|
+| `RUNNING` | green `32` | green `32` | matches |
+| `PARTIAL` | amber `33` | amber `33` | matches |
+| `NOT RUNNING` | magenta `35` | red `31` | **magenta `35`** |
+| the service's short name, on a `check` row | the status colour | not coloured | **the status colour** |
+| the `[not running at -->…]` suffix | the status colour | not coloured | **the status colour** |
+| the short name on a `list` row | cyan `36`, fixed | not coloured | **cyan `36`, fixed** |
+| `groups` | no colour at all | no colour | matches — measured on both sides, not assumed |
+
+Upstream's row is `'  '` + colour + padded status + reset + `' | '` + colour + short name + reset
++ `' ('` + description + `') '` + colour + suffix + reset. The description is not coloured, and
+the parentheses and spaces sit outside the escapes — so stripping the escapes from a coloured row
+yields the uncoloured row byte for byte, which is what keeps the columns a consumer parses by
+exactly where they were.
+
+`list`'s cyan is **fixed rather than status-derived**: one listing covering a running, a partial
+and a stopped service showed `36` on every short name, and `SCOUT_list_row` is not handed a status
+at all, so it could not vary even by accident.
+
+**Colour off is unchanged and remains the contract.** `tools/colour-test.sh` stage 1 exists to say
+so, and the gate's byte-exact comparison covers it from the other side.
 
 ## Beyond the operations — how YAML types a scalar
 

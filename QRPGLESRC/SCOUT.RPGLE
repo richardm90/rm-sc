@@ -63,14 +63,18 @@ dcl-c NL const(x'25');
 
 ///
 // ANSI colour. Applied to the padded status only, so the visible column
-// positions are identical with colour on or off.
+// positions are identical with colour on or off. The escapes wrap the padded
+// status, the short name and the not-running suffix - never a space, never a
+// bracket, never the description - so stripping them yields the uncoloured row
+// byte for byte.
 ///
 
 dcl-c ESC        const(x'27');
 dcl-c ANSI_RESET const('[0m');
-dcl-c ANSI_GREEN const('[32m');
-dcl-c ANSI_RED   const('[31m');
-dcl-c ANSI_AMBER const('[33m');
+dcl-c ANSI_GREEN   const('[32m');
+dcl-c ANSI_AMBER   const('[33m');
+dcl-c ANSI_MAGENTA const('[35m');
+dcl-c ANSI_CYAN    const('[36m');
 
 ///
 // Colour state. OFF unless switched on explicitly - see SCOUT_is_tty.
@@ -106,6 +110,8 @@ dcl-proc SCOUT_check_row export;
 
   dcl-s padded like(SCOUT_LINE_t);
   dcl-s field  like(SCOUT_LINE_t);
+  dcl-s shown  like(SCOUT_LINE_t);
+  dcl-s colour like(SCOUT_LINE_t);
   dcl-s row    like(SCOUT_LINE_t);
 
   // Left-justified in a fixed-width field. %trimr then explicit padding, so a
@@ -116,19 +122,35 @@ dcl-proc SCOUT_check_row export;
     padded += ' ';
   enddo;
 
+  // Upstream colours THREE things in the same colour: the padded status, the
+  // SHORT NAME, and the not-running suffix. The description is left alone, and
+  // the parentheses and every space sit outside the escapes, so the visible
+  // bytes and their columns are identical whether colour is on or off.
+  //
+  //   '  ' <c>STATUS<r> ' | ' <c>name<r> ' (' desc ') ' <c>suffix<r>
+  //
+  // Measured through a pseudo-terminal; see docs/parity.md.
   if SCOUT_colour();
-    field = %trim(colour_for(status)) + padded + ESC + ANSI_RESET;
+    colour = %trim(colour_for(status));
+    field  = colour + padded + ESC + ANSI_RESET;
+    shown  = colour + %trim(name) + ESC + ANSI_RESET;
   else;
     field = padded;
+    shown = %trim(name);
   endif;
 
-  row = '  ' + field + ' | ' + %trim(name) + ' (' + %trim(desc) + ') ';
+  row = '  ' + field + ' | ' + shown + ' (' + %trim(desc) + ') ';
 
   // Appended AFTER the trailing space, so the row itself is byte-for-byte
   // what it has always been and only a partial service's line ends with ']'.
+  // The space stays OUTSIDE the colour - the escape follows it.
   if %parms() >= 4 and %addr(suffix) <> *null
      and %len(%trim(suffix)) > 0;
-    row += %trim(suffix);
+    if SCOUT_colour();
+      row += colour + %trim(suffix) + ESC + ANSI_RESET;
+    else;
+      row += %trim(suffix);
+    endif;
   endif;
 
   return row;
@@ -137,7 +159,9 @@ end-proc;
 
 //==============================================================================
 // colour_for
-//   Green running, red stopped, amber anything else
+//   Green running, MAGENTA stopped, amber anything else. Magenta rather than
+//   the red anyone would reach for: measured against sc 1.7.1 through a
+//   pseudo-terminal, which is the only instrument that can see colour at all.
 //==============================================================================
 
 dcl-proc colour_for;
@@ -149,7 +173,10 @@ dcl-proc colour_for;
     when %trimr(status) = SCOUT_RUNNING;
       return ESC + ANSI_GREEN;
     when %trimr(status) = SCOUT_NOT_RUNNING;
-      return ESC + ANSI_RED;
+      // MAGENTA, not red. Measured through a pseudo-terminal against sc
+      // 1.7.1 - a pipe strips colour, so this was invisible to every
+      // comparison here until one was run under a PTY with SSH_TTY set.
+      return ESC + ANSI_MAGENTA;
     other;
       return ESC + ANSI_AMBER;
   endsl;
@@ -165,6 +192,15 @@ dcl-proc SCOUT_list_row export;
     name like(SCOUT_LINE_t) const;
     desc like(SCOUT_LINE_t) const;
   end-pi;
+
+  // CYAN, and FIXED rather than derived from the service's status - measured
+  // with a running, a partial and a stopped service in one listing, all three
+  // cyan. `list` says what is defined, not what is up, so the row has no
+  // status to take a colour from; SCOUT_list_row is not even given one.
+  if SCOUT_colour();
+    return ESC + ANSI_CYAN + %trim(name) + ESC + ANSI_RESET +
+           ' (' + %trim(desc) + ')';
+  endif;
 
   return %trim(name) + ' (' + %trim(desc) + ')';
 

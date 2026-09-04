@@ -35,6 +35,51 @@ dcl-pr aEqualV;
 end-pr;
 
 //------------------------------------------------------------------------------
+// COLOUR - the SGR codes, and the two helpers the colour cases are built from
+//
+// These are globals because ILE RPG's definition section has to precede the
+// first procedure; the bodies are at the foot of the file with the cases they
+// serve.
+//
+// THE CODES ARE MEASURED, NOT CHOSEN. Captured 4 September 2026 from sc 1.7.1
+// through a pseudo-terminal with SSH_TTY set - upstream's colour gate wants a
+// console AND a non-empty SSH_TTY, which is why an earlier PTY-only probe saw
+// no colour at all and this was written down as untestable. The captures are
+// reproduced byte for byte in the cases below, and tools/colour-test.sh
+// re-measures every one of these codes against upstream on each run.
+//
+//   RUNNING       32  green
+//   NOT RUNNING   35  MAGENTA. RMSC emitted 31, red, until this was closed. Nothing structural tells
+//                     the two apart - same length, same position, one escape
+//                     either way - so the DIGITS are the separating value and
+//                     no assertion that counts escapes can reach this.
+//   PARTIAL       33  amber, and the same 33 wraps the [not running at -->...]
+//                     suffix
+//   list rows     36  CYAN, and the same 36 for a service that is running, one
+//                     that is partial and one that is stopped. The list colour
+//                     is fixed rather than status-derived, which is a second
+//                     rule and not a restatement of the check row's.
+//   groups rows   none. Neither implementation colours them.
+//------------------------------------------------------------------------------
+dcl-c COL_RUNNING const('32');
+dcl-c COL_NOT     const('35');
+dcl-c COL_PARTIAL const('33');
+dcl-c COL_LIST    const('36');
+dcl-c COL_RESET   const('0');
+
+// sgr - one Select Graphic Rendition sequence: ESC [ code m
+dcl-pr sgr varchar(8);
+  code varchar(4) const;
+end-pr;
+
+// strip_sgr - the same text with every ESC [ ... m removed and NOTHING else
+// touched. What makes "colour adds escapes and moves no visible byte" a single
+// assertion rather than a second copy of every expectation.
+dcl-pr strip_sgr varchar(512);
+  src varchar(512) const;
+end-pr;
+
+//------------------------------------------------------------------------------
 // The silence flag as it stood before this suite touched anything.
 //
 // It is MODULE state - it lives for the activation, not for the call - and
@@ -286,6 +331,20 @@ end-proc;
 
 //==============================================================================
 // With colour on the escapes are present but the visible columns do not move
+//
+// THE LAST ASSERTION HERE USED TO BE `%scan(' | webproxy (Web Proxy) ': row)`,
+// and it was measuring the wrong thing without anyone noticing. It was true
+// only because RMSC coloured the status field and nothing else, so everything
+// after the bar happened to be one unbroken run of plain text. Upstream wraps
+// the SHORT NAME in the status colour too - measured 4 September 2026, see the
+// COLOUR section at the foot of this file - so that substring stops being
+// contiguous the moment RMSC matches it, and the case would have failed on a
+// correct implementation while claiming the columns had moved.
+//
+// What it was reaching for survives intact, and is now said directly: with the
+// escapes stripped the coloured row IS the uncoloured row. That is true of the
+// colour rules today, true of upstream's, and true of whatever comes next,
+// because it never names a colour.
 //==============================================================================
 
 dcl-proc test_colour_preserves_columns export;
@@ -304,8 +363,10 @@ dcl-proc test_colour_preserves_columns export;
 
   // The visible text either side of the status field is unchanged
   aEqualV('  ': %subst(row: 1: 2): 'two leading spaces still');
-  assert((%scan(' | webproxy (Web Proxy) ': row) > 0):
-         'everything after the status is unchanged');
+  aEqualExact(plain: strip_sgr(row):
+              'with the escapes removed the coloured row is the plain row - ' +
+              'the bar is still at column 22, the status is still padded to ' +
+              '18, and the trailing space is still there');
 
   SCOUT_set_colour(false);
 
@@ -2358,5 +2419,479 @@ dcl-proc test_is_tty_does_not_move_with_silence export;
          'another with it on - SCOUT_is_tty is reading the silence flag');
   nEqual(before: after:
          'and the answer did not come back when silence went off again');
+
+end-proc;
+
+//==============================================================================
+// COLOUR
+//
+// Everything from here down is about the bytes a row is made of when colour is
+// ON, and about the bytes it is made of when colour is OFF, which must not
+// change at all.
+//
+// WHY THIS IS HERE RATHER THAN ONLY IN A SHELL SCRIPT. SCOUT_check_row and
+// SCOUT_list_row RETURN their row, and SCOUT_set_colour forces the flag, so
+// every escape sequence and its exact position is assertable from inside an
+// RPGUnit job with no terminal anywhere near it. That is worth stating because
+// docs/parity.md records the opposite - "it needs a person looking at a
+// terminal rather than a diff" - and that was never true of the rendering. It
+// was only ever true of the GATE.
+//
+// THE SPLIT WITH tools/colour-test.sh, which is the other half:
+//
+//   this file          which bytes, in which order, with colour forced on
+//   colour-test.sh     whether a terminal turns colour on at all, whether a
+//                      pipe turns it off, and whether the bytes match UPSTREAM
+//
+// Neither can do the other's work. SCOUT_set_colour(true) proves nothing about
+// `[ -t 1 ]` in scripts/scr, and no shell can call SCOUT_check_row.
+//
+// THE FIXTURE NAMES ARE THE ONES THE CAPTURE USED - zzc_up, zzc_half, zzc_down
+// with 'Zulu C Up', 'Zulu C Half', 'Zulu C Down' - rather than this file's
+// usual webproxy/'Web Proxy'. Each literal below is then a transcription of a
+// captured line and can be compared with the capture directly. They also keep
+// the property the rest of the project relies on: no short name is a substring
+// of any friendly name or of any other short name, so "the coloured run covers
+// the short name and stops" is a question a substring test can actually ask.
+//==============================================================================
+
+//------------------------------------------------------------------------------
+// sgr - one SGR sequence
+//------------------------------------------------------------------------------
+dcl-proc sgr;
+  dcl-pi *n varchar(8);
+    code varchar(4) const;
+  end-pi;
+
+  // x'27' is ESC in EBCDIC. It becomes x'1B' on the way out to a PASE stream,
+  // which is why the existing test_no_escapes_without_colour scans for x'27'
+  // and the shell side of this work greps for \033. Same byte, two codings.
+  dcl-s escByte char(1) inz(x'27');
+
+  return escByte + '[' + %trim(code) + 'm';
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// strip_sgr - remove every ESC [ ... m and nothing else
+//
+// The loop steps to the terminating 'm' rather than assuming a length, so a
+// sequence with parameters this file does not expect - ESC[1;33m, say - is
+// still removed whole instead of leaving its tail behind as visible text and
+// failing the comparison in a way that reads like a padding defect.
+//------------------------------------------------------------------------------
+dcl-proc strip_sgr;
+  dcl-pi *n varchar(512);
+    src varchar(512) const;
+  end-pi;
+
+  // NOT CALLED `out`. OUT is an RPG operation code, so `out = out + ...` is
+  // parsed as the OUT operation with a nonsense factor 2 and reported as
+  // RNF5008/RNF5507/RNF7560 - three messages, none of which mentions the name.
+  dcl-s kept varchar(512) inz('');
+  dcl-s i    int(10) inz(1);
+
+  dow i <= %len(src);
+    if %subst(src: i: 1) = x'27';
+      i += 1;
+      // Step to the 'm' that ends the sequence. The two conditions are tested
+      // in separate statements on purpose: ILE RPG does not promise to
+      // short-circuit 'and', so a combined test could evaluate %subst past the
+      // end of the string.
+      dow i <= %len(src);
+        if %subst(src: i: 1) = 'm';
+          leave;
+        endif;
+        i += 1;
+      enddo;
+      i += 1;
+    else;
+      kept = kept + %subst(src: i: 1);
+      i += 1;
+    endif;
+  enddo;
+
+  return kept;
+
+end-proc;
+
+//==============================================================================
+// COLOUR OFF - byte for byte what it is today, and this must never move
+//
+// CLAUDE.md opens with the reason: "`check` output is byte-exact, and a slip is
+// silent. The consumer screen-scrapes it and drops any row that does not yield
+// three fields, so a formatting mistake makes services vanish from a screen
+// rather than raising an error."
+//
+// Colouring the short name is exactly the change that can leak an escape into
+// the uncoloured path - one flag read in the wrong place - and the symptom is
+// not an error. So the piped row is pinned here as a whole literal, with its
+// length, and with a scan proving there is not one ESC byte in it. Any change
+// to these four expectations is a defect, not a new baseline.
+//
+// The literals are the captured uncoloured rows:
+//     RUNNING            | zzc_up (Zulu C Up)                        42 bytes
+//     NOT RUNNING        | zzc_down (Zulu C Down)                    46 bytes
+//     PARTIAL (1/2)      | zzc_half (Zulu C Half) [not running...]   91 bytes
+//     zzc_up (Zulu C Up)                                             18 bytes
+//==============================================================================
+
+dcl-proc test_colour_off_rows_are_unchanged export;
+
+  dcl-s row varchar(512);
+
+  SCOUT_set_colour(false);
+
+  row = SCOUT_check_row(SCOUT_RUNNING: 'zzc_up': 'Zulu C Up');
+  aEqualExact('  RUNNING            | zzc_up (Zulu C Up) ': row: 'running row');
+  iEqual(42: %len(row): 'running row length');
+  iEqual(0: %scan(x'27': row): 'no ESC byte in the running row');
+
+  row = SCOUT_check_row(SCOUT_NOT_RUNNING: 'zzc_down': 'Zulu C Down');
+  aEqualExact('  NOT RUNNING        | zzc_down (Zulu C Down) ': row: 'stopped row');
+  iEqual(46: %len(row): 'stopped row length');
+  iEqual(0: %scan(x'27': row): 'no ESC byte in the stopped row');
+
+  row = SCOUT_check_row(SCOUT_partial_status(1: 2): 'zzc_half': 'Zulu C Half':
+                        SCOUT_not_running_suffix('JOBNAME:ZZNOSUCHCOLOURJOB'));
+  aEqualExact('  PARTIAL (1/2)      | zzc_half (Zulu C Half) ' +
+              '[not running at -->JOBNAME:ZZNOSUCHCOLOURJOB]': row: 'partial row');
+  iEqual(91: %len(row): 'partial row length');
+  iEqual(0: %scan(x'27': row): 'no ESC byte in the partial row, suffix and all');
+
+  row = SCOUT_list_row('zzc_up': 'Zulu C Up');
+  aEqualExact('zzc_up (Zulu C Up)': row: 'list row');
+  iEqual(18: %len(row): 'list row length');
+  iEqual(0: %scan(x'27': row): 'no ESC byte in the list row');
+
+end-proc;
+
+//==============================================================================
+// A RUNNING row, coloured, byte for byte
+//
+// Captured:
+//   b'  \x1b[32mRUNNING           \x1b[0m | \x1b[32mzzc_up\x1b[0m (Zulu C Up) '
+//
+// The structure, and what is deliberately OUTSIDE the colour: the two leading
+// spaces, the bar and the spaces either side of it, the parentheses, the
+// description, and the trailing space after ')'. The status field is padded to
+// 18 INSIDE the colour, which is what keeps the bar at column 22 once the
+// escapes are stripped.
+//==============================================================================
+
+dcl-proc test_colour_on_running_row export;
+
+  dcl-s row      varchar(512);
+  dcl-s expected varchar(512);
+
+  SCOUT_set_colour(true);
+  row = SCOUT_check_row(SCOUT_RUNNING: 'zzc_up': 'Zulu C Up');
+
+  expected = '  ' + sgr(COL_RUNNING) + 'RUNNING           ' + sgr(COL_RESET) +
+             ' | ' + sgr(COL_RUNNING) + 'zzc_up' + sgr(COL_RESET) +
+             ' (Zulu C Up) ';
+
+  aEqualExact(expected: row: 'coloured running row');
+  iEqual(60: %len(row):
+         'length, as a cross-check on the padding inside the literal above');
+
+  SCOUT_set_colour(false);
+
+end-proc;
+
+//==============================================================================
+// A NOT RUNNING row is MAGENTA, and 31 appears nowhere
+//
+// Captured:
+//   b'  \x1b[35mNOT RUNNING       \x1b[0m | \x1b[35mzzc_down\x1b[0m (Zulu C Down) '
+//
+// THE SEPARATING VALUE IS THE DIGITS, AND ONLY THE DIGITS. RMSC emits 31 here
+// and upstream emits 35. Both are one SGR sequence, five bytes long, in the
+// same position, wrapping the same text. Nothing about the SHAPE of the row
+// differs, so an assertion that counted escapes, or measured the row's length,
+// or checked that the status was coloured at all, would pass on both. The
+// second assertion states the other half - that 31 is gone rather than merely
+// joined by a 35 - because an implementation emitting both would satisfy the
+// first alone.
+//==============================================================================
+
+dcl-proc test_colour_on_not_running_is_magenta export;
+
+  dcl-s row      varchar(512);
+  dcl-s expected varchar(512);
+
+  SCOUT_set_colour(true);
+  row = SCOUT_check_row(SCOUT_NOT_RUNNING: 'zzc_down': 'Zulu C Down');
+
+  expected = '  ' + sgr(COL_NOT) + 'NOT RUNNING       ' + sgr(COL_RESET) +
+             ' | ' + sgr(COL_NOT) + 'zzc_down' + sgr(COL_RESET) +
+             ' (Zulu C Down) ';
+
+  aEqualExact(expected: row: 'coloured stopped row');
+  iEqual(64: %len(row): 'length');
+  assert((%scan(sgr(COL_NOT): row) > 0): 'magenta 35 is present');
+  iEqual(0: %scan(sgr('31'): row):
+         'red 31 is gone - upstream uses 35 for NOT RUNNING and 31 for nothing');
+
+  SCOUT_set_colour(false);
+
+end-proc;
+
+//==============================================================================
+// A PARTIAL row, coloured, with its suffix coloured too
+//
+// Captured:
+//   b'  \x1b[33mPARTIAL (1/2)     \x1b[0m | \x1b[33mzzc_half\x1b[0m (Zulu C Half) \x1b[33m[not running at -->JOBNAME:ZZNOSUCHCOLOURJOB]\x1b[0m'
+//
+// THREE coloured runs in one row, all in the same 33, and the row ends with a
+// reset rather than with visible text - the only row that does.
+//
+// SEPARATING VALUE for the suffix, stated as its own assertion below: the
+// escape sits BETWEEN the row's trailing space and the '[', so ') ' + ESC
+// appears. An assertion that only said "the suffix is coloured" would be
+// satisfied by an implementation that swallowed that space into the coloured
+// run - which changes nothing on screen and changes where the visible text
+// starts the moment anything strips the escapes.
+//==============================================================================
+
+dcl-proc test_colour_on_partial_row_and_suffix export;
+
+  dcl-s row      varchar(512);
+  dcl-s expected varchar(512);
+
+  SCOUT_set_colour(true);
+  row = SCOUT_check_row(SCOUT_partial_status(1: 2): 'zzc_half': 'Zulu C Half':
+                        SCOUT_not_running_suffix('JOBNAME:ZZNOSUCHCOLOURJOB'));
+
+  expected = '  ' + sgr(COL_PARTIAL) + 'PARTIAL (1/2)     ' + sgr(COL_RESET) +
+             ' | ' + sgr(COL_PARTIAL) + 'zzc_half' + sgr(COL_RESET) +
+             ' (Zulu C Half) ' +
+             sgr(COL_PARTIAL) + '[not running at -->JOBNAME:ZZNOSUCHCOLOURJOB]' +
+             sgr(COL_RESET);
+
+  aEqualExact(expected: row: 'coloured partial row');
+  iEqual(118: %len(row): 'length');
+
+  assert((%scan(') ' + sgr(COL_PARTIAL) + '[not running at -->': row) > 0):
+         'the space before the suffix is OUTSIDE the colour - an implementation ' +
+         'that swallowed it looks identical on screen and is not');
+  assert((%scan(']' + sgr(COL_RESET): row) > 0):
+         'the suffix is closed by a reset, so the row ends with an escape');
+
+  SCOUT_set_colour(false);
+
+end-proc;
+
+//==============================================================================
+// The short name carries its OWN ROW'S status colour
+//
+// SEPARATING VALUE: three rows in three states, and the code in front of the
+// short name differs between them - 32, 33, 35. That is what tells "the name
+// carries the status colour" apart from "the name has a colour of its own",
+// and the two rules are not hypothetical alternatives: SCOUT_list_row's name is
+// a fixed 36 whatever the service is doing, so BOTH rules exist in this
+// codebase and a one-row test cannot say which applies here.
+//
+// Asserted with %scan of the whole wrapped name rather than by looking at a
+// column, so it stays a statement about the name and not about the row length.
+//==============================================================================
+
+dcl-proc test_colour_name_takes_the_status_colour export;
+
+  dcl-s row varchar(512);
+
+  SCOUT_set_colour(true);
+
+  row = SCOUT_check_row(SCOUT_RUNNING: 'zzc_up': 'Zulu C Up');
+  assert((%scan(sgr(COL_RUNNING) + 'zzc_up' + sgr(COL_RESET): row) > 0):
+         'the RUNNING row wraps its short name in 32');
+
+  row = SCOUT_check_row(SCOUT_partial_status(1: 2): 'zzc_half': 'Zulu C Half':
+                        SCOUT_not_running_suffix('JOBNAME:ZZNOSUCHCOLOURJOB'));
+  assert((%scan(sgr(COL_PARTIAL) + 'zzc_half' + sgr(COL_RESET): row) > 0):
+         'the PARTIAL row wraps its short name in 33');
+  iEqual(0: %scan(sgr(COL_RUNNING) + 'zzc_half': row):
+         'and not in 32 - the name colour follows the row, not a constant');
+
+  row = SCOUT_check_row(SCOUT_NOT_RUNNING: 'zzc_down': 'Zulu C Down');
+  assert((%scan(sgr(COL_NOT) + 'zzc_down' + sgr(COL_RESET): row) > 0):
+         'the NOT RUNNING row wraps its short name in 35');
+
+  SCOUT_set_colour(false);
+
+end-proc;
+
+//==============================================================================
+// The description, its brackets and the spaces round them are NOT coloured
+//
+// SEPARATING VALUE: ' (Zulu C Up) ' appears CONTIGUOUSLY in the coloured row.
+// An implementation that ran the colour on from the short name through the
+// description would break that substring with a reset, and would still satisfy
+// every "the short name is coloured" assertion above. This is the assertion
+// that tells "coloured the name" from "coloured the name and the description",
+// and no escape count can.
+//
+// THIS ONE PASSES BEFORE THE FIX AS WELL AS AFTER IT, and it is written down as
+// a guard rather than a driver: colouring the name is the easiest place in this
+// change to colour one byte too far.
+//==============================================================================
+
+dcl-proc test_colour_leaves_the_description_alone export;
+
+  dcl-s row varchar(512);
+
+  SCOUT_set_colour(true);
+
+  row = SCOUT_check_row(SCOUT_RUNNING: 'zzc_up': 'Zulu C Up');
+  assert((%scan(' (Zulu C Up) ': row) > 0):
+         'the description and both brackets are one unbroken run of plain text');
+
+  row = SCOUT_check_row(SCOUT_partial_status(1: 2): 'zzc_half': 'Zulu C Half':
+                        SCOUT_not_running_suffix('JOBNAME:ZZNOSUCHCOLOURJOB'));
+  assert((%scan(' (Zulu C Half) ': row) > 0):
+         'and on the row that has a coloured suffix after it');
+
+  row = SCOUT_list_row('zzc_up': 'Zulu C Up');
+  assert((%scan(' (Zulu C Up)': row) > 0):
+         'and in the list row, which has no trailing space');
+
+  SCOUT_set_colour(false);
+
+end-proc;
+
+//==============================================================================
+// Colour adds escape sequences and moves no visible byte
+//
+// One assertion covering what four separate expectations would otherwise have
+// to repeat: with the SGR sequences removed, the coloured row IS the uncoloured
+// row. The bar stays at column 22, the status stays padded to 18, the trailing
+// space survives, and nothing is swallowed by a reset.
+//
+// SEPARATING VALUE: the strip removes ESC[...m and nothing else, so a visible
+// byte lost or gained inside a coloured run survives it and shows up here. A
+// test that compared TRIMMED lines, or that only counted escapes, could not see
+// that - and the trailing space is precisely the byte a consumer's third field
+// depends on.
+//
+// It is also the assertion that stays meaningful when the colour rules change
+// again: it never names a code.
+//==============================================================================
+
+dcl-proc test_colour_moves_no_visible_byte export;
+
+  dcl-s plain    varchar(512);
+  dcl-s coloured varchar(512);
+
+  SCOUT_set_colour(false);
+  plain = SCOUT_check_row(SCOUT_RUNNING: 'zzc_up': 'Zulu C Up');
+  SCOUT_set_colour(true);
+  coloured = SCOUT_check_row(SCOUT_RUNNING: 'zzc_up': 'Zulu C Up');
+  aEqualExact(plain: strip_sgr(coloured): 'running row, escapes removed');
+
+  SCOUT_set_colour(false);
+  plain = SCOUT_check_row(SCOUT_NOT_RUNNING: 'zzc_down': 'Zulu C Down');
+  SCOUT_set_colour(true);
+  coloured = SCOUT_check_row(SCOUT_NOT_RUNNING: 'zzc_down': 'Zulu C Down');
+  aEqualExact(plain: strip_sgr(coloured): 'stopped row, escapes removed');
+
+  SCOUT_set_colour(false);
+  plain = SCOUT_check_row(SCOUT_partial_status(1: 2): 'zzc_half': 'Zulu C Half':
+                          SCOUT_not_running_suffix('JOBNAME:ZZNOSUCHCOLOURJOB'));
+  SCOUT_set_colour(true);
+  coloured = SCOUT_check_row(SCOUT_partial_status(1: 2): 'zzc_half': 'Zulu C Half':
+                             SCOUT_not_running_suffix('JOBNAME:ZZNOSUCHCOLOURJOB'));
+  aEqualExact(plain: strip_sgr(coloured): 'partial row and suffix, escapes removed');
+
+  SCOUT_set_colour(false);
+  plain = SCOUT_list_row('zzc_up': 'Zulu C Up');
+  SCOUT_set_colour(true);
+  coloured = SCOUT_list_row('zzc_up': 'Zulu C Up');
+  aEqualExact(plain: strip_sgr(coloured): 'list row, escapes removed');
+
+  SCOUT_set_colour(false);
+
+end-proc;
+
+//==============================================================================
+// A list row's short name is CYAN, and the colour does not follow the status
+//
+// Captured:
+//   b'\x1b[36mzzc_up\x1b[0m (Zulu C Up)'
+//   b'\x1b[36mzzc_half\x1b[0m (Zulu C Half)'
+//   b'\x1b[36mzzc_down\x1b[0m (Zulu C Down)'
+//
+// The three services were RUNNING, PARTIAL and NOT RUNNING in the run that
+// produced those three lines, and all three are 36.
+//
+// THE DIVERGENCE THE BRIEF DID NOT HAVE. Only `check` had been measured; `list`
+// turns out to diverge in the same direction and RMSC leaves the name plain
+// here too. `groups` does not diverge - neither implementation colours it - and
+// that is recorded in tools/colour-test.sh, which is the only side that can see
+// a `groups` line at all.
+//
+// SEPARATING VALUE: 36 rather than the row's status colour. That this cannot
+// vary by status is structural here - SCOUT_list_row is not handed a status -
+// so the case that could actually catch a status-derived list colour is in
+// tools/colour-test.sh, where three real services in three states go through
+// one `list`. Said here rather than left implied, because a reader will
+// otherwise look for it in this file.
+//==============================================================================
+
+dcl-proc test_colour_on_list_row_is_cyan export;
+
+  dcl-s row varchar(512);
+
+  SCOUT_set_colour(true);
+  row = SCOUT_list_row('zzc_up': 'Zulu C Up');
+
+  aEqualExact(sgr(COL_LIST) + 'zzc_up' + sgr(COL_RESET) + ' (Zulu C Up)':
+              row: 'coloured list row');
+  iEqual(27: %len(row): 'length');
+  iEqual(0: %scan(sgr(COL_RUNNING): row):
+         'not the check row''s green - the list colour is its own');
+
+  SCOUT_set_colour(false);
+
+end-proc;
+
+//==============================================================================
+// The flag is a flag, not a one-shot
+//
+// SEPARATING VALUE: the row is byte-identical on the FIRST and the THIRD call
+// with colour on, and byte-identical to the uncoloured row on the call in
+// between. An implementation that emitted colour once and then latched - or one
+// that read the flag before the caller set it - would satisfy any single-row
+// case in this file and fail here.
+//
+// This is not idle. Both flags in this module are activation-scoped state that
+// outlives the procedure setting it, and the file already carries a case about
+// silence leaking between tests for the same reason.
+//==============================================================================
+
+dcl-proc test_colour_flag_toggles_both_ways export;
+
+  dcl-s first  varchar(512);
+  dcl-s middle varchar(512);
+  dcl-s third  varchar(512);
+
+  SCOUT_set_colour(true);
+  first = SCOUT_check_row(SCOUT_RUNNING: 'zzc_up': 'Zulu C Up');
+  nEqual(true: SCOUT_colour(): 'the flag reads back on');
+
+  SCOUT_set_colour(false);
+  middle = SCOUT_check_row(SCOUT_RUNNING: 'zzc_up': 'Zulu C Up');
+  nEqual(false: SCOUT_colour(): 'and reads back off');
+
+  SCOUT_set_colour(true);
+  third = SCOUT_check_row(SCOUT_RUNNING: 'zzc_up': 'Zulu C Up');
+
+  aEqualExact(first: third: 'colour on again gives the same row as the first time');
+  aEqualExact('  RUNNING            | zzc_up (Zulu C Up) ': middle:
+              'and colour off in between gives the plain row, not a stale one');
+  assert((%len(first) > %len(middle)):
+         'the coloured row is longer than the plain one, so the middle call ' +
+         'really did turn something off');
+
+  SCOUT_set_colour(false);
 
 end-proc;

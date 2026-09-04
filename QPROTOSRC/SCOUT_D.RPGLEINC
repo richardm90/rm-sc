@@ -49,8 +49,10 @@ dcl-s SCOUT_STATUS_t varchar(20)   template;
 // One 'check' row.
 //
 // Byte-identical to upstream. If colour is on, ANSI escapes wrap the padded
-// status so the visible columns are unchanged; with colour off - which is the
-// case whenever output is not a terminal - the row contains no escapes at all.
+// status, the short name and the not-running suffix - never a space, a bracket
+// or the description - so the visible columns are unchanged and stripping the
+// escapes yields the uncoloured row exactly. With colour off, which is the case
+// whenever output is not a terminal, the row contains no escapes at all.
 ///
 
 dcl-pr SCOUT_check_row like(SCOUT_LINE_t);
@@ -64,6 +66,9 @@ end-pr;
 // One 'list' row: 'name (description)', with no leading or trailing padding.
 ///
 
+// With colour on, the short name is wrapped in CYAN - fixed, not derived from
+// the service's status, which this procedure is not given. Measured against
+// sc 1.7.1 with running, partial and stopped services in one listing.
 dcl-pr SCOUT_list_row like(SCOUT_LINE_t);
   name like(SCOUT_LINE_t) const;
   desc like(SCOUT_LINE_t) const;
