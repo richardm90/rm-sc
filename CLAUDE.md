@@ -71,6 +71,26 @@ The gate is byte-exact for `check`, `list` and `groups`, and a live differential
 read-only operations. Differences are classified as sanctioned by the plan or still undecided;
 it fails when something regresses *and* when something is fixed without the list being updated.
 
+```bash
+makei build && BASELINE=<captured-upstream-dir> tools/verify.sh
+```
+
+`tools/verify.sh` is the whole of it in one run: thirteen suites, the five harnesses, the gate
+and the fixture pack, with a time against each stage and `VERIFY_DONE` at the end. **Run it
+before every commit.** Three things about it are worth knowing before you do:
+
+- **Build first, or the suites lie.** They compile and run against whatever `RMSC.SRVPGM`
+  is already there, so without a build they report a pass for code that was never tested. A
+  stale service program is indistinguishable from a current one at run time, so nothing in the
+  run can detect this.
+- **It takes the better part of an hour**, and the fixture pack is most of it - about ninety
+  `sc` invocations, each starting a JVM. Named stages run a subset while iterating
+  (`tools/verify.sh suites gate`), but a partial run is not a verification and the script says
+  so in its own output.
+- **`BASELINE` is not defaulted.** It points at captured upstream output naming real services,
+  so it lives outside this repository; the gate exits 2 with a clear message rather than
+  guessing.
+
 ## Where things are
 
 | | |
