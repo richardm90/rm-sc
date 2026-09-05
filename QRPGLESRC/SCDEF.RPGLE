@@ -434,6 +434,15 @@ dcl-proc add_criterion;
   if digits;
     def.criteria(def.criteria_count).kind = SCDEF_CHECK_PORT;
     def.criteria(def.criteria_count).port = %int(work);
+    // NORMALISED, and this is the same rule as the job name below: the DIRECT
+    // form is normalised and the companion form is verbatim. `check_alive:
+    // 08080` renders PORT:8080 while `check_alive: port` + `08080` renders
+    // PORT:08080 - measured, and already recorded in docs/parity.md.
+    //
+    // It matters beyond the rendering: to upstream a service on 08080 and one
+    // on 8080 claim ONE criterion and warn; without this they are two to RMSC
+    // and it stays silent about a real collision.
+    def.criteria(def.criteria_count).raw = %char(%int(work));
     return true;
   endif;
 
@@ -441,6 +450,19 @@ dcl-proc add_criterion;
   // the type-and-value form is a port because check_alive said so, and its
   // value may be anything at all - see the forced-kind path below, which is
   // where 'port' + 'abc' arrives. Nothing is converted without checking.
+
+  // Below here is the DIRECT form - `check_alive: <value>` with no companion
+  // key - and upstream folds a job name reached this way. The forced-kind path
+  // above returned already, with `raw` left exactly as written, because
+  // upstream does not fold that one. Measured; the difference is visible in
+  // `info` and, worse, in a conflict warning that names services which do not
+  // actually claim the same criterion.
+  //
+  // Ports are unaffected: the all-digits case returned above, and a port
+  // reached through the companion key returned with the forced kind. Their
+  // text is rendered from `raw` verbatim either way, which is what lets
+  // PORT:abc and PORT:22,23 survive intact.
+  def.criteria(def.criteria_count).raw = STRING_upper(work);
 
   // PGM-name: jobs running that program
   if %len(work) > 4 and STRING_upper(%subst(work: 1: 4)) = 'PGM-';
@@ -724,7 +746,7 @@ end-proc;
 //==============================================================================
 
 dcl-proc SCDEF_criterion_text export;
-  dcl-pi *n like(SCDEF_NAME_t);
+  dcl-pi *n like(SCDEF_CRITTEXT_t);
     criterion likeds(SCDEF_CRITERION_t) const;
   end-pi;
 
@@ -739,9 +761,15 @@ dcl-proc SCDEF_criterion_text export;
 
   // Everything else is a job name to upstream, including the SBS/JOB slash
   // form and the PGM- prefix - there is no PGM: rendering. Built from raw
-  // rather than the split-out fields so those forms survive intact, and
-  // upper-cased because upstream folds the criterion as it parses it.
-  return 'JOBNAME:' + STRING_upper(%trim(criterion.raw));
+  // rather than the split-out fields, so those forms survive intact AND a name
+  // longer than the ten characters a *JOB name holds is rendered whole.
+  //
+  // NOT upper-cased here. Upstream folds a job name given directly as
+  // `check_alive: x` and does NOT fold one arriving through
+  // `check_alive_criteria:`, so the folding belongs where the two paths are
+  // still distinguishable - at parse time - and `raw` already carries the
+  // right spelling by the time it reaches here.
+  return 'JOBNAME:' + %trim(criterion.raw);
 
 end-proc;
 

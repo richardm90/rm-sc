@@ -339,6 +339,79 @@ RMSC's own failure texts in this area, aligned with the narration in the same ch
 | `<short> did not stop, even immediately` | — | unmeasured |
 | `No stop_cmd defined` (`SCLAUNCH`) | — | unmeasured; upstream's `No start command specified for service '%s'` may be unreachable through YAML, since a definition without `start_cmd` is rejected at load time |
 
+## Four defects the fixture pack found on its first run
+
+The pack in `tools/gate-fixtures/` has never been part of any routine verification — it has its
+own runner, which nothing calls. Running it found two differences, both on **stderr**, both
+repeated on every one of its 54 comparisons, and neither reachable by anything on the machine.
+Review then found two more while checking the fixes for those, which is why this section lists
+four — only the first two came from the pack's own first run.
+
+**1. A job name reached through `check_alive_criteria:` must NOT be upper-cased.**
+
+    check_alive: jobname
+    check_alive_criteria: qp0zspwp
+
+    upstream  Check-alive conditions: JOBNAME:qp0zspwp     <- as written
+    RMSC      Check-alive conditions: JOBNAME:QP0ZSPWP     <- upper-cased
+
+Upstream upper-cases a job name given directly as `check_alive: qp0zspwp`, and does **not**
+upper-case one arriving through the companion key. RMSC upper-cases both.
+
+The consequence is worse than the rendering. RMSC normalises two differently-spelled criteria onto
+one, decides two services claim it, and emits a **conflict warning naming services that do not
+conflict** — on every `check`, `list`, `groups` and `info`. Upstream stays silent because to it
+the two criteria are different.
+
+This also reconciles with the earlier measurement that job names differing only in case DO
+conflict: that was two definitions both using `check_alive:` directly, so both were upper-cased
+and genuinely collided.
+
+**2. A name ending `rpmnew` is skipped SILENTLY**, and the rule is
+
+    name.toLowerCase().endsWith("rpmnew")
+
+Measured over thirteen filenames, and **three things about it are not what they look like**. A
+first implementation, written from ten filenames, got all three wrong:
+
+| | |
+|---|---|
+| it is **case-insensitive** | `x.YAML.RPMNEW`, `x.RPMnew`, `x.yaml.RpMnEw` are silent |
+| there is **no dot** in it | bare `rpmnew`, `foorpmnew` and `x_rpmnew` are silent too — the suffix is `rpmnew`, not `.rpmnew` |
+| the name is **not trimmed** | `x.yaml.rpmnew ` with a trailing blank **warns**, because the blank is part of the name |
+
+Upstream **does** warn about `.rpmsave`, `.bak`, `.orig`, `~`, `.disabled`, `.swp`, `.old`,
+`.rpm-new`, `.rpmnew.bak` and `.rpmnewer`. So it is one suppression of a package-manager
+artefact, not a general backup-extension rule — guessing from `.rpmnew` alone gives
+"backup-ish extensions are quiet", which fits every observation of it and gets `.rpmsave` wrong.
+
+The trailing-blank row is the one worth keeping in mind: it is the only case where a wrong
+implementation is **silent where upstream warns**, so a test that only checks "the rpmnew ones are
+quiet" cannot catch it.
+
+Both implementations load the identical set of services either way; the difference is only the
+warning.
+
+**3. `info` rendered a criterion from the parsed fields rather than from the criterion text**,
+and was wrong three ways at once: a job name longer than **ten** characters was truncated,
+because a `*JOB` name field holds ten and the criterion text does not; a `PGM-` criterion
+rendered as `PGM:x` where upstream says `JOBNAME:PGM-X`; and a port rendered from the converted
+number, so a criterion upstream shows as `PORT:abc` would have appeared as `PORT:0`.
+
+Three independent driftings in one duplicated renderer, which is what the note beside
+`SCOUT_only_started` predicts about two renderings of one thing in one codebase.
+
+**4. And a truncation hidden behind that truncation.** With `info` fixed, `SCDEF_criterion_text`
+turned out to truncate at **56** characters of criterion: its return type was 64 wide and
+`'JOBNAME:'` plus a 64-character criterion is 72. The test asserting that a twenty-character job
+name "renders whole" sat below both caps and could never have failed.
+
+**Ports follow the same direct-versus-companion rule as job names**, which is the part that was
+missed when the job-name rule was found. `check_alive: 08080` renders `PORT:8080` — normalised —
+and `check_alive: port` + `check_alive_criteria: 08080` renders `PORT:08080`, verbatim. It matters
+beyond the rendering: to upstream a service on `08080` and one on `8080` claim **one** criterion
+and conflict, so keeping them distinct means staying silent about a real collision.
+
 ## The read-only operations
 
 `check`, `list` and `groups` are byte-exact and are not in this document. The four the gate calls

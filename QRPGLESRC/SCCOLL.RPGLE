@@ -27,6 +27,11 @@ ctl-opt text('RMSC: Service definition collection');
 // Internal prototypes
 ///
 
+dcl-pr ends_with like(BOOLEAN_t);
+  name   like(IFS_DIR_FILENAME_t) const;
+  suffix like(SCDEF_NAME_t) const;
+end-pr;
+
 dcl-pr is_yaml like(BOOLEAN_t);
   filename like(IFS_DIR_FILENAME_t) const;
 end-pr;
@@ -199,7 +204,32 @@ dcl-proc SCCOLL_load_dir export;
       // where SCMAIN's own quiet test cannot reach, which is how it came to
       // ignore the option in the first place.
       if not hush;
-        SCOUT_warnln('WARNING: Ignoring file: ' + path);
+        // Skipped in silence when the name ends 'rpmnew', which is what a
+        // package manager leaves behind rather than overwrite a config file
+        // someone has edited. Upstream warns about every other name its rule
+        // rejects - .rpmsave, .bak, .orig, ~, .disabled, .swp and .old were
+        // each measured and each warns.
+        //
+        // THREE THINGS ABOUT THIS RULE ARE NOT WHAT THEY LOOK LIKE, and a
+        // first implementation got all three wrong:
+        //
+        //   it is CASE-INSENSITIVE   x.YAML.RPMNEW and x.RPMnew are silent
+        //   there is NO DOT in it    'rpmnew', 'foorpmnew' and 'x_rpmnew'
+        //                            are silent; the suffix is 'rpmnew', not
+        //                            '.rpmnew'
+        //   the name is NOT TRIMMED  'x.yaml.rpmnew ' with a trailing blank
+        //                            WARNS, because that blank is part of the
+        //                            file's name - the same discipline is_yaml
+        //                            keeps, and for the same reason
+        //
+        // Measured over thirteen filenames. Guessing from '.rpmnew' alone
+        // gives "backup-ish extensions are quiet", which fits every
+        // observation of it and gets .rpmsave wrong.
+        //
+        // filename rather than path: the rule is about the name, as is_yaml's.
+        if not ends_with(filename: 'RPMNEW');
+          SCOUT_warnln('WARNING: Ignoring file: ' + path);
+        endif;
       endif;
       iter;
     endif;
@@ -269,6 +299,44 @@ dcl-proc SCCOLL_load_dir export;
   LIST_sort_by_key(coll.list);
 
   return true;
+
+end-proc;
+
+//==============================================================================
+// ends_with
+//   Does the name end with this suffix, ignoring case?
+//
+// Upstream's rule reads name.toLowerCase().endsWith("rpmnew"), so both sides
+// are folded here. NEITHER side is trimmed: a trailing blank belongs to the
+// file's name, and upstream warns about 'x.yaml.rpmnew ' precisely because
+// that blank means the name does not end in rpmnew. is_yaml keeps the same
+// discipline for the same reason.
+//==============================================================================
+
+dcl-proc ends_with;
+  dcl-pi *n like(BOOLEAN_t);
+    name   like(IFS_DIR_FILENAME_t) const;
+    suffix like(SCDEF_NAME_t) const;
+  end-pi;
+
+  // AS WIDE AS A FILENAME, not as wide as a service name. At varchar(64)
+  // against a varchar(640) argument every longer name was cut before the rule
+  // saw its tail, and the failure had a direction: a name whose first 64
+  // characters end in 'rpmnew' went SILENT where upstream WARNS. That is the
+  // one direction a test checking "the rpmnew ones are quiet" cannot catch,
+  // and it is the second bound bug in this one procedure - the first was the
+  // %trim that swallowed a trailing blank.
+  dcl-s n like(IFS_DIR_FILENAME_t);
+  dcl-s x like(SCDEF_NAME_t);
+
+  n = STRING_upper(name);
+  x = STRING_upper(suffix);
+
+  if %len(x) = 0 or %len(n) < %len(x);
+    return false;
+  endif;
+
+  return (%subst(n: %len(n) - %len(x) + 1) = x);
 
 end-proc;
 
@@ -670,7 +738,17 @@ dcl-proc SCCOLL_conflicts export;
   dcl-s j      like(INTEGER_t);
   dcl-s c      like(INTEGER_t);
   dcl-s k      like(INTEGER_t);
-  dcl-s text   like(SCDEF_NAME_t);
+  // SCDEF_CRITTEXT_t, and the width is LOAD-BEARING. This held a
+  // SCDEF_NAME_t (64) while SCDEF_criterion_text returns up to 136 -
+  // 'JOBNAME:' plus a 128-character criterion. The assignment below truncated
+  // silently, and the comparison further down tests the UNtruncated rendering
+  // against it, so past 64 characters nothing matched: a definition did not
+  // claim even its own criterion, the count stayed at zero, and no conflict
+  // was reported at all. Not a partial answer - silence.
+  //
+  // Found by review, not by the suite: every fixture here used a short name,
+  // so the two widths agreed on every case anyone had written.
+  dcl-s text   like(SCDEF_CRITTEXT_t);
   dcl-s seen   like(BOOLEAN_t);
   dcl-s claims like(BOOLEAN_t);
 

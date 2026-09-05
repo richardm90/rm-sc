@@ -201,7 +201,13 @@ dcl-ds SCEXEC_EVAL_t qualified template inz;
   alive        like(INTEGER_t) inz(0);
   total        like(INTEGER_t) inz(0);
   failed_count like(INTEGER_t) inz(0);
-  failed       like(SCDEF_NAME_t) dim(SCDEF_MAX_CRITERIA);
+  // SCDEF_CRITTEXT_t, not SCDEF_NAME_t, and the width is LOAD-BEARING:
+  // SCEXEC_evaluate assigns SCDEF_criterion_text into these, which renders up
+  // to 136 - 'JOBNAME:' plus a 128-character criterion. At 64 a long criterion
+  // was cut, and failed_text is built from these entries, so the cut reached
+  // the '[not running at -->...]' suffix on a check row - the byte-exact path
+  // a consumer screen-scrapes by column.
+  failed       like(SCDEF_CRITTEXT_t) dim(SCDEF_MAX_CRITERIA);
   failed_text  like(SCOUT_LINE_t) inz('');
 
   // A criterion can be UNUSABLE as opposed to unsatisfied: 'check_alive: port'
@@ -222,7 +228,7 @@ dcl-ds SCEXEC_EVAL_t qualified template inz;
   // very conflation being fixed, one layer up.
   unusable_count like(INTEGER_t) inz(0);
   unusable_index like(INTEGER_t) inz(0);
-  unusable_text  like(SCDEF_NAME_t) inz('');
+  unusable_text  like(SCDEF_CRITTEXT_t) inz('');
 end-ds;
 
 ///

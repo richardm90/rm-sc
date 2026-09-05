@@ -93,6 +93,14 @@ dcl-pr cfl_write;
   criteria varchar(128) const;
 end-pr;
 
+dcl-pr cfl_write_comp;
+  suffix   varchar(32) const;
+  short    varchar(64) const;
+  friendly varchar(64) const;
+  typeword varchar(32) const;
+  criteria varchar(128) const;
+end-pr;
+
 dcl-pr cfl_load;
   suffix varchar(32) const;
   coll   likeds(SCCOLL_t);
@@ -100,7 +108,12 @@ end-pr;
 
 dcl-pr cfl_index like(INTEGER_t);
   conflicts likeds(SCCOLL_CONFLICTS_t) const;
-  want      varchar(64) const;
+  want      varchar(512) const;
+end-pr;
+
+dcl-pr cfl_longname varchar(256);
+  tag varchar(16) const;
+  len like(INTEGER_t) const;
 end-pr;
 
 dcl-s g_en like(STMF_t);
@@ -2089,7 +2102,8 @@ end-proc;
 //------------------------------------------------------------------------------
 dcl-proc nam_setup;
 
-  dcl-s y like(STRING_t);
+  dcl-s y  like(STRING_t);
+  dcl-s xs varchar(64);
 
   g_nam = '/tmp/rmsc-sccoll-name-' + %trim(psds.current_user);
 
@@ -2112,6 +2126,76 @@ dcl-proc nam_setup;
   write_file(%trim(g_nam) + '/backup.yaml.bak': y);   // extension is .bak
   write_file(%trim(g_nam) + '/nodots': y);            // no extension
   write_file(%trim(g_nam) + '/.hidden.yaml': y);      // leading dot
+
+  // FOUR PACKAGE-MANAGER ARTEFACTS, added after tools/gate-fixtures-run.sh
+  // found that upstream skips a .rpmnew file WITHOUT WARNING and warns about
+  // every other rejected name including .rpmsave. The warning itself is not
+  // observable from inside the ILE job and belongs to
+  // tools/load-warning-test.sh; what belongs HERE is the other half of that
+  // measurement - both implementations LOAD THE SAME SERVICES either way, and
+  // the difference is only what they say.
+  //
+  // That half is worth pinning precisely because the warning is the thing
+  // being changed. The cheapest way to stop warning about a file is to stop
+  // rejecting it, and a .rpmnew accepted as a definition would be a far worse
+  // defect than the one being closed: an old copy of a service definition,
+  // silently live, under a name nobody chose.
+  //
+  // Three spellings of .rpmnew because the suppression is of the SUFFIX and
+  // not of '.yaml.rpmnew', and .rpmsave because it is the separating value -
+  // "backup-ish extensions are skipped quietly" fits every .rpmnew and gets
+  // .rpmsave wrong.
+  write_file(%trim(g_nam) + '/pkgnew.yaml.rpmnew': y);
+  write_file(%trim(g_nam) + '/pkgnew.yml.rpmnew': y);
+  write_file(%trim(g_nam) + '/pkgbare.rpmnew': y);
+  write_file(%trim(g_nam) + '/pkgsave.yaml.rpmsave': y);
+
+  // THE SUPPRESSION IS WIDER THAN '.rpmnew', and every one of these is still
+  // rejected as a definition. Upstream's test is
+  //
+  //     name.toLowerCase().endsWith("rpmnew")
+  //
+  // measured across thirteen filenames on 4 September, so it is
+  // case-insensitive and there is no dot in it. These four are the names that
+  // separate that rule from '.rpmnew' written literally, and they are here
+  // because the warning is the thing being changed: a suppression implemented
+  // by ACCEPTING the file rather than by staying quiet about rejecting it
+  // would show up as a count, and only if the count is asked about these
+  // spellings as well as the obvious ones.
+  //
+  // EVERY BASE NAME IS DISTINCT, and that is not decoration. /tmp on this
+  // machine is case-insensitive and case-preserving, so two fixtures differing
+  // only in case collapse into one file and the second silently overwrites the
+  // first - leaving a fixture that tests less than it appears to while the
+  // count still comes out right. It cost the review of this file one attempt.
+  write_file(%trim(g_nam) + '/pkgcase.YAML.RPMNEW': y);   // upper throughout
+  write_file(%trim(g_nam) + '/pkgmix.yaml.RpMnEw': y);    // mixed
+  write_file(%trim(g_nam) + '/pkgunder_rpmnew': y);       // no dot at all
+  write_file(%trim(g_nam) + '/pkgcatrpmnew': y);          // no separator
+
+  // THREE NAMES PAST 64 CHARACTERS, because the rule is applied to the WHOLE
+  // name and two separate defects in this area have been about the BOUNDARY of
+  // the value rather than the logic on it - a %trim that swallowed a trailing
+  // blank, and a 64-character parameter that cut a 640-character directory
+  // entry before the rule saw its tail. Neither was reachable by a fixture
+  // chosen for what it SPELLS, and every other name in this directory is
+  // short.
+  //
+  // They differ only PAST the old cut, which is what makes them a separating
+  // set rather than three long names: rvz ends in rpmnew and rvy ends in .bak,
+  // but cut at 64 the first ends in 'x' and the second ends in 'rpmnew' - so a
+  // narrow parameter gets both backwards. rvw is the control, past the cut and
+  // rejected either way.
+  //
+  // WHAT THIS SUITE CAN SEE OF THAT IS THE LOADING, NOT THE WARNING, and all
+  // three are rejected by the filename rule whatever happens to the tail. The
+  // warning is where the defect showed and belongs to
+  // tools/load-warning-test.sh; this is the half that says a fix must not
+  // start ACCEPTING a long name in the course of quietening it.
+  xs = 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
+  write_file(%trim(g_nam) + '/rvz' + %subst(xs: 1: 61) + 'rpmnew': y);
+  write_file(%trim(g_nam) + '/rvy' + %subst(xs: 1: 55) + 'rpmnew.bak': y);
+  write_file(%trim(g_nam) + '/rvw' + %subst(xs: 1: 62) + '.bak': y);
 
 end-proc;
 
@@ -2168,7 +2252,8 @@ dcl-proc test_filename_rule export;
   assert(SCCOLL_load_dir(coll: g_nam): 'filename fixture loaded');
 
   // good.yaml, also.yml, under_score-dash9.yaml - and nothing else
-  iEqual(3: SCCOLL_count(coll): 'three of the nine files are definitions');
+  iEqual(3: SCCOLL_count(coll):
+         'three of the twenty files are definitions');
 
   nEqual(true: SCCOLL_find(coll: 'good': def):
          'a plain lower-case name loads');
@@ -2181,6 +2266,87 @@ dcl-proc test_filename_rule export;
          'a capital letter in the base name is not legal');
   nEqual(false: SCCOLL_find(coll: 'upper': def):
          'and neither is a capitalised extension');
+
+end-proc;
+
+//==============================================================================
+// A .rpmnew is skipped exactly as a .rpmsave is - the difference is the WARNING
+//
+// MEASURED 4 September against sc 1.7.1, thirteen failing filenames in one
+// directory. Upstream's test is
+//
+//     name.toLowerCase().endsWith("rpmnew")
+//
+// so it is case-insensitive, carries no dot, and is applied to the name AS IT
+// IS ON DISK - 'x.yaml.rpmnew ' with a trailing blank WARNS, because the blank
+// is part of the name and the name therefore does not end in rpmnew. Upstream
+// loaded NONE of the thirteen either way. So the suppression is of the
+// message, not of the rejection, and this is the assertion that keeps the
+// second from being changed while the first is.
+//
+// THE TRAILING BLANK IS NOT ASSERTED HERE. It is the sharpest case of the
+// three - the only one where a wrong implementation is SILENT where upstream
+// WARNS - and it is therefore about the warning rather than about loading,
+// which puts it in tools/load-warning-test.sh. The blank fixtures in this
+// suite live in their own directory for reasons the blk_ block sets out, and
+// adding one here would put a fixture-creation risk into a count that is
+// currently clean.
+//
+// THE COUNT IS THE REAL ASSERTION, as it is in test_filename_rule, and for the
+// same reason: what a wrongly-accepted 'pkgnew.yaml.rpmnew' would be CALLED is
+// a guess, and a test resting on a guess about the wrong behaviour goes green
+// when the guess is wrong rather than when the code is right. The two named
+// look-ups below are the two spellings worth guessing at - RMSC derives a short
+// name from the filename and lower-cases it - and they are additional to the
+// count, not a substitute for it.
+//
+// SHARES THE nam_ DIRECTORY, so this count and test_filename_rule's are the
+// same count of the same thirteen files. That is deliberate: the two tests
+// state different things about one fixture, and a second directory holding
+// copies would let them drift apart.
+//
+// IT PASSES TODAY, and it is here for the direction nothing else covers. Every
+// other assertion about .rpmnew in this repository - tools/load-warning-test.sh
+// stage 1 - is about a warning that must STOP. This one is about a rejection
+// that must not.
+//==============================================================================
+
+dcl-proc test_filename_rule_package_artefacts export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t) inz(*likeds);
+
+  SCCOLL_init(coll);
+  assert(SCCOLL_load_dir(coll: g_nam): 'filename fixture loaded');
+
+  iEqual(3: SCCOLL_count(coll):
+         'none of the eight package artefacts became a service');
+
+  nEqual(false: SCCOLL_find(coll: 'pkgnew': def):
+         'a .rpmnew is not a definition however its base name is spelled');
+  nEqual(false: SCCOLL_find(coll: 'pkgbare': def):
+         'including one with no .yaml in the name at all');
+  nEqual(false: SCCOLL_find(coll: 'pkgcase': def):
+         'nor one written in upper case, which upstream is equally quiet ' +
+         'about and equally unwilling to load');
+  nEqual(false: SCCOLL_find(coll: 'pkgmix': def):
+         'nor a mixed-case one');
+  nEqual(false: SCCOLL_find(coll: 'pkgunder': def):
+         'nor one whose suffix is not introduced by a dot at all');
+  nEqual(false: SCCOLL_find(coll: 'pkgcatrpmnew': def):
+         'nor one where rpmnew is simply the end of the word');
+  nEqual(false: SCCOLL_find(coll: 'pkgsave': def):
+         'and neither is a .rpmsave - every one of these is rejected alike, ' +
+         'and only the warning tells them apart');
+
+  // THE THREE NAMES PAST 64 CHARACTERS ARE COVERED BY THE COUNT ALONE, and
+  // deliberately not looked up by name. This test's header already argues that
+  // what a wrongly-accepted file would be CALLED is a guess, and it is a worse
+  // guess here than anywhere: the short name RMSC would derive from a
+  // 70-character filename is exactly the thing a narrow parameter would get
+  // wrong, so a look-up would be asking the defect to describe itself. The
+  // count of 3 is the assertion, and it is a complete one - twenty files in,
+  // three definitions out.
 
 end-proc;
 
@@ -2570,6 +2736,16 @@ dcl-proc cfl_setup;
   IFS_crtdir(%trim(g_cfl) + '/self');
   IFS_crtdir(%trim(g_cfl) + '/mixed');
   IFS_crtdir(%trim(g_cfl) + '/case');
+  IFS_crtdir(%trim(g_cfl) + '/compcase');
+  IFS_crtdir(%trim(g_cfl) + '/compsame');
+  IFS_crtdir(%trim(g_cfl) + '/portzero');
+  IFS_crtdir(%trim(g_cfl) + '/portcomp');
+  IFS_crtdir(%trim(g_cfl) + '/portsame');
+  IFS_crtdir(%trim(g_cfl) + '/portmix');
+  IFS_crtdir(%trim(g_cfl) + '/len28');
+  IFS_crtdir(%trim(g_cfl) + '/len64');
+  IFS_crtdir(%trim(g_cfl) + '/len65');
+  IFS_crtdir(%trim(g_cfl) + '/len136');
 
   // Two services sharing a job criterion. Written bravo first so that the
   // expected order is not the creation order.
@@ -2612,6 +2788,91 @@ dcl-proc cfl_setup;
   cfl_write('case': 'rmsccfl_sierra': 'Sierra svc': 'rmsccflcasejob');
   cfl_write('case': 'rmsccfl_romeo':  'Romeo svc':  'RMSCCFLCASEJOB');
 
+  // The same job name in two cases, but reached through check_alive_criteria.
+  // MEASURED - upstream keeps each as written, so these are two criteria and
+  // NOTHING conflicts. The pair above and this pair differ in exactly one
+  // thing, which is the whole point of having both.
+  cfl_write_comp('compcase': 'rmsccfl_tango':   'Tango svc':
+                 'jobname': 'rmsccflcompjob');
+  cfl_write_comp('compcase': 'rmsccfl_uniform': 'Uniform svc':
+                 'jobname': 'RMSCCFLCOMPJOB');
+
+  // ONE spelling of a companion job name, written twice. These really do
+  // conflict, on both sides. Without it, "a companion criterion never
+  // conflicts with anything" would satisfy compcase and lose a warning
+  // upstream prints.
+  cfl_write_comp('compsame': 'rmsccfl_victor':  'Victor svc':
+                 'jobname': 'rmsccflsamecomp');
+  cfl_write_comp('compsame': 'rmsccfl_whiskey': 'Whiskey svc':
+                 'jobname': 'rmsccflsamecomp');
+
+  // THE SAME RULE, SPELLED IN PORTS. A port written into check_alive is
+  // normalised and one arriving through the companion is kept verbatim, so
+  // 08080 and 8080 are one criterion on the direct path and two on the
+  // companion path. MEASURED 4 September; docs/parity.md:377 has the
+  // rendering half and test_criterion_text_direct_port_normalises in
+  // SCDEF.TEST pins it.
+  //
+  // FOUR DIRECTORIES, and each rules out a different wrong reading:
+  //
+  //   portzero   direct 08080 + direct 8080       -> ONE conflict, PORT:8080
+  //              rules out "keep the text on both paths", which would lose a
+  //              warning about a collision that is real
+  //   portcomp   companion 08080 + companion 8080 -> NO conflict
+  //              rules out "normalise on both paths", which would invent one
+  //   portsame   companion 08080 twice            -> ONE conflict, PORT:08080
+  //              rules out "a companion criterion never conflicts", the
+  //              cheapest way to make portcomp green
+  //   portmix    direct 8080 + companion 08080    -> NO conflict
+  //              rules out normalising the companion to meet the direct one,
+  //              which portcomp alone cannot see because both its values go
+  //              down the same path
+  //
+  // A DIFFERENT PORT NUMBER PER DIRECTORY, so that a fixture leaking between
+  // directories would change a count rather than pass unnoticed.
+  cfl_write('portzero': 'rmsccfl_xray':   'Xray svc':   '08080');
+  cfl_write('portzero': 'rmsccfl_yankee': 'Yankee svc': '8080');
+
+  cfl_write_comp('portcomp': 'rmsccfl_zulu2':  'Zulu Two svc':
+                 'port': '08081');
+  cfl_write_comp('portcomp': 'rmsccfl_alpha2': 'Alpha Two svc':
+                 'port': '8081');
+
+  cfl_write_comp('portsame': 'rmsccfl_bravo2': 'Bravo Two svc':
+                 'port': '08082');
+  cfl_write_comp('portsame': 'rmsccfl_charlie2': 'Charlie Two svc':
+                 'port': '08082');
+
+  cfl_write('portmix': 'rmsccfl_delta2': 'Delta Two svc': '8083');
+  cfl_write_comp('portmix': 'rmsccfl_echo2': 'Echo Two svc':
+                 'port': '08083');
+
+  // CRITERION LENGTH. Four directories, one per length, so each test's
+  // conflict count is a statement about its own length and nothing else.
+  // Every value is a job name written straight into check_alive:, upper case
+  // already, so 'JOBNAME:' + the value IS the rendering and the rendering's
+  // length is 8 + the value's - see the group header below the fixture.
+  //
+  //   len28    20 chars ->  28 rendered   control, well inside any holder
+  //   len64    56 chars ->  64 rendered   the largest that a 64-wide holder
+  //                                       still fits exactly
+  //   len65    57 chars ->  65 rendered   ONE character past it
+  //   len136  128 chars -> 136 rendered   the documented criterion limit
+  //
+  // Written b before a in every pair, so the expected member order is not
+  // the creation order - the same discipline the pairs above use.
+  cfl_write('len28':  'rmsccfl_len28b':  'Len28 B':  cfl_longname('L28': 20));
+  cfl_write('len28':  'rmsccfl_len28a':  'Len28 A':  cfl_longname('L28': 20));
+
+  cfl_write('len64':  'rmsccfl_len64b':  'Len64 B':  cfl_longname('L64': 56));
+  cfl_write('len64':  'rmsccfl_len64a':  'Len64 A':  cfl_longname('L64': 56));
+
+  cfl_write('len65':  'rmsccfl_len65b':  'Len65 B':  cfl_longname('L65': 57));
+  cfl_write('len65':  'rmsccfl_len65a':  'Len65 A':  cfl_longname('L65': 57));
+
+  cfl_write('len136': 'rmsccfl_len136b': 'Len136 B': cfl_longname('L136': 128));
+  cfl_write('len136': 'rmsccfl_len136a': 'Len136 A': cfl_longname('L136': 128));
+
 end-proc;
 
 //------------------------------------------------------------------------------
@@ -2630,6 +2891,48 @@ dcl-proc cfl_write;
   y = 'name: ' + %trim(friendly) + LF;
   y += 'start_cmd: /usr/bin/rmsccfl' + LF;
   y += 'check_alive: ' + %trim(criteria) + LF;
+
+  write_file(%trim(g_cfl) + '/' + %trim(suffix) + '/' +
+             %trim(short) + '.yaml': y);
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// cfl_write_comp - the same definition, with the criterion reached through the
+// COMPANION key instead of written straight into check_alive
+//
+// A separate procedure rather than a flag on cfl_write, so that every existing
+// fixture keeps the shape it was measured in and a reader can see at the call
+// site which of the two forms a case is about. The two forms are the whole
+// subject of the compcase and compsame cases and conflating them in the helper
+// would be conflating them in the fixture.
+//
+// THE TYPE WORD IS A PARAMETER because the rule this helper exists to exercise
+// is not about job names. 'jobname' and 'port' are the two type words upstream
+// has, and the direct-versus-companion difference shows up in BOTH - as case
+// for a job name and as a leading zero for a port. A helper hard-coded to
+// 'jobname' would have quietly limited the fixture to half the rule.
+//
+// It is written lower case at every call site because that is how the type
+// word arrives in the definitions this was measured against; the type word
+// being matched without regard to case is SCDEF's business, pinned by
+// test_criteria_companion_type_case in SCDEF.TEST rather than here.
+//------------------------------------------------------------------------------
+dcl-proc cfl_write_comp;
+  dcl-pi *n;
+    suffix   varchar(32) const;
+    short    varchar(64) const;
+    friendly varchar(64) const;
+    typeword varchar(32) const;
+    criteria varchar(128) const;
+  end-pi;
+
+  dcl-s y like(STRING_t);
+
+  y = 'name: ' + %trim(friendly) + LF;
+  y += 'start_cmd: /usr/bin/rmsccfl' + LF;
+  y += 'check_alive: ' + %trim(typeword) + LF;
+  y += 'check_alive_criteria: ' + %trim(criteria) + LF;
 
   write_file(%trim(g_cfl) + '/' + %trim(suffix) + '/' +
              %trim(short) + '.yaml': y);
@@ -2657,11 +2960,18 @@ end-proc;
 // Used instead of assuming item(1) is the one a test means. Conflict order is
 // not specified, so a test that assumed one would be asserting a contract
 // nobody has agreed.
+//
+// WANT IS 512, AND THAT WIDTH IS LOAD-BEARING. It was 64, which is fine for
+// every criterion above and silently wrong for the length tests at the end of
+// this group: a 136-character expected value handed to a 64-wide parameter
+// arrives TRUNCATED, so it would have matched a truncated recorded criterion
+// and reported the very defect those tests exist to detect as a pass. The
+// instrument must not share the fault it is measuring. Do not narrow it again.
 //------------------------------------------------------------------------------
 dcl-proc cfl_index;
   dcl-pi *n like(INTEGER_t);
     conflicts likeds(SCCOLL_CONFLICTS_t) const;
-    want      varchar(64) const;
+    want      varchar(512) const;
   end-pi;
 
   dcl-s i like(INTEGER_t);
@@ -2673,6 +2983,46 @@ dcl-proc cfl_index;
   endfor;
 
   return 0;
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// cfl_longname - a job name of exactly LEN characters, distinct per case
+//
+// Built rather than written out, so each length is stated ONCE and cannot
+// drift from the comment when somebody reflows a literal - the argument
+// test_criterion_text_job_not_truncated in SCDEF.TEST makes for the same kind
+// of fixture. Every test below re-asserts %len of what it gets back, so a
+// helper that quietly returned the wrong length would be caught rather than
+// believed.
+//
+// UPPER CASE THROUGHOUT, and deliberately: a job name written straight into
+// check_alive: is folded, so an upper-case value renders identically whether
+// the folding rule is applied or not. These rows are about LENGTH, and a
+// lower-case value would make them go red the day the folding rule moved,
+// for a reason that has nothing to do with what they measure.
+//
+// The TAG goes at the FRONT, so two values of different lengths still differ
+// in their first dozen characters. If they differed only past character 56, a
+// finder that truncated them would see one criterion where the fixture means
+// two, and the count assertions would report the wrong thing.
+//------------------------------------------------------------------------------
+dcl-proc cfl_longname;
+  dcl-pi *n varchar(256);
+    tag varchar(16) const;
+    len like(INTEGER_t) const;
+  end-pi;
+
+  dcl-c FILLER const('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
+  dcl-s v varchar(320);
+
+  v = 'RMSCCFL' + %trimr(tag);
+
+  dow %len(v) < len;
+    v += FILLER;
+  enddo;
+
+  return %subst(v: 1: len);
 
 end-proc;
 
@@ -2716,6 +3066,16 @@ dcl-proc cfl_teardown;
   cfl_rmdir(%trim(g_cfl) + '/self');
   cfl_rmdir(%trim(g_cfl) + '/mixed');
   cfl_rmdir(%trim(g_cfl) + '/case');
+  cfl_rmdir(%trim(g_cfl) + '/compcase');
+  cfl_rmdir(%trim(g_cfl) + '/compsame');
+  cfl_rmdir(%trim(g_cfl) + '/portzero');
+  cfl_rmdir(%trim(g_cfl) + '/portcomp');
+  cfl_rmdir(%trim(g_cfl) + '/portsame');
+  cfl_rmdir(%trim(g_cfl) + '/portmix');
+  cfl_rmdir(%trim(g_cfl) + '/len28');
+  cfl_rmdir(%trim(g_cfl) + '/len64');
+  cfl_rmdir(%trim(g_cfl) + '/len65');
+  cfl_rmdir(%trim(g_cfl) + '/len136');
 
   IFS_dltdir(g_cfl);
 
@@ -2951,6 +3311,504 @@ dcl-proc test_conflicts_case_insensitive export;
   aEqualV('rmsccfl_sierra': cf.item(n).name(2): 'second member');
 
 end-proc;
+
+//==============================================================================
+// MEASURED - two spellings reached through check_alive_criteria are TWO
+// criteria, and nothing conflicts
+//
+// Found by tools/gate-fixtures-run.sh on its first run and measured against
+// sc 1.7.1 on 4 September. Upstream folds a job name written straight into
+// check_alive: and does NOT fold one arriving through check_alive_criteria:,
+// so a pair that collides in the test above stays apart here:
+//
+//     rmsccfl_tango    check_alive: jobname / check_alive_criteria: rmsccflcompjob
+//     rmsccfl_uniform  check_alive: jobname / check_alive_criteria: RMSCCFLCOMPJOB
+//
+//     upstream   silent
+//     RMSC       WARNING: ... liveliness check 'JOBNAME:RMSCCFLCOMPJOB':
+//                    rmsccfl_tango (Tango svc)
+//                    rmsccfl_uniform (Uniform svc)
+//
+// A warning naming two services that do not conflict, printed on check, list,
+// groups and info alike. docs/messages.md § "Two defects the fixture pack found
+// on its first run" has the capture.
+//
+// THIS PAIR AND test_conflicts_case_insensitive ARE THE SEPARATING PAIR, and
+// neither is worth anything without the other. They differ in exactly one
+// thing - which key the value arrived through - and between them they rule out
+// the rule that fits all the obvious data:
+//
+//     RIVAL      "job names are compared without regard to case"
+//     fits       test_conflicts_case_insensitive, exactly
+//     wrong      here, where upstream keeps two spellings apart
+//
+//     RIVAL      "job names are compared exactly"
+//     fits       this test, exactly
+//     wrong      there, where upstream folds two spellings together
+//
+// So the case rule is not a property of job names at all. It is a property of
+// where the value came from, and any fix that cannot tell those apart will
+// turn one of these two red while making the other green. Neither may be
+// relaxed to accommodate the other.
+//
+// EXPECTS ZERO, which the conflict header warns is a shape a stub also
+// satisfies - test_conflicts_none and test_conflicts_self_repeat are the two
+// it names. This one is different: a stub returning zero would be caught
+// immediately by test_conflicts_job, test_conflicts_port, test_conflicts_sorted
+// _members, test_conflicts_two_separate, test_conflicts_only_the_shared
+// _criterion, test_conflicts_case_insensitive AND
+// test_conflicts_companion_same_spelling below, so there is no state of the
+// finder in which this row passes vacuously and something else does not say so.
+//==============================================================================
+
+dcl-proc test_conflicts_companion_case_differs export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds cf   likeds(SCCOLL_CONFLICTS_t) inz(*likeds);
+
+  cfl_load('compcase': coll);
+
+  iEqual(2: SCCOLL_count(coll):
+         'both definitions loaded - a count of conflicts in a collection ' +
+         'that did not load is not evidence of anything');
+
+  iEqual(0: SCCOLL_conflicts(coll: cf):
+         'MEASURED - two cases of a job name reached through ' +
+         'check_alive_criteria are two different criteria, and upstream ' +
+         'says nothing about them');
+
+  iEqual(0: cfl_index(cf: 'JOBNAME:RMSCCFLCOMPJOB'):
+         'and in particular not under the folded spelling, which is the one ' +
+         'RMSC invents');
+
+end-proc;
+
+//==============================================================================
+// MEASURED - one companion spelling written twice DOES conflict, and the
+// criterion is reported as written
+//
+//     rmsccfl_victor   check_alive_criteria: rmsccflsamecomp
+//     rmsccfl_whiskey  check_alive_criteria: rmsccflsamecomp
+//
+//     upstream   WARNING: ... liveliness check 'JOBNAME:rmsccflsamecomp':
+//                    rmsccfl_whiskey (Whiskey svc)
+//                    rmsccfl_victor (Victor svc)
+//
+// Two things are asserted and they fail against different wrong fixes:
+//
+//   the COUNT     against "a criterion from the companion key never takes part
+//                 in a conflict", which is the cheapest way to make
+//                 test_conflicts_companion_case_differs go green and which
+//                 nothing else here would catch. Upstream warns about this
+//                 pair, so RMSC must.
+//
+//   the CRITERION against a fix applied only to the conflict FINDER and not to
+//                 SCDEF_criterion_text. The warning quotes the criterion, so
+//                 the text has to survive as written all the way into it -
+//                 which is what test_criterion_text_companion_job_as_written
+//                 in SCDEF.TEST pins from the other end.
+//
+// Member ORDER is asserted, and upstream's is not: it gave whiskey before
+// victor, which is Java hash iteration order. The conflict header above sets
+// out why RMSC sorts instead and why an exact order assertion is legitimate
+// here when mimicking upstream faithfully would have meant asserting
+// membership only. Code point puts victor before whiskey.
+//==============================================================================
+
+dcl-proc test_conflicts_companion_same_spelling export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds cf   likeds(SCCOLL_CONFLICTS_t) inz(*likeds);
+  dcl-s  n    like(INTEGER_t);
+
+  cfl_load('compsame': coll);
+
+  iEqual(1: SCCOLL_conflicts(coll: cf):
+         'MEASURED - one criterion, claimed twice');
+
+  n = cfl_index(cf: 'JOBNAME:rmsccflsamecomp');
+  assert((n > 0):
+         'MEASURED - and quoted as it was written, not folded on the way ' +
+         'into the warning');
+  iEqual(2: cf.item(n).count: 'claimed by both services');
+  aEqualV('rmsccfl_victor':  cf.item(n).name(1): 'first member');
+  aEqualV('rmsccfl_whiskey': cf.item(n).name(2): 'second member');
+
+end-proc;
+
+
+//==============================================================================
+// MEASURED - a leading zero is the port's version of a case difference
+//
+// The four cases below are one statement in four parts, and no one of them is
+// worth having on its own. Upstream NORMALISES a port written straight into
+// check_alive: and keeps one arriving through check_alive_criteria: VERBATIM,
+// exactly as it folds a direct job name and keeps a companion one. Measured
+// 4 September against sc 1.7.1:
+//
+//     08080 + 8080, both direct       WARNING ... 'PORT:8080'
+//     08080 + 8080, both companion    silent
+//     08080 twice,  both companion    WARNING ... 'PORT:08080'
+//     8080 direct + 08080 companion   silent
+//
+// WHY THE PORT CASES EARN THEIR PLACE NEXT TO THE JOB ONES. The job-name pair
+// shows the rule as a difference in CASE, and case is exactly the kind of
+// thing an implementation might special-case without ever discovering the
+// underlying rule - it could fold job names and normalise ports for unrelated
+// reasons and pass every job test here. The ports say the same thing in a
+// different alphabet, and it is only having both that shows the rule is about
+// WHICH KEY THE VALUE ARRIVED THROUGH rather than about how job names are
+// spelled.
+//
+// THE DIRECTION OF FAILURE IS THE OPPOSITE ONE, which is what makes portzero
+// worth more than its three neighbours. Every job-name case here guards
+// against RMSC inventing a warning. portzero guards against it LOSING one:
+// two services really do collide on 8080, and an implementation that kept the
+// direct text verbatim would have nothing to say about it. A missing warning
+// is the harder direction to notice, for the reason test_discovery and the
+// filename block both give - nothing looks wrong.
+//==============================================================================
+
+dcl-proc test_conflicts_port_zero_padded export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds cf   likeds(SCCOLL_CONFLICTS_t) inz(*likeds);
+  dcl-s  n    like(INTEGER_t);
+
+  cfl_load('portzero': coll);
+
+  iEqual(1: SCCOLL_conflicts(coll: cf):
+         'MEASURED - 08080 and 8080 written DIRECTLY are one criterion');
+
+  n = cfl_index(cf: 'PORT:8080');
+  assert((n > 0):
+         'MEASURED - and it is reported under the normalised spelling');
+  iEqual(2: cf.item(n).count: 'claimed by both services');
+  aEqualV('rmsccfl_xray':   cf.item(n).name(1): 'first member');
+  aEqualV('rmsccfl_yankee': cf.item(n).name(2): 'second member');
+
+  iEqual(0: cfl_index(cf: 'PORT:08080'):
+         'and not under the padded one, which is the spelling the companion ' +
+         'path would have kept');
+
+end-proc;
+
+//==============================================================================
+// MEASURED - the same two spellings through the companion key are two criteria
+//==============================================================================
+
+dcl-proc test_conflicts_port_companion_padding_differs export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds cf   likeds(SCCOLL_CONFLICTS_t) inz(*likeds);
+
+  cfl_load('portcomp': coll);
+
+  iEqual(2: SCCOLL_count(coll):
+         'both definitions loaded - a count of conflicts in a collection ' +
+         'that did not load is not evidence of anything');
+
+  iEqual(0: SCCOLL_conflicts(coll: cf):
+         'MEASURED - 08080 and 8081 through check_alive_criteria are two ' +
+         'criteria, and upstream says nothing about them');
+
+end-proc;
+
+//==============================================================================
+// MEASURED - one companion port spelling written twice DOES conflict, and is
+// reported with its padding intact
+//
+// The counterpart of test_conflicts_companion_same_spelling, and it exists for
+// the same reason: without it, "a companion criterion never conflicts with
+// anything" satisfies the case above and loses a warning upstream prints.
+//==============================================================================
+
+dcl-proc test_conflicts_port_companion_same_spelling export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds cf   likeds(SCCOLL_CONFLICTS_t) inz(*likeds);
+  dcl-s  n    like(INTEGER_t);
+
+  cfl_load('portsame': coll);
+
+  iEqual(1: SCCOLL_conflicts(coll: cf):
+         'MEASURED - one criterion, claimed twice');
+
+  n = cfl_index(cf: 'PORT:08082');
+  assert((n > 0):
+         'MEASURED - and quoted with the leading zero it was written with');
+  iEqual(2: cf.item(n).count: 'claimed by both services');
+  aEqualV('rmsccfl_bravo2':   cf.item(n).name(1): 'first member');
+  aEqualV('rmsccfl_charlie2': cf.item(n).name(2): 'second member');
+
+  iEqual(0: cfl_index(cf: 'PORT:8082'):
+         'and not under the normalised spelling, which belongs to the other ' +
+         'key');
+
+end-proc;
+
+//==============================================================================
+// MEASURED - a direct port and a companion port do not meet in the middle
+//
+// 8083 written directly and 08083 through the companion. Upstream is silent.
+//
+// THE ONE THING portcomp CANNOT SEE. Both of its values arrive through the
+// companion key, so it only ever compares one path with itself. An
+// implementation that compared criteria by their PARSED PORT NUMBER rather
+// than by their text would be caught there - 08081 and 8081 parse alike - but
+// one that kept the companion text and normalised only when a direct value
+// existed to match it would not, because portcomp has no direct value in it.
+// This pair is the only place the two paths are asked to meet.
+//==============================================================================
+
+dcl-proc test_conflicts_port_direct_and_companion export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds cf   likeds(SCCOLL_CONFLICTS_t) inz(*likeds);
+
+  cfl_load('portmix': coll);
+
+  iEqual(2: SCCOLL_count(coll): 'both definitions loaded');
+
+  iEqual(0: SCCOLL_conflicts(coll: cf):
+         'MEASURED - a normalised direct port and a verbatim companion one ' +
+         'are two criteria, however alike they look');
+
+end-proc;
+
+//##############################################################################
+//##                                                                          ##
+//##  CONFLICT DETECTION AND THE LENGTH OF A CRITERION                        ##
+//##                                                                          ##
+//##############################################################################
+//
+// FOUND BY CODE REVIEW, NOT BY A FAILURE, which is why these are written
+// before any fix and are expected to be RED. SCCOLL_conflicts compares
+// rendered criteria through an internal holder 64 characters wide. The holder
+// truncates ONE SIDE of the comparison and not the other, so once a rendering
+// passes 64 characters nothing matches at all - a definition does not even
+// claim its own criterion - and no conflict is reported. The warning simply
+// stops being printed, on stderr, where nobody is looking for it.
+//
+// A criterion's VALUE may be up to 128 characters, documented and measured -
+// test_criterion_text_job_not_truncated in SCDEF.TEST has the four
+// measurements against sc 1.7.1 and the reason 128 is a limit rather than a
+// defect. 'JOBNAME:' is 8, so a RENDERED criterion runs to 136.
+//
+// THE BOUNDARY IS ON THE RENDERING, NOT ON THE VALUE, and that is the whole
+// difficulty of writing these. A 56-character job name renders to 64 and still
+// fits; a 57-character one renders to 65 and does not. Choose the fixture by
+// the value and the separating case quietly becomes a control.
+//
+// THE RIVAL HYPOTHESIS is "criteria are handled correctly at every length",
+// and the only values that separate it from the truth are the ones either side
+// of 64:
+//
+//     20 chars ->  28 rendered   CONTROL - passes today, and must keep
+//                                passing. Rules out "the finder is broken
+//                                outright", which every other test in this
+//                                group already rules out too, and states the
+//                                baseline these four are read against.
+//
+//     56 chars ->  64 rendered   CONTROL AT THE EDGE - the largest rendering
+//                                a 64-wide holder still holds whole. Rules
+//                                out "long criteria are wrong for some reason
+//                                other than the 64-wide holder": if this went
+//                                red, 64 would not be where the edge is and
+//                                the diagnosis would be a different one.
+//
+//     57 chars ->  65 rendered   THE SEPARATING CASE. One character past the
+//                                holder, and nothing else about it differs
+//                                from the row above. Red today. Rules out the
+//                                rival: there is no reading of "handled
+//                                correctly at every length" that survives 64
+//                                passing and 65 failing.
+//
+//    128 chars -> 136 rendered   THE FAR END - the documented limit, and the
+//                                longest thing a definition may legitimately
+//                                carry. Rules out "the edge moved a little",
+//                                a fix that widened the holder to 72 or 128
+//                                and stopped short of the rendering.
+//
+// TWO THINGS ARE ASSERTED IN EACH, and they fail against different wrong
+// fixes. The COUNT fails against a finder that cannot see the collision at
+// all. The RECORDED CRITERION TEXT fails against one that finds the collision
+// by comparing truncated keys and then reports the truncated key - which would
+// put a cut criterion into a warning that quotes it, and is exactly the shape
+// of the near-fix a widened comparison alone would produce.
+//
+// Member order is asserted for the reason the group header gives: RMSC sorts
+// where upstream iterates a hash, so an exact order here is legitimate. a
+// before b under either collation.
+//
+// 05/09/2026 - RM - written against the defect, before the fix
+//==============================================================================
+
+//==============================================================================
+// CONTROL - a criterion rendering to 28 characters conflicts
+//
+// 20-character value, 28 rendered. Nothing near any holder in this code, and
+// nothing here that the pairs earlier in this group do not already say. It is
+// kept because the three tests below mean nothing without it: they are red,
+// and a reader has to be able to tell "long criteria are broken" from "the
+// finder is broken".
+//==============================================================================
+
+dcl-proc test_conflicts_length_28_control export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds cf   likeds(SCCOLL_CONFLICTS_t) inz(*likeds);
+  dcl-s  v    varchar(256);
+  dcl-s  n    like(INTEGER_t);
+
+  v = cfl_longname('L28': 20);
+  iEqual(20: %len(v): 'the value really is 20 characters');
+  iEqual(28: 8 + %len(v): 'so the rendering really is 28');
+
+  cfl_load('len28': coll);
+  iEqual(2: SCCOLL_count(coll):
+         'both definitions loaded - conflicts counted in a collection that ' +
+         'did not load are not evidence of anything');
+
+  iEqual(1: SCCOLL_conflicts(coll: cf): 'one conflicting criterion');
+
+  n = cfl_index(cf: 'JOBNAME:' + v);
+  assert((n > 0): 'the shared criterion is reported');
+  aEqualV('JOBNAME:' + v: cf.item(n).criterion:
+          'and recorded as the full rendering');
+  iEqual(2: cf.item(n).count: 'claimed by two services');
+  aEqualV('rmsccfl_len28a': cf.item(n).name(1): 'first member');
+  aEqualV('rmsccfl_len28b': cf.item(n).name(2): 'second member');
+
+end-proc;
+
+//==============================================================================
+// CONTROL AT THE EDGE - a criterion rendering to exactly 64 still conflicts
+//
+// 56-character value, 64 rendered: the last rendering a 64-wide holder can
+// carry whole. This is the row that says WHERE the edge is rather than only
+// that there is one. If it fails, the diagnosis in the header is wrong and
+// the holder is narrower than 64 - do not simply widen the fixture until it
+// passes, find the real width and record it here.
+//==============================================================================
+
+dcl-proc test_conflicts_length_64_edge export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds cf   likeds(SCCOLL_CONFLICTS_t) inz(*likeds);
+  dcl-s  v    varchar(256);
+  dcl-s  n    like(INTEGER_t);
+
+  v = cfl_longname('L64': 56);
+  iEqual(56: %len(v): 'the value really is 56 characters');
+  iEqual(64: 8 + %len(v):
+         'so the rendering is exactly 64 - the last one that fits');
+
+  cfl_load('len64': coll);
+  iEqual(2: SCCOLL_count(coll): 'both definitions loaded');
+
+  iEqual(1: SCCOLL_conflicts(coll: cf):
+         'one conflicting criterion, as at 28');
+
+  n = cfl_index(cf: 'JOBNAME:' + v);
+  assert((n > 0): 'the shared criterion is reported');
+  aEqualV('JOBNAME:' + v: cf.item(n).criterion:
+          'and recorded as the full rendering');
+  iEqual(2: cf.item(n).count: 'claimed by two services');
+  aEqualV('rmsccfl_len64a': cf.item(n).name(1): 'first member');
+  aEqualV('rmsccfl_len64b': cf.item(n).name(2): 'second member');
+
+end-proc;
+
+//==============================================================================
+// THE SEPARATING CASE - 65 rendered, one character past the holder
+//
+// RED TODAY, and expected to be. 57-character value, 65 rendered. It differs
+// from the row above in exactly one character of one job name, and in nothing
+// else: same shape of fixture, same two services, same key, same case. So a
+// pass above and a failure here can only be about the length, which is what
+// makes this the value that separates "handled correctly at every length"
+// from the truth.
+//
+// The failure to expect is a count of 0 - the two services do not meet,
+// because the truncated left-hand side of the comparison never equals the
+// whole right-hand one. A count of 1 with a cut criterion would be the OTHER
+// wrong answer, a comparison fixed without the recorded text being fixed, and
+// the aEqualV below is what catches that one.
+//==============================================================================
+
+dcl-proc test_conflicts_length_65_separating export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds cf   likeds(SCCOLL_CONFLICTS_t) inz(*likeds);
+  dcl-s  v    varchar(256);
+  dcl-s  n    like(INTEGER_t);
+
+  v = cfl_longname('L65': 57);
+  iEqual(57: %len(v): 'the value really is 57 characters');
+  iEqual(65: 8 + %len(v):
+         'so the rendering is 65 - ONE past the 64-wide holder, which is ' +
+         'the whole point of this fixture');
+
+  cfl_load('len65': coll);
+  iEqual(2: SCCOLL_count(coll): 'both definitions loaded');
+
+  iEqual(1: SCCOLL_conflicts(coll: cf):
+         'two services declaring one criterion conflict whatever its ' +
+         'length - 65 characters is not a reason to say nothing');
+
+  n = cfl_index(cf: 'JOBNAME:' + v);
+  assert((n > 0): 'the shared criterion is reported');
+  aEqualV('JOBNAME:' + v: cf.item(n).criterion:
+          'and recorded as the FULL rendering, not the first 64 of it - ' +
+          'the warning quotes this text');
+  iEqual(2: cf.item(n).count: 'claimed by two services');
+  aEqualV('rmsccfl_len65a': cf.item(n).name(1): 'first member');
+  aEqualV('rmsccfl_len65b': cf.item(n).name(2): 'second member');
+
+end-proc;
+
+//==============================================================================
+// THE FAR END - 136 rendered, the documented criterion limit
+//
+// RED TODAY. 128-character value, 136 rendered: the longest criterion a
+// definition may legitimately carry, measured against sc 1.7.1 and recorded
+// in test_criterion_text_job_not_truncated. SCDEF renders it whole; this asks
+// whether the conflict finder can still see it.
+//
+// It is here because a fix that only moved the edge would pass the 65 above
+// and fail this: 72 and 128 are both plausible widths to widen a 64-wide
+// holder to, and neither holds 136.
+//==============================================================================
+
+dcl-proc test_conflicts_length_136_limit export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds cf   likeds(SCCOLL_CONFLICTS_t) inz(*likeds);
+  dcl-s  v    varchar(256);
+  dcl-s  n    like(INTEGER_t);
+
+  v = cfl_longname('L136': 128);
+  iEqual(128: %len(v): 'the value really is the documented 128-char limit');
+  iEqual(136: 8 + %len(v): 'so the rendering really is 136');
+
+  cfl_load('len136': coll);
+  iEqual(2: SCCOLL_count(coll): 'both definitions loaded');
+
+  iEqual(1: SCCOLL_conflicts(coll: cf):
+         'a criterion at the documented limit still conflicts with itself ' +
+         'in another service');
+
+  n = cfl_index(cf: 'JOBNAME:' + v);
+  assert((n > 0): 'the shared criterion is reported');
+  aEqualV('JOBNAME:' + v: cf.item(n).criterion:
+          'and recorded as all 136 characters of it');
+  iEqual(2: cf.item(n).count: 'claimed by two services');
+  aEqualV('rmsccfl_len136a': cf.item(n).name(1): 'first member');
+  aEqualV('rmsccfl_len136b': cf.item(n).name(2): 'second member');
+
+end-proc;
+
 
 
 //##############################################################################

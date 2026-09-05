@@ -260,6 +260,63 @@ dcl-proc test_criterion_job_absent export;
 end-proc;
 
 //==============================================================================
+// A LOWER-CASE job name still finds the job, whichever key it arrived through
+//
+// MEASURED 4 September against sc 1.7.1, two definitions naming this job in
+// lower case, one through each key. Both reported RUNNING, and so did RMSC:
+//
+//     check_alive: qp0zspwp                            -> RUNNING
+//     check_alive: jobname / check_alive_criteria: qp0zspwp -> RUNNING
+//
+// THIS IS A REGRESSION GUARD FOR A FIX THAT HAS NOT BEEN MADE YET, and the
+// only one of its kind. docs/messages.md § "Two defects the fixture pack found
+// on its first run" records that a job name reached through
+// check_alive_criteria must be RENDERED as it was written, and
+// test_criterion_text_companion_job_as_written in SCDEF.TEST asserts exactly
+// that. The obvious way to satisfy it is to stop folding the value on the way
+// in - and *JOB names on this system are upper case, so a lookup made with the
+// unfolded value finds nothing.
+//
+// The failure that would cause is the one CLAUDE.md singles out: a live
+// service reported as NOT RUNNING, silently, on a definition nobody would
+// think to re-check. Nothing in SCDEF can catch it, because SCDEF is where the
+// text is kept and keeping the text is correct. It shows up only where the
+// text is USED to ask the system a question, which is here.
+//
+// So the two sides of the rule are: the criterion is RENDERED as written and
+// LOOKED UP folded. Neither test alone says that; together they do.
+//
+// THE FIXTURE IS THE JOB THIS SUITE RUNS IN, as test_criterion_job's is, and
+// the same argument applies: an iRPGUnit suite on this platform runs in a
+// QP0ZSPWP job, so the value is available on every run and needs nothing
+// installed. It is written here in lower case ON PURPOSE - upper case is what
+// test_criterion_job already covers, and would make this row unable to fail.
+//==============================================================================
+
+dcl-proc test_criterion_job_lower_case export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+
+  assert(load_def('critlc1.yaml':
+    'start_cmd: /usr/bin/x' + LF +
+    'check_alive: qp0zspwp' + LF: def): 'load');
+
+  nEqual(true: SCEXEC_criterion_alive(def.criteria(1)):
+         'MEASURED - a lower-case job name in check_alive still finds the ' +
+         'job running this suite');
+
+  assert(load_def('critlc2.yaml':
+    'start_cmd: /usr/bin/x' + LF +
+    'check_alive: jobname' + LF +
+    'check_alive_criteria: qp0zspwp' + LF: def): 'load');
+
+  nEqual(true: SCEXEC_criterion_alive(def.criteria(1)):
+         'MEASURED - and so does one reached through check_alive_criteria, ' +
+         'whose TEXT must survive unfolded but whose LOOKUP must not');
+
+end-proc;
+
+//==============================================================================
 // The jobs behind a running service can be identified
 //==============================================================================
 
@@ -2799,5 +2856,315 @@ dcl-proc test_groups_excluded_service_takes_its_group export;
          'and the same through the implicit group all');
 
   uc_remove_dir(d);
+
+end-proc;
+
+
+//##############################################################################
+//##                                                                          ##
+//##  THE FAILED-CRITERIA LIST AND THE LENGTH OF A CRITERION                  ##
+//##                                                                          ##
+//##############################################################################
+//
+// FOUND BY CODE REVIEW, NOT BY A FAILURE, which is why these are written
+// before any fix and three of the four are expected to be RED.
+// SCEXEC_evaluate fills ev.failed(n) with the criteria that were not
+// satisfied, and ev.failed_text is built from those entries. The entries are
+// held 64 characters wide while a rendering runs to 136, so a long criterion
+// arrives CUT.
+//
+// THIS IS ON THE BYTE-EXACT PATH. ev.failed_text is what produces the
+// '[not running at -->...]' suffix on a `check` row, and CLAUDE.md's first
+// rule is that the consumer screen-scrapes those rows. A cut criterion does
+// not raise anything: the row still has three fields, still parses, and
+// simply names a criterion that does not exist. docs/messages.md has the
+// captured shape.
+//
+// A criterion's VALUE may be up to 128 characters, documented and measured -
+// test_criterion_text_job_not_truncated in SCDEF.TEST has the four
+// measurements against sc 1.7.1. 'JOBNAME:' is 8, so a rendering runs to 136.
+// SCDEF renders all 136; these ask whether the evaluation still carries them.
+//
+// THE BOUNDARY IS ON THE RENDERING, NOT ON THE VALUE. A 56-character job name
+// renders to 64 and fits; a 57-character one renders to 65 and does not.
+// Pick the fixture by the value and the separating case becomes a control.
+//
+// THE RIVAL HYPOTHESIS is "criteria are carried correctly at every length",
+// and only values either side of 64 separate it from the truth:
+//
+//     20 chars ->  28 rendered   CONTROL - passes today, must keep passing.
+//                                It is also what pins the SHAPE of
+//                                failed_text, which the three below then
+//                                only have to be measured against.
+//
+//     56 chars ->  64 rendered   CONTROL AT THE EDGE - the last rendering a
+//                                64-wide entry holds whole. Rules out "long
+//                                criteria fail for some reason other than the
+//                                64-wide entry": if this is red, 64 is not
+//                                where the edge is.
+//
+//     57 chars ->  65 rendered   THE SEPARATING CASE. One character longer
+//                                than the row above and identical in every
+//                                other respect. Red today. No reading of
+//                                "carried correctly at every length"
+//                                survives 64 passing and 65 failing.
+//
+//    128 chars -> 136 rendered   THE FAR END - the documented limit. Rules
+//                                out a fix that widened the entry to 72 or to
+//                                128 and stopped short of the rendering.
+//
+// EVERY FIXTURE IS PARTIAL - port 22, which listens because this suite
+// arrived over SSH, and then the long dead job name. PARTIAL rather than
+// NOT RUNNING on purpose: PARTIAL is the state that actually prints the
+// suffix, so these run down the path the consumer reads rather than a
+// neighbouring one. The dead half is second, so ev.failed(1) is the long
+// criterion and nothing else.
+//
+// The job names cannot exist: 20 characters is already twice what an IBM i
+// job name holds, and test_long_job_name_is_usable measures that upstream
+// accepts a name of any length and simply reports it not running.
+//
+// 05/09/2026 - RM - written against the defect, before the fix
+//==============================================================================
+
+//------------------------------------------------------------------------------
+// lc_jobname - a job name of exactly LEN characters, distinct per case
+//
+// A second copy of the idea SCCOLL.TEST's cfl_longname carries; the suites are
+// separate bound programs. Built rather than written out so each length is
+// stated once and cannot drift from its comment.
+//
+// UPPER CASE, deliberately: a job name written straight into check_alive: is
+// folded, so an upper-case value renders identically whether the folding rule
+// is applied or not. These rows are about LENGTH and must not go red when
+// some other rule moves. The tag is at the FRONT so two values of different
+// lengths differ in their first dozen characters rather than only past 56.
+//------------------------------------------------------------------------------
+dcl-proc lc_jobname;
+  dcl-pi *n varchar(256);
+    tag varchar(16) const;
+    len like(INTEGER_t) const;
+  end-pi;
+
+  dcl-c FILLER const('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
+  dcl-s v varchar(320);
+
+  v = 'RMSCEXEC' + %trimr(tag);
+
+  dow %len(v) < len;
+    v += FILLER;
+  enddo;
+
+  return %subst(v: 1: len);
+
+end-proc;
+
+//==============================================================================
+// CONTROL - a failed criterion rendering to 28 characters is carried whole
+//
+// 20-character value, 28 rendered. Nothing near any width in this code. It is
+// kept because the three tests below are red, and a reader has to be able to
+// tell "long criteria are cut" from "the failed list is broken" - and because
+// it is where the SHAPE of failed_text is stated: for a single failure it is
+// that failure and nothing else, no wrapper, which is what lets the rows
+// below assert one value rather than scan for a substring.
+//==============================================================================
+
+dcl-proc test_evaluate_failed_length_28_control export;
+
+  dcl-ds def likeds(SCDEF_t)       inz(*likeds);
+  dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
+  dcl-s  v   varchar(256);
+
+  v = lc_jobname('L28': 20);
+  iEqual(20: %len(v): 'the value really is 20 characters');
+  iEqual(28: 8 + %len(v): 'so the rendering really is 28');
+
+  assert(pt_load_def('lclen28.yaml':
+    'name: ZZ len28' + LF +
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: 22,' + v + LF: def): 'load');
+
+  SCEXEC_evaluate(def: ev);
+
+  aEqual('PARTIAL': ev.state: 'the live port and the dead job');
+  iEqual(1: ev.alive: 'one alive');
+  iEqual(2: ev.total: 'of two');
+  iEqual(1: ev.failed_count: 'one failure');
+
+  aEqual('JOBNAME:' + v: pt_failed(ev: 1):
+         'the failed entry is the whole rendering');
+  aEqualV('JOBNAME:' + v: ev.failed_text:
+          'and so is the suffix material built from it');
+
+end-proc;
+
+//==============================================================================
+// CONTROL AT THE EDGE - a failed criterion rendering to exactly 64
+//
+// 56-character value, 64 rendered: the last rendering a 64-wide entry holds
+// whole. This says WHERE the edge is rather than only that there is one. If
+// it fails, the diagnosis in the header is wrong and the entry is narrower
+// than 64 - find the real width and record it here rather than shortening the
+// fixture until it passes.
+//==============================================================================
+
+dcl-proc test_evaluate_failed_length_64_edge export;
+
+  dcl-ds def likeds(SCDEF_t)       inz(*likeds);
+  dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
+  dcl-s  v   varchar(256);
+
+  v = lc_jobname('L64': 56);
+  iEqual(56: %len(v): 'the value really is 56 characters');
+  iEqual(64: 8 + %len(v):
+         'so the rendering is exactly 64 - the last one that fits');
+
+  assert(pt_load_def('lclen64.yaml':
+    'name: ZZ len64' + LF +
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: 22,' + v + LF: def): 'load');
+
+  SCEXEC_evaluate(def: ev);
+
+  aEqual('PARTIAL': ev.state: 'the live port and the dead job');
+  iEqual(1: ev.failed_count: 'one failure');
+
+  aEqual('JOBNAME:' + v: pt_failed(ev: 1):
+         'the failed entry is the whole rendering, as at 28');
+  aEqualV('JOBNAME:' + v: ev.failed_text: 'and so is the suffix material');
+
+end-proc;
+
+//==============================================================================
+// THE SEPARATING CASE - 65 rendered, one character past the entry
+//
+// RED TODAY, and expected to be. 57-character value, 65 rendered. It differs
+// from the row above in exactly one character of one job name and in nothing
+// else - same fixture shape, same key, same case, same live port beside it.
+// So a pass above and a failure here can only be about the length, which is
+// what makes this the value that separates "carried correctly at every
+// length" from the truth.
+//
+// The failure to expect is a cut entry: 'JOBNAME:' plus the first 56
+// characters of the value. Read the message carefully - the two strings agree
+// for 64 characters and then one of them stops, which is easy to skim past.
+//==============================================================================
+
+dcl-proc test_evaluate_failed_length_65_separating export;
+
+  dcl-ds def likeds(SCDEF_t)       inz(*likeds);
+  dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
+  dcl-s  v   varchar(256);
+
+  v = lc_jobname('L65': 57);
+  iEqual(57: %len(v): 'the value really is 57 characters');
+  iEqual(65: 8 + %len(v):
+         'so the rendering is 65 - ONE past the 64-wide entry, which is the ' +
+         'whole point of this fixture');
+
+  assert(pt_load_def('lclen65.yaml':
+    'name: ZZ len65' + LF +
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: 22,' + v + LF: def): 'load');
+
+  SCEXEC_evaluate(def: ev);
+
+  aEqual('PARTIAL': ev.state: 'the live port and the dead job');
+  iEqual(1: ev.failed_count: 'one failure');
+
+  aEqual('JOBNAME:' + v: pt_failed(ev: 1):
+         'the failed entry carries the FULL rendering - 65 characters is ' +
+         'not a reason to cut it');
+  aEqualV('JOBNAME:' + v: ev.failed_text:
+          'and neither is the suffix material cut - this is the text a ' +
+          'consumer screen-scrapes off a check row');
+
+end-proc;
+
+//==============================================================================
+// THE FAR END - 136 rendered, the documented criterion limit
+//
+// RED TODAY. 128-character value, 136 rendered: the longest criterion a
+// definition may legitimately carry, measured against sc 1.7.1 and recorded
+// in test_criterion_text_job_not_truncated. SCDEF renders it whole; this asks
+// whether the evaluation still carries it.
+//
+// It is here because a fix that only moved the edge would pass the 65 above
+// and fail this: 72 and 128 are both plausible widths to widen a 64-wide
+// entry to, and neither holds 136.
+//==============================================================================
+
+dcl-proc test_evaluate_failed_length_136_limit export;
+
+  dcl-ds def likeds(SCDEF_t)       inz(*likeds);
+  dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
+  dcl-s  v   varchar(256);
+
+  v = lc_jobname('L136': 128);
+  iEqual(128: %len(v): 'the value really is the documented 128-char limit');
+  iEqual(136: 8 + %len(v): 'so the rendering really is 136');
+
+  assert(pt_load_def('lclen136.yaml':
+    'name: ZZ len136' + LF +
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: 22,' + v + LF: def): 'load');
+
+  SCEXEC_evaluate(def: ev);
+
+  aEqual('PARTIAL': ev.state: 'the live port and the dead job');
+  iEqual(1: ev.failed_count: 'one failure');
+
+  aEqual('JOBNAME:' + v: pt_failed(ev: 1):
+         'a criterion at the documented limit is carried whole, all 136 ' +
+         'characters of it');
+  aEqualV('JOBNAME:' + v: ev.failed_text: 'and so is the suffix material');
+
+end-proc;
+
+//==============================================================================
+// THE SUFFIX MATERIAL ALONE, at the separating length
+//
+// RED TODAY. The four tests above assert ev.failed(1) BEFORE ev.failed_text,
+// and assert() ends the procedure at the first failure - so on the current
+// build the failed_text half of the separating case is never reached and its
+// state is unreported. That matters more than the usual "one assertion per
+// test" argument would suggest, because failed_text is the half that reaches
+// the CONSUMER: it is what SCOUT_not_running_suffix turns into
+// '[not running at -->...]' on a check row, and CLAUDE.md's first rule is
+// that those rows are screen-scraped.
+//
+// So this row asserts nothing but failed_text, at 65 rendered - the same
+// value test_evaluate_failed_length_65_separating uses, for the same reason
+// it uses it. Its only purpose is to make the state of the byte-exact path
+// visible on its own rather than behind another assertion.
+//
+// It goes green the moment the entries do, if failed_text is built from them
+// as the header says. If it stays red after they are fixed, failed_text has a
+// width of its own and the fix is not finished.
+//==============================================================================
+
+dcl-proc test_evaluate_failed_text_length_65_separating export;
+
+  dcl-ds def likeds(SCDEF_t)       inz(*likeds);
+  dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
+  dcl-s  v   varchar(256);
+
+  v = lc_jobname('L65': 57);
+  iEqual(65: 8 + %len(v): 'the rendering is 65, one past the 64-wide entry');
+
+  assert(pt_load_def('lctxt65.yaml':
+    'name: ZZ txt65' + LF +
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: 22,' + v + LF: def): 'load');
+
+  SCEXEC_evaluate(def: ev);
+
+  aEqual('PARTIAL': ev.state: 'the live port and the dead job');
+
+  aEqualV('JOBNAME:' + v: ev.failed_text:
+          'the suffix material carries the FULL rendering - this is the ' +
+          'text that reaches a check row, and a cut criterion there names ' +
+          'something that does not exist without anything saying so');
 
 end-proc;

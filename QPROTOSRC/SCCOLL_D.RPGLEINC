@@ -262,7 +262,7 @@ end-pr;
 
 dcl-ds SCCOLL_CONFLICT_t qualified template inz;
   // As SCDEF_criterion_text renders it: 'JOBNAME:MYJOB' or 'PORT:8080'.
-  criterion like(SCDEF_NAME_t) inz('');
+  criterion like(SCDEF_CRITTEXT_t) inz('');
   count     like(INTEGER_t) inz(0);
   // Short names, ascending by code point.
   //

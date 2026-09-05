@@ -943,6 +943,357 @@ end-proc;
 
 //##############################################################################
 //##                                                                          ##
+//##  THE COMPANION KEY IS NOT UPPER-CASED                                    ##
+//##                                                                          ##
+//##############################################################################
+//
+// MEASURED 4 September against sc 1.7.1, and found by
+// tools/gate-fixtures-run.sh on its first ever run - nothing installed on this
+// machine names a job through check_alive_criteria, so nothing here could have
+// reached it. Written up in docs/messages.md § "Two defects the fixture pack
+// found on its first run".
+//
+//     check_alive: jobname
+//     check_alive_criteria: qp0zspwp
+//
+//     upstream   Check-alive conditions: JOBNAME:qp0zspwp     <- as written
+//     RMSC       Check-alive conditions: JOBNAME:QP0ZSPWP     <- upper-cased
+//
+// THE RENDERING IS THE SMALLER HALF. Because RMSC folds the text, two services
+// spelling one job name differently become one criterion, RMSC decides they
+// both claim it, and it prints a conflict warning naming services that do not
+// conflict - on check, list, groups and info alike. Upstream is silent, because
+// to it the two criteria are different. SCCOLL.TEST's compcase case is the
+// other half of this; the warning itself is in tools/load-warning-test.sh.
+//
+// THE SEPARATING VALUE IS THE DIRECT FORM, and it is the reason
+// test_criterion_text_direct_job_still_folds below is written out again rather
+// than left to test_criterion_text_upper_cases_job:
+//
+//     RIVAL RULE   "a job name is rendered as written"
+//     fits         every companion measurement, exactly
+//     wrong        upstream DOES upper-case a job name written straight into
+//                  check_alive:, and two services writing one job name in two
+//                  cases DO collide there - measured, and recorded in
+//                  test_conflicts_case_insensitive in SCCOLL.TEST, which must
+//                  keep passing while this is fixed
+//
+// So the rule is not about job names. It is about WHERE THE VALUE CAME FROM: a
+// value that came from check_alive: is folded, one that came from
+// check_alive_criteria: is not. Any fix that cannot tell those apart at
+// rendering time is fixing the wrong thing, and the two procedures below are
+// what say so.
+//==============================================================================
+
+dcl-proc test_criterion_text_companion_job_as_written export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+
+  assert(pt_load_def('ptcompjob.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: jobname' + LF +
+    'check_alive_criteria: rmscdefcompjob' + LF: def): 'load');
+
+  iEqual(1: def.criteria_count: 'one criterion');
+  aEqualV(SCDEF_CHECK_JOB: def.criteria(1).kind: 'kind is JOB');
+  aEqual('JOBNAME:rmscdefcompjob': SCDEF_criterion_text(def.criteria(1)):
+         'MEASURED - a job name reached through check_alive_criteria is ' +
+         'rendered in the case it was written in');
+
+  // Mixed case, so that a fix which lower-cased instead of upper-casing is
+  // caught as well. Nothing here would tell the two apart with an all-lower
+  // fixture, and "fold the other way" is the cheapest wrong fix there is.
+  assert(pt_load_def('ptcompmix.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: jobname' + LF +
+    'check_alive_criteria: RmScDeFmIxEd' + LF: def): 'load');
+
+  aEqual('JOBNAME:RmScDeFmIxEd': SCDEF_criterion_text(def.criteria(1)):
+         'MEASURED - mixed case survives intact, so the text is reproduced ' +
+         'rather than folded either way');
+
+end-proc;
+
+//==============================================================================
+// THE SAME RULE APPLIES TO PORTS, and it is the same rule, not an analogy
+//
+// MEASURED 4 September against sc 1.7.1, and already recorded at
+// docs/parity.md:377. A port written straight into check_alive: is NORMALISED;
+// one arriving through check_alive_criteria: is kept VERBATIM:
+//
+//     check_alive: 08080                                  ->  PORT:8080
+//     check_alive: port / check_alive_criteria: 08080      ->  PORT:08080
+//
+// So the distinction the companion tests above draw for job names is not about
+// case, and not about job names. It is about WHICH KEY THE VALUE CAME THROUGH,
+// and it shows up in whatever way that type of value can be spelled two ways -
+// as case for a job name, and as a leading zero for a port.
+//
+// THE COMPANION HALF IS ALREADY PINNED, by
+// test_criterion_text_unusable_port's 08080 row further down, which was
+// measured before any of this. The DIRECT half was not pinned anywhere, and
+// that is the gap this closes: with only the companion row, "a port renders
+// its text" fits everything and is wrong.
+//
+// THE CONSEQUENCE IS A MISSING WARNING, not a cosmetic one, and it runs the
+// opposite way to the job-name defect. Two services on 08080 and 8080 claim
+// ONE criterion upstream and are reported as conflicting; an implementation
+// that kept the direct text verbatim would keep them apart and say nothing
+// about a collision that is real. test_conflicts_port_zero_padded in
+// SCCOLL.TEST is that half.
+//
+// A LEADING ZERO IS THE SEPARATING VALUE, for the reason
+// test_criterion_text_unusable_port already sets out at length: it is the only
+// input where the text and the parsed number differ while both exist. 8080
+// alone cannot tell "render the text" from "render the number" apart.
+//==============================================================================
+
+dcl-proc test_criterion_text_direct_port_normalises export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+
+  assert(pt_load_def('ptdirzero.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: 08080' + LF: def): 'load');
+
+  aEqualV(SCDEF_CHECK_PORT: def.criteria(1).kind: 'a PORT criterion');
+  aEqual('PORT:8080': SCDEF_criterion_text(def.criteria(1)):
+         'MEASURED - a port written into check_alive is NORMALISED, so the ' +
+         'leading zero goes; the companion form keeps it, and that is the ' +
+         'whole difference between the two keys');
+
+  // The companion, immediately alongside, so the pair reads as one statement
+  // rather than as two facts in different parts of the file. Duplicating the
+  // 08080 row from test_criterion_text_unusable_port is deliberate: that test
+  // is about a criterion that cannot be USED and this one is about which key
+  // a value arrived through, and a reader of either should not have to find
+  // the other to see the contrast.
+  assert(pt_load_def('ptcompzero.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: port' + LF +
+    'check_alive_criteria: 08080' + LF: def): 'load');
+
+  aEqual('PORT:08080': SCDEF_criterion_text(def.criteria(1)):
+         'MEASURED - and the companion keeps it verbatim');
+
+end-proc;
+
+//==============================================================================
+// THE RIVAL KILLER - the direct form still folds
+//
+// MEASURED 4 September, the same run: 'check_alive: rmsccjdeadjob' rendered
+// JOBNAME:RMSCCJDEADJOB, and two services writing that name in two cases
+// produced one conflict warning from upstream.
+//
+// This passes today. It is here for the direction the companion tests cannot
+// cover: a fix that simply stopped upper-casing would satisfy every assertion
+// above and would turn off a warning upstream really does print.
+//==============================================================================
+
+dcl-proc test_criterion_text_direct_job_still_folds export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+
+  assert(pt_load_def('ptdirjob.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: rmscdefdirjob' + LF: def): 'load');
+
+  aEqual('JOBNAME:RMSCDEFDIRJOB': SCDEF_criterion_text(def.criteria(1)):
+         'MEASURED - a job name written into check_alive is still folded');
+
+  assert(pt_load_def('ptdirmix.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: RmScDeFdIrEcT' + LF: def): 'load');
+
+  aEqual('JOBNAME:RMSCDEFDIRECT': SCDEF_criterion_text(def.criteria(1)):
+         'MEASURED - and mixed case is folded there too, which is what makes ' +
+         'two spellings of one name a single criterion');
+
+end-proc;
+
+//==============================================================================
+// The companion keeps the SHAPE of the value as well as its case
+//
+// MEASURED 4 September, one service per row, read back through sc info:
+//
+//     qusrwrk/rmsccmsbsjob    -> JOBNAME:qusrwrk/rmsccmsbsjob
+//     pgm-rmsccmpgm           -> JOBNAME:pgm-rmsccmpgm
+//     rmsccmseqa,rmsccmseqb   -> JOBNAME:rmsccmseqa,rmsccmseqb
+//
+// The third row is the one worth having. The companion is NOT split on commas
+// - it is one criterion whose text happens to contain one - which is what
+// tools/gate-fixtures/isolation/criteria-comma exists to prove out of process,
+// and it is asserted here as a COUNT so that a splitter is caught by something
+// other than the rendered text. A splitter would render 'JOBNAME:rmsccmseqa'
+// for criterion 1 and look almost right.
+//
+// The first two matter for a smaller reason: the subsystem qualifier and the
+// PGM- prefix are the two places where RMSC splits the value up internally,
+// and a fix that reassembled the text from the split-out parts would lose the
+// case exactly where it is hardest to notice.
+//==============================================================================
+
+dcl-proc test_criterion_text_companion_job_shapes export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+
+  assert(pt_load_def('ptcompsbs.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: jobname' + LF +
+    'check_alive_criteria: qusrwrk/rmscdefsbsjob' + LF: def): 'load');
+
+  iEqual(1: def.criteria_count: 'one criterion');
+  aEqual('JOBNAME:qusrwrk/rmscdefsbsjob':
+         SCDEF_criterion_text(def.criteria(1)):
+         'MEASURED - the SBS/JOB form keeps its case on both sides of the ' +
+         'slash');
+
+  assert(pt_load_def('ptcomppgm.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: jobname' + LF +
+    'check_alive_criteria: pgm-rmscdefpgm' + LF: def): 'load');
+
+  iEqual(1: def.criteria_count: 'one criterion');
+  aEqual('JOBNAME:pgm-rmscdefpgm': SCDEF_criterion_text(def.criteria(1)):
+         'MEASURED - the PGM- prefix is part of the text and is not folded ' +
+         'either');
+
+  assert(pt_load_def('ptcompcomma.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: jobname' + LF +
+    'check_alive_criteria: rmscdefseqa,rmscdefseqb' + LF: def): 'load');
+
+  iEqual(1: def.criteria_count:
+         'MEASURED - the companion is ONE criterion, comma and all; it is ' +
+         'check_alive that splits on commas, not check_alive_criteria');
+  aEqual('JOBNAME:rmscdefseqa,rmscdefseqb':
+         SCDEF_criterion_text(def.criteria(1)):
+         'MEASURED - and the whole of it is rendered');
+
+end-proc;
+
+//==============================================================================
+// The text is rendered in FULL - the criterion is not cut at 64 characters
+//
+// A THIRD DEFECT, found while measuring the first two on 4 September and not
+// part of either. The criterion is carried in a result 64 characters wide, so
+// 'JOBNAME:' plus the criterion is cut at 72 - in the DIRECT form as much as
+// the companion one, and on the `info` line as much as here.
+//
+// THE LENGTH HAS TO BE PAST 72 RENDERED CHARACTERS, and the first version of
+// this test got that wrong in a way worth recording, because the mistake is
+// not obvious and the test looked like coverage while covering nothing.
+//
+// It was written with twenty- and twenty-three-character job names. Both are
+// comfortably below every cap this code has ever had, so it could not fail -
+// and it was written against a truncation that had ALREADY BEEN FIXED one
+// layer up. A test written after a fix agrees with the code by construction;
+// what makes it worth keeping is a value that would have caught the defect,
+// and neither of those was one.
+//
+// THERE HAVE BEEN TWO CAPS, in two different fields, and the difference is
+// what a boundary case is for. The first was 56 characters of criterion, from
+// a RESULT type 64 wide carrying 'JOBNAME:' as well; that type is now 128. The
+// one still measured below is 64 characters of criterion - 72 rendered - which
+// is not that field at all but the width the text is STORED in. Widening one
+// and not the other is exactly the near-fix that a test carrying a single long
+// value reports as "still broken" when what it should report is "the edge
+// moved, and here is where it is now".
+//
+// Measured on 4 September against sc 1.7.1 with three upper-case job names, so
+// that only LENGTH varies:
+//
+//     40 characters  ->  48 rendered   both sides agree
+//     64 characters  ->  72 rendered   both sides agree - the exact boundary
+//     80 characters  ->  88 rendered   upstream whole, RMSC cut at 72
+//
+// AND THE EDGE HAS MOVED ONCE SINCE, WHICH IS THE POINT OF SAYING WHERE IT IS.
+// SCDEF_CRIT_t is now 128 and a cap survives at exactly that. Re-measured the
+// same way:
+//
+//    118 characters  -> 126 rendered   both sides agree
+//    120 characters  -> 128 rendered   both sides agree
+//    128 characters  -> 136 rendered   both sides agree - the edge now
+//    130 characters  -> 138 upstream, 136 RMSC - cut back to 128
+//
+// THE 130 IS DELIBERATELY NOT ASSERTED. 128 characters is a LIMIT rather than
+// a defect: a *JOB name is 10, an SBS/JOB 21 and a PGM- form 14, so nothing a
+// definition can legitimately carry comes within a factor of five of it. A
+// test pinning the cut would go red the day somebody widened the field, which
+// is the wrong direction to fail in. What is asserted is the side that must
+// hold - everything up to 128 survives whole - and the measurement above is
+// recorded so the edge is known rather than rediscovered a third time.
+//
+// So 64 is the largest value that proves nothing, and it is kept below as the
+// boundary case: a cap that moved to 72 would pass it and fail the 80. A test
+// carrying only the 80 would go red without saying where the edge is.
+//
+// BOTH VALUES ARE WRITTEN UPPER CASE, INCLUDING THE COMPANION ONE, and that is
+// deliberate rather than careless. This row is about LENGTH, and an upper-case
+// companion value renders identically whether the folding rule above is
+// applied or not - so it stays green through that change and keeps saying only
+// the one thing it is for. A lower-case value here would go red for the wrong
+// reason and would have to be re-read every time the other rule moved.
+//==============================================================================
+
+dcl-proc test_criterion_text_job_not_truncated export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  j64  varchar(256);
+  dcl-s  j80  varchar(256);
+  dcl-s  j128 varchar(256);
+
+  // Built rather than written out, so the length is stated once and cannot
+  // drift from the comment when somebody reflows a literal.
+  j64 = 'RMSCDEF' + 'AAAAAAAAAABBBBBBBBBBCCCCCCCCCC' +
+                    'DDDDDDDDDDEEEEEEEEEEFFFFFFF';
+  j80 = j64 + 'FFFGGGGGGGGGGHHH';
+
+  iEqual(64: %len(j64): 'the boundary value really is 64 characters');
+  iEqual(80: %len(j80): 'and the value past it really is 80');
+
+  assert(pt_load_def('ptlong64.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: ' + j64 + LF: def): 'load');
+
+  aEqual('JOBNAME:' + j64: SCDEF_criterion_text(def.criteria(1)):
+         'MEASURED - 64 characters render as 72, the exact boundary the old ' +
+         '64-wide result could still hold');
+
+  assert(pt_load_def('ptlong80.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: ' + j80 + LF: def): 'load');
+
+  aEqual('JOBNAME:' + j80: SCDEF_criterion_text(def.criteria(1)):
+         'MEASURED - and 80 characters render as 88, which no 64- or ' +
+         '72-wide result can hold');
+
+  assert(pt_load_def('ptlong80c.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: jobname' + LF +
+    'check_alive_criteria: ' + j80 + LF: def): 'load');
+
+  aEqual('JOBNAME:' + j80: SCDEF_criterion_text(def.criteria(1)):
+         'and the companion path is no shorter than the direct one');
+
+  // THE EDGE AS IT STANDS. j64 twice is 128 characters, which is exactly the
+  // width of SCDEF_CRIT_t - so this is the largest criterion that survives,
+  // and the cheapest possible statement of where the limit sits.
+  j128 = j64 + j64;
+  iEqual(128: %len(j128): 'the edge value really is 128 characters');
+
+  assert(pt_load_def('ptlong128.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: ' + j128 + LF: def): 'load');
+
+  aEqual('JOBNAME:' + j128: SCDEF_criterion_text(def.criteria(1)):
+         'MEASURED - 128 characters render as 136, whole. Past this the ' +
+         'value is cut, which is a limit and not a defect - see the header');
+
+end-proc;
+
+//##############################################################################
+//##                                                                          ##
 //##  BLOCK C - paste into qtestsrc/SCDEF.TEST.RPGLE                          ##
 //##                                                                          ##
 //##############################################################################

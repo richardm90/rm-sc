@@ -750,19 +750,14 @@ dcl-proc SCEXEC_info export;
     if i > 1;
       line += ', ';
     endif;
-    select;
-      when def.criteria(i).kind = SCDEF_CHECK_PORT;
-        line += 'PORT:' + %char(def.criteria(i).port);
-      when def.criteria(i).kind = SCDEF_CHECK_PGM;
-        line += 'PGM:' + %trim(def.criteria(i).program);
-      other;
-        if %len(%trim(def.criteria(i).subsystem)) > 0;
-          line += 'JOBNAME:' + %trim(def.criteria(i).subsystem) + '/' +
-                  %trim(def.criteria(i).job_name);
-        else;
-          line += 'JOBNAME:' + %trim(def.criteria(i).job_name);
-        endif;
-    endsl;
+    // Rendered by the one procedure that knows how, rather than rebuilt here
+    // from the parsed fields. Building it here got three things wrong at once:
+    // a job name longer than ten characters was TRUNCATED, because *JOB name
+    // fields hold ten and the criterion text does not; a PGM- criterion
+    // rendered as 'PGM:x' where upstream has no such form and says
+    // 'JOBNAME:PGM-X'; and a port rendered from the converted number, so a
+    // criterion upstream shows as PORT:abc appeared here as PORT:0.
+    line += SCDEF_criterion_text(def.criteria(i));
   endfor;
   SCOUT_writeln(line);
 

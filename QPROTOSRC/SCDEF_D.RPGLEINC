@@ -45,7 +45,47 @@ dcl-c SCDEF_CHECK_PGM       const('PGM');
 dcl-s SCDEF_NAME_t     varchar(64)   template;
 dcl-s SCDEF_FRIENDLY_t varchar(128)  template;
 dcl-s SCDEF_CMD_t      varchar(1024) template;
-dcl-s SCDEF_CRIT_t     varchar(64)   template;
+// One criterion as written. 128 rather than 64: at 64 a job name of 65
+// characters was silently cut, and the cut was INVISIBLE because the rendering
+// type was 64 too, so the text was truncated on the way in and again on the
+// way out and the two caps hid each other. Fixing only the rendering moved the
+// cap from 56 to 72 without removing it - the storage is the other half, and a
+// test carrying a 20-character name could see neither.
+//
+// 128 IS THE SURVIVING EDGE, and it is named here so the next person measures
+// against it rather than rediscovering the stack. Upstream renders longer; RMSC
+// cuts at 128 characters of criterion. Far past anything real - a *JOB name is
+// 10, SBS/JOB is 21, PGM- is 14 - so it is a limit rather than a defect.
+//
+// THAT CLAIM WAS WRONG WHEN IT WAS FIRST WRITTEN, and the correction is left
+// here rather than tidied away, because the mistake is the useful part. Two
+// MORE 64-wide holders were still standing underneath when this comment
+// announced 128 as the surviving edge: SCCOLL's conflict comparison and
+// SCEXEC_EVAL_t.failed. Both were found by review, neither by any test, and
+// the first of them made conflict detection report nothing at all past 64
+// characters rather than reporting something short.
+//
+// So the count reached FIVE caps, not three, and the lesson is about the
+// method rather than the number: naming an edge does not establish it. What
+// establishes it is a test at a value past every candidate cap - which is why
+// the suites now carry cases at 28, 64, 65 and 136 rendered characters, the
+// 65 being the one that separates "handled at every length" from its rival.
+// Anyone widening SCDEF_CRIT_t again should sweep every holder that receives
+// SCDEF_criterion_text before believing the job done.
+dcl-s SCDEF_CRIT_t     varchar(128)  template;
+
+///
+// A rendered criterion: 'JOBNAME:' or 'PORT:' in front of a SCDEF_CRIT_t.
+//
+// Wider than SCDEF_CRIT_t plus its longest prefix, so the rendering can never
+// be the thing that truncates. THREE caps were stacked here, each hiding the
+// next: `info` cut at 10 (it built the text from a *JOB name field), this type
+// cut at 56 (it was SCDEF_NAME_t, 64 wide, against a 72-character value), and
+// the storage cut at 64. Removing them one at a time reported each fix as
+// complete, because the next cap down was still doing the truncating.
+///
+
+dcl-s SCDEF_CRITTEXT_t varchar(160)  template;
 dcl-s SCDEF_ENVVAR_t   varchar(512)  template;
 dcl-s SCDEF_KIND_t     char(4)       template;
 dcl-s SCDEF_OBJ_t      varchar(10)   template;
@@ -198,7 +238,14 @@ end-pr;
 // 'PGM:' rendering.
 ///
 
-dcl-pr SCDEF_criterion_text like(SCDEF_NAME_t);
+// NOTE FOR RMSC.BND: this return type widened from varchar(64). The signature
+// pins the ORDER of the export list, not the SHAPES of what the exports return,
+// so the binder says nothing about a change like this. Every caller in this
+// repository rebuilds together, so nothing is at risk here - but an
+// already-compiled caller outside it would read a different layout in silence,
+// which is the failure CLAUDE.md describes for an inserted export arriving by
+// another road.
+dcl-pr SCDEF_criterion_text like(SCDEF_CRITTEXT_t);
   criterion likeds(SCDEF_CRITERION_t) const;
 end-pr;
 

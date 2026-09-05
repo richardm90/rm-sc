@@ -22,18 +22,32 @@
 #            one the pack can rely on, so the duplication is unavoidable; a third
 #            fixture that shared it, rmscgate_type_case, has been moved off it.
 #
-#            MEASURED, and the reason this is tolerable: with three services on
-#            this criterion, upstream emitted NO conflict warning - while warning
-#            immediately about two services sharing PORT:22. So upstream's
-#            check-alive conflict detection appears to cover PORT criteria and
-#            not JOBNAME ones. That rule is pinned by
-#            isolation/duplicate-criterion-job, which asks the question directly
-#            instead of inferring it from this pack's silence.
+#            THE INFERENCE THAT USED TO SIT HERE WAS WRONG, and it is left
+#            described rather than deleted because of how it was wrong.
 #
-#            If that isolation case ever DOES warn, this pair is what must change,
-#            and the base pack would be perturbing every one of its own
-#            comparisons until it does. Check that case before reading a wrong
-#            row here as a job-lookup defect.
+#            It read: with three services on this criterion upstream emitted NO
+#            conflict warning, while warning immediately about two sharing
+#            PORT:22 - so upstream's conflict detection "appears to cover PORT
+#            criteria and not JOBNAME ones". The observation was real. The
+#            conclusion did not follow, and the word doing the damage was
+#            "appears".
+#
+#            DISPROVED 4 September. Upstream's detection covers JOBNAME
+#            perfectly well - measured with four services on one shared job
+#            name, all four named in the warning. The silence here had a
+#            different cause entirely: a job name reached through
+#            check_alive_criteria is NOT folded to upper case by upstream,
+#            where one given directly IS. These three fixtures spelled one job
+#            name three ways, so upstream saw three DIFFERENT criteria and had
+#            nothing to warn about.
+#
+#            RMSC folded both forms, saw one criterion, and warned about a
+#            collision that does not exist - which is the defect this pack found
+#            on its first run, and which this comment had already explained away
+#            as a property of upstream.
+#
+#            isolation/duplicate-criterion-job asks the question directly, which
+#            is why it is right and this was not.
 name: RMSC gate job up
 start_cmd: /QOpenSys/usr/bin/true
 check_alive: qp0zspwp
