@@ -70,6 +70,61 @@ strip_known() {
   mv "$1.k" "$1"
 }
 
+# A conflict-warning block is a SET, and comparing it as a sequence made this
+# harness report two different answers on identical code. Measured: three runs
+# of the same build gave differ=7, differ=8, differ=7, with two cases flapping
+# in and out - `list -a` and `isolation:duplicate-criterion-job list` - each
+# showing the same shape, one member moving between position 2 and 3:
+#
+#     2d1
+#     <     system_sshd (System Secure Shell server)
+#     3a3
+#     >     system_sshd (System Secure Shell server)
+#
+# Same lines, different order. Upstream builds the block from a hash and its
+# member order is not stable even against ITSELF between consecutive runs;
+# `7791266` measured that and RMSC deliberately sorts, because a set is the
+# only part of it that can be asserted. A two-member block is then a coin toss,
+# which is exactly the flap rate seen.
+#
+# So the members under each header are sorted on both sides before comparing.
+# NOTHING IS LOST by that: there is no correct order to detect a departure
+# from. What WOULD be lost by leaving it alone is the harness's credibility -
+# a differ count that changes on identical input cannot support a claim about
+# either implementation, and it is why the pack cannot be wired into the gate,
+# which exits non-zero on any difference at all.
+#
+# Only the indented run directly under a header is touched. The blocks
+# themselves keep their positions: whether their ORDER also varies has not been
+# measured, and inventing a rule for it before seeing it happen is how a
+# harness comes to hide the thing it was built to find. If it does vary, the
+# stability runs will say so.
+#
+# The count is reported for the same reason known_hits is: normalisation that
+# silently stops firing - because conflict detection broke, or the wording
+# moved - would leave this looking like it still guards something.
+CONFLICT_HDR='WARNING: the following services all have conflicting definitions for liveliness check '
+conflict_blocks=0
+sort_conflict_members() {
+  grep -qF "$CONFLICT_HDR" "$1" || return 0
+  local out="$1.c" buf="$1.b" inblock=0
+  : > "$out"; : > "$buf"
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$inblock" = 1 ]; then
+      case "$line" in
+        [[:space:]]*) printf '%s\n' "$line" >> "$buf"; continue;;
+        *) sort "$buf" >> "$out"; : > "$buf"; inblock=0;;
+      esac
+    fi
+    printf '%s\n' "$line" >> "$out"
+    case "$line" in
+      "$CONFLICT_HDR"*) inblock=1; conflict_blocks=$((conflict_blocks+1));;
+    esac
+  done < "$1"
+  [ "$inblock" = 1 ] && sort "$buf" >> "$out"
+  mv "$out" "$1"; rm -f "$buf"
+}
+
 # Upstream announces JAVA_TOOL_OPTIONS on stderr, which would otherwise look
 # like output from the command under test.
 sc_() { JAVA_TOOL_OPTIONS="-Dservices.dir=$WORK/services" "$SC" "$@" 2>"$WORK/j.e.raw"; jrc=$?
@@ -81,6 +136,10 @@ compare() {
   sc_  "$@" >"$WORK/j.o"; jrc=$?
   scr_ "$@" >"$WORK/r.o"; rrc=$?
   for f in "$WORK/j.o" "$WORK/j.e" "$WORK/r.o" "$WORK/r.e"; do strip_known "$f"; done
+  # stderr only. If RMSC ever put a conflict block on stdout - the stream a
+  # consumer parses by column - that is a difference this must still report,
+  # not one it tidies away.
+  for f in "$WORK/j.e" "$WORK/r.e"; do sort_conflict_members "$f"; done
   so=same; se=same; sr=same
   cmp -s "$WORK/j.o" "$WORK/r.o" || so=DIFF
   cmp -s "$WORK/j.e" "$WORK/r.e" || se=DIFF
@@ -183,7 +242,8 @@ for case_dir in "$PACK"/isolation/*/; do
 done
 
 echo
-echo "pass=$pass  differ=$differ  (of which ordering-only=$order_only)  known-difference lines filtered=$known_hits"
+echo "pass=$pass  differ=$differ  (of which ordering-only=$order_only)  known-difference lines filtered=$known_hits  conflict blocks set-compared=$conflict_blocks"
+[ "$conflict_blocks" -eq 0 ] && echo "NOTE: no conflict block was seen at all - either the fixtures stopped colliding or the warning's wording moved. The set comparison guarded nothing this run."
 [ "$order_only" -gt 0 ] && cat <<'NOTE'
 
 A stdout figure of 58/0 means the two agree on every line and disagree only on
