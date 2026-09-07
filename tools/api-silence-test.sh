@@ -122,7 +122,42 @@ WORK="${WORK:-/tmp/api-silence-test.$$}"
 # The two most recent are kept, so "inspect the artefacts" still works for the
 # run that just failed and the one before it. Only this script's own
 # directories are touched, by name, so a sibling harness's are left alone.
+# NEVER DELETE A DIRECTORY SOMETHING IS STILL USING. The name carries the PID
+# that made it - WORK defaults to <prefix>.$$ - so ownership needs no
+# bookkeeping, only `kill -0` on the suffix.
+#
+# Without this, two runs at once leave three directories and the oldest still
+# RUNNING one is removed underneath itself. It then fails on missing capture
+# files, and it does not fail saying its files vanished - it fails looking like
+# a fidelity regression. A harness that reports a defect in the thing under
+# test when the fault is its own cleanup is worse than one that leaks debris.
+#
+# The two failure modes are not symmetrical, which is what decides the rule. A
+# recycled PID means skipping a delete that could have been made: debris kept.
+# Getting it wrong the other way destroys a run in flight. So anything that
+# might be alive is left alone, and so is any name whose suffix is not a plain
+# number - an overridden WORK= belongs to whoever set it, and this cannot know
+# who that is.
+#
+# The same block appears in all five harnesses. Deliberately duplicated rather
+# than shared: each is deployed and run standalone, and a shared file would be
+# a dependency that costs more than the repetition does. Change one, change
+# all five.
 ls -dt /tmp/api-silence-test.* 2>/dev/null | tail -n +3 | while read -r stale; do
+  owner="${stale##*.}"
+  case "$owner" in
+    ''|*[!0-9]*) continue ;;
+  esac
+  # `kill -0` fails two ways and they mean opposite things: ESRCH is "no such
+  # process", EPERM is "alive, but not yours". Testing only the exit status
+  # treats another user's LIVE run as dead and deletes its work directory -
+  # the exact failure this block exists to prevent, on a shared box.
+  if kill_err=$(kill -0 "$owner" 2>&1); then
+    continue
+  fi
+  case "$kill_err" in
+    *ermitted*|*EPERM*|*ermission*) continue ;;
+  esac
   rm -rf "$stale" 2>/dev/null
 done
 SVCDIR="$WORK/services"
