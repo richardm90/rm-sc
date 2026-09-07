@@ -194,7 +194,30 @@ dcl-proc SCYAML_parse export;
       return false;
     endif;
 
-    key_name = %subst(work: 1: colon - 1);
+    // A LONG KEY IS RECORDED, NOT REFUSED, and this changed direction after
+    // review. Refusing the whole definition made a service vanish where
+    // upstream lists it: upstream warns `Unrecognized attribute '<key>'` and
+    // carries on, and RMSC already mirrors that for ordinary unknown keys.
+    // Refusing was over-reach - the rule "refuse what cannot be represented"
+    // is right for a value that changes behaviour and wrong for the NAME of
+    // an attribute nobody recognises.
+    //
+    // So a key longer than the holder is kept to its first SCYAML_KEY_SIZE
+    // characters and travels on as an unrecognised attribute. That is a
+    // deliberate truncation of a typo's name, not of anything that acts: 128
+    // characters identify an attribute perfectly well, and making it complete
+    // would cost 16KB per definition in the unknown array to say nothing more.
+    //
+    // What it still closes is the collision. Two keys agreeing for the first
+    // 64 characters used to collapse to one name, and add_key treats a repeat
+    // as a REPLACE - so a definition could silently lose an attribute it had
+    // set. At 128 that needs two 128-character keys agreeing throughout,
+    // which no typo produces.
+    if colon - 1 > SCYAML_KEY_SIZE;
+      key_name = %subst(work: 1: SCYAML_KEY_SIZE);
+    else;
+      key_name = %subst(work: 1: colon - 1);
+    endif;
     if colon = %len(work);
       raw_val = '';
     else;

@@ -43,6 +43,13 @@ end-pr;
 
 dcl-pr remove_fixtures end-pr;
 
+// Derived-job-name block - see THE DERIVED JOB NAME STILL TRUNCATES at the
+// foot of this suite
+dcl-pr jn_lc varchar(2048);
+  tag varchar(16) const;
+  len like(INTEGER_t) const;
+end-pr;
+
 //==============================================================================
 // Suite set-up and tear-down
 //==============================================================================
@@ -396,5 +403,181 @@ dcl-proc test_job_name_explicit export;
     'sbmjob_jobname: WEBPROXY' + LF: def): 'load');
 
   aEqualV('WEBPROXY': SCLAUNCH_job_name(def): 'sbmjob_jobname wins');
+
+end-proc;
+
+//##############################################################################
+//##                                                                          ##
+//##  THE DERIVED JOB NAME STILL TRUNCATES - and must keep doing so           ##
+//##                                                                          ##
+//##############################################################################
+//
+// There are TWO paths to a batch job name and only one of them is changing:
+//
+//   sbmjob_jobname GIVEN     the author chose it   -> refused if over 10,
+//                                                     because an IBM i job name
+//                                                     cannot be longer and a
+//                                                     stored one would never
+//                                                     work. Pinned in
+//                                                     SCDEF.TEST.
+//   sbmjob_jobname ABSENT    RMSC derives one      -> CUT TO 10, on purpose.
+//                                                     Nobody chose that name,
+//                                                     so cutting it to fit is
+//                                                     the right answer.
+//
+// THIS BLOCK IS THE CONTROL FOR THE SECOND PATH, and it matters more than the
+// refusals it accompanies. The cheapest wrong fix for "a job name over 10 is
+// invalid" is one applied wherever a job name is formed - which would refuse
+// every service whose own name is longer than ten characters, that is to say
+// most of them. Every rejection case in SCDEF.TEST passes against that fix.
+// Only these do not.
+//
+// test_job_name_truncated above already covers a 24-character service name.
+// These two go past the widths this round of work is moving - 64, and the 250
+// a file name can now carry - because the derived name is built from the SHORT
+// NAME, and the short name is the field being widened.
+//
+// THE TWO ARE NOT BOTH CONTROLS, and it is worth saying which is which because
+// the second was WRITTEN as a control and measurement said otherwise:
+//
+//   100 characters   GREEN today. The short name is cut at 64, but the first
+//                    ten characters survive that, so the derived job name is
+//                    the same either way. This is the control - it must stay
+//                    green, and it is what a refusal applied to the derived
+//                    path as well as the given one would break.
+//
+//   250 characters   Measured in SCDEF.TEST the same day: past 127 characters
+//                    the short name does not arrive short, it arrives EMPTY.
+//                    So there is no name to derive from, and SCLAUNCH falls
+//                    back to a constant - the job name that comes out is
+//                    'SCSERVICE'. Every service with a file name of 128
+//                    characters or more would submit under that one shared
+//                    name, and stop and check would look for it.
+//
+// THE SECOND IS BLOCKED ON rmtools AND IS WRITTEN AS A MARKER. The empty short
+// name comes from PATH_BASENAME_t being varchar(128) in rmtools, not from
+// anything in this repository, and it is to be fixed separately. So the case
+// asserts the constant that really comes out today, using the idiom
+// tools/error-delivery-test.sh calls `pinned`, and it goes red the day rmtools
+// lands - which is when the real expectation, RMSCJNA250, becomes reachable.
+//
+// It is the only thing in this repository that observes what an empty short
+// name does to the job that actually gets SUBMITTED, which is why it is kept
+// as a marker rather than deleted until rmtools ships.
+//
+// THE DERIVATION RULE ITSELF IS NOT CHANGING - confirmed by the project owner:
+// the first ten alphanumeric characters of the upper-cased name. Every fixture
+// here is lower-case alphanumeric with the tag at the front, so the expected
+// value is simply the first ten characters upper-cased.
+//
+// EVERY CHARACTER OF THE FIXTURE IS LOWER-CASE ALPHANUMERIC, so the derivation
+// has nothing to strip and the expected value is simply the first ten
+// characters, upper-cased. That keeps these cases about LENGTH: if they used a
+// name with hyphens in it they would also be asserting where the stripping
+// happens relative to the cut, which is a different rule and is already
+// covered by test_job_name_from_service.
+//##############################################################################
+
+//------------------------------------------------------------------------------
+// jn_lc - lower-case alphanumeric filler of exactly LEN characters, tag first
+//------------------------------------------------------------------------------
+dcl-proc jn_lc;
+  dcl-pi *n varchar(2048);
+    tag varchar(16) const;
+    len like(INTEGER_t) const;
+  end-pi;
+
+  dcl-c LCFILL const('abcdefghijklmnopqrstuvwxyz0123456789');
+  dcl-s v varchar(2100);
+
+  v = 'rmscjn' + %trimr(tag);
+
+  dow %len(v) < len;
+    v += LCFILL;
+  enddo;
+
+  return %subst(v: 1: len);
+
+end-proc;
+
+dcl-proc test_job_name_derived_from_a_long_name export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  nm  varchar(2048);
+
+  nm = jn_lc('a100': 100);
+  iEqual(100: %len(nm): 'a service name of 100 characters');
+
+  assert(load_def(nm + '.yaml':
+    'start_cmd: /usr/bin/rmscjn' + LF +
+    'check_alive: 8080' + LF: def):
+    'no sbmjob_jobname, so the job name is derived - and a long SERVICE ' +
+    'name must not make the definition invalid');
+
+  aEqualV('RMSCJNA100': SCLAUNCH_job_name(def):
+          'the derived name is the first ten characters, upper-cased - ' +
+          'truncation is CORRECT on this path and must keep working');
+
+end-proc;
+
+dcl-proc test_job_name_past_the_rmtools_limit_blocked_on_rmtools export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  nm  varchar(2048);
+
+  nm = jn_lc('a250': 250);
+  iEqual(250: %len(nm): 'the longest base name a .yaml file can carry');
+
+  assert(load_def(nm + '.yaml':
+    'start_cmd: /usr/bin/rmscjn' + LF +
+    'check_alive: 8080' + LF: def):
+    'the longest service name the IFS will hold still loads - it is the ' +
+    'NAME that is lost, not the definition');
+
+  aEqualV('SCSERVICE': SCLAUNCH_job_name(def):
+          'BLOCKED ON rmtools, NOT A DEFECT IN THIS REPOSITORY. Past 127 ' +
+          'characters PATH_BASENAME_t leaves the short name empty, so there ' +
+          'is nothing to derive from and this service submits under a ' +
+          'CONSTANT - as would every other service that long, all of them ' +
+          'sharing one job name that stop and check would then look for. ' +
+          'IF THIS FAILS, rmtools HAS LANDED - expect RMSCJNA250 and rename ' +
+          'this to test_job_name_derived_from_the_longest_name');
+
+end-proc;
+
+//==============================================================================
+// AN EXPLICIT JOB NAME WITH LEADING BLANKS SUBMITS UNDER THE NAME IN THE FILE
+//
+// The other half of test_sbmjob_jobname_quoted_10_stored_8_trimmed_is_accepted
+// in SCDEF.TEST. That suite can see what was STORED; this one can see what
+// would be SUBMITTED, and the two together are the assertion that matters:
+// what the author wrote reaches SBMJOB whole.
+//
+// A double-quoted scalar keeps its interior blanks, so "  ABCDEFGH" is ten
+// characters stored and eight after trimming. Ten fits, so the definition is
+// valid and the job name is ABCDEFGH.
+//
+// GREEN TODAY, and it is a control rather than a driver. It is here so that the
+// fix to the guard in SCDEF - measure what is stored, not what is trimmed -
+// cannot be made by refusing every value with a blank in it. A refusal there
+// makes this case red, and nothing else in either suite would notice.
+//==============================================================================
+
+dcl-proc test_job_name_explicit_with_leading_blanks export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+
+  assert(load_def('explicitblank.yaml':
+    'start_cmd: /usr/bin/x' + LF +
+    'check_alive: 8080' + LF +
+    'sbmjob_jobname: "  ABCDEFGH"' + LF: def):
+    'ten characters are stored and ten characters fit, so this definition ' +
+    'is valid - if it is refused, the job-name guard is reading the ' +
+    'spelling of the value rather than its length');
+
+  aEqualV('ABCDEFGH': SCLAUNCH_job_name(def):
+          'and the job is submitted under the name the file asks for - not ' +
+          'under a prefix of it, and not under one derived from the service ' +
+          'name as though no sbmjob_jobname had been given');
 
 end-proc;

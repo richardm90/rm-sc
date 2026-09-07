@@ -16,6 +16,10 @@ ctl-opt bnddir('RMSCPGM':'RMSCDEPS');
 /include 'SCCOLL_D.rpgleinc'
 /include 'SCDEF_D.rpgleinc'
 /include 'SCDIRS_D.rpgleinc'
+// SCMAIN_D is here for one block only - test_long_ignore_list_still_excludes
+// at the end of this suite, which has to see the value the PARSER stored
+// rather than a list of its own making. See the block comment there.
+/include 'SCMAIN_D.rpgleinc'
 /include 'include/RMIFS_D.rpgleinc'
 /include 'include/RMTOOLS_D.rpgleinc'
 /include 'include/PSDS_D.rpgleinc'
@@ -57,6 +61,11 @@ end-pr;
 
 dcl-pr fil_load;
   coll likeds(SCCOLL_t);
+end-pr;
+
+dcl-pr lim_list varchar(1024);
+  len  like(INTEGER_t) const;
+  tail varchar(64) const;
 end-pr;
 
 dcl-s g_nam like(STMF_t);
@@ -186,6 +195,87 @@ end-pr;
 
 dcl-pr sl_criteria varchar(2048) end-pr;
 
+// Width block - see A NAME TOO LONG TO HOLD LOSES A SERVICE at the foot of
+// this suite
+dcl-s g_tr like(STMF_t);
+
+dcl-s g_tra   varchar(2048);
+dcl-s g_trb   varchar(2048);
+dcl-s g_trc   varchar(2048);
+dcl-s g_trd   varchar(2048);
+dcl-s g_tr64  varchar(2048);
+dcl-s g_tr65  varchar(2048);
+dcl-s g_tr127 varchar(2048);
+dcl-s g_tr128 varchar(2048);
+dcl-s g_tr250 varchar(2048);
+dcl-s g_tr251 varchar(2048);
+dcl-s g_trg   varchar(2048);
+dcl-s g_trjn  varchar(2048);
+
+dcl-pr tr_setup end-pr;
+
+dcl-pr tr_teardown end-pr;
+
+dcl-pr tr_name varchar(2048);
+  tag varchar(16) const;
+  len like(INTEGER_t) const;
+end-pr;
+
+dcl-pr tr_load;
+  suffix varchar(32) const;
+  coll   likeds(SCCOLL_t);
+end-pr;
+
+dcl-pr tr_stored;
+  coll likeds(SCCOLL_t);
+  want varchar(2048) const;
+  ctx  varchar(200) const;
+end-pr;
+
+dcl-pr tr_equal;
+  expected varchar(2048) const;
+  actual   varchar(2048) const;
+  ctx      varchar(200) const;
+end-pr;
+
+dcl-pr tr_tail varchar(64);
+  v varchar(2048) const;
+end-pr;
+
+dcl-pr tr_short_at varchar(2048);
+  coll likeds(SCCOLL_t);
+  rrn  like(INTEGER_t) const;
+end-pr;
+
+// Sort-key block - see THE SORT KEY IS THE WHOLE NAME at the foot of this
+// suite
+dcl-s g_sk like(STMF_t);
+
+dcl-s g_ska varchar(2048);
+dcl-s g_skb varchar(2048);
+dcl-s g_skc varchar(2048);
+dcl-s g_skd varchar(2048);
+
+dcl-pr sk_setup end-pr;
+
+dcl-pr sk_teardown end-pr;
+
+dcl-pr sk_name varchar(2048);
+  tag varchar(16) const;
+  len like(INTEGER_t) const;
+end-pr;
+
+dcl-pr sk_first_entry varchar(2048);
+  dir_path like(STMF_t) const;
+end-pr;
+
+dcl-pr sk_assert_order;
+  suffix varchar(32) const;
+  first  varchar(2048) const;
+  second varchar(2048) const;
+  ctx    varchar(200) const;
+end-pr;
+
 //==============================================================================
 // Suite set-up
 //==============================================================================
@@ -281,6 +371,8 @@ dcl-proc setUpSuite export;
   en_setup();
   wt_setup();
   sl_setup();
+  tr_setup();
+  sk_setup();
 
 end-proc;
 
@@ -295,6 +387,8 @@ dcl-proc tearDownSuite export;
   en_teardown();
   wt_teardown();
   sl_teardown();
+  tr_teardown();
+  sk_teardown();
 
 end-proc;
 
@@ -3666,7 +3760,7 @@ end-proc;
 //
 //     57 chars ->  65 rendered   THE SEPARATING CASE. One character past the
 //                                holder, and nothing else about it differs
-//                                from the row above. Red today. Rules out the
+//                                from the row above. Red when written. Rules out
 //                                rival: there is no reading of "handled
 //                                correctly at every length" that survives 64
 //                                passing and 65 failing.
@@ -3770,12 +3864,12 @@ end-proc;
 //==============================================================================
 // THE SEPARATING CASE - 65 rendered, one character past the holder
 //
-// RED TODAY, and expected to be. 57-character value, 65 rendered. It differs
-// from the row above in exactly one character of one job name, and in nothing
-// else: same shape of fixture, same two services, same key, same case. So a
-// pass above and a failure here can only be about the length, which is what
-// makes this the value that separates "handled correctly at every length"
-// from the truth.
+// RED WHEN WRITTEN, and expected to be; green since the holder was widened.
+// 57-character value, 65 rendered. It differs from the row above in exactly
+// one character of one job name, and in nothing else: same shape of fixture,
+// same two services, same key, same case. So a pass above and a failure here
+// could only have been about the length, which is what makes this the value
+// that separates "handled correctly at every length" from the truth.
 //
 // The failure to expect is a count of 0 - the two services do not meet,
 // because the truncated left-hand side of the comparison never equals the
@@ -3818,10 +3912,10 @@ end-proc;
 //==============================================================================
 // THE FAR END - 136 rendered, the documented criterion limit
 //
-// RED TODAY. 128-character value, 136 rendered: the longest criterion a
-// definition may legitimately carry, measured against sc 1.7.1 and recorded
-// in test_criterion_text_job_not_truncated. SCDEF renders it whole; this asks
-// whether the conflict finder can still see it.
+// RED WHEN WRITTEN, green since. 128-character value, 136 rendered: the
+// longest criterion a definition may legitimately carry, measured against
+// sc 1.7.1 and recorded in test_criterion_text_job_not_truncated. SCDEF
+// renders it whole; this asks whether the conflict finder can still see it.
 //
 // It is here because a fix that only moved the edge would pass the 65 above
 // and fail this: 72 and 128 are both plausible widths to widen a 64-wide
@@ -4800,5 +4894,1329 @@ dcl-proc test_long_check_alive_recorded_not_fatal export;
   iEqual(1: coll.bad_count: 'one bad definition, recorded');
   aEqualV('rmscsk_bad': coll.bad_name(1): 'named');
   assert((%len(coll.bad_err(1)) > 0): 'reason recorded');
+
+end-proc;
+
+//##############################################################################
+//##                                                                          ##
+//##  A NAME TOO LONG TO HOLD LOSES A SERVICE                                 ##
+//##                                                                          ##
+//##############################################################################
+//
+// MEASURED, 7 September 2026, against sc 1.7.1 and RMSC side by side:
+//
+//   a file name of 100 characters   upstream: the name column shows 100
+//                                   RMSC:     cut at 64
+//
+//   TWO file names sharing a        upstream: two services
+//   64-character prefix             RMSC:     ONE. The second replaces the
+//                                             first and one service is GONE.
+//
+// THE SECOND ROW IS THE WHOLE REASON THIS BLOCK EXISTS. A collection is keyed
+// by short name, so two definitions whose names agree for their first 64
+// characters become one entry and the later file silently overwrites the
+// earlier. `check` is screen-scraped by a consumer, and CLAUDE.md opens by
+// saying that a row disappearing from that output is the failure mode this
+// project guards against hardest. This is a way to make a row disappear with
+// nothing anywhere reporting an error: the collection is internally
+// consistent, the count is a whole number, the row that remains is correctly
+// formed. Nothing is malformed. There is simply one fewer service than there
+// are files.
+//
+// AND THERE IS A SECOND, WIDER WAY TO LOSE ONE - IN ANOTHER REPOSITORY.
+// Measured the same day in SCDEF.TEST by loading one definition per base-name
+// length:
+//
+//     base name   short name that arrives
+//     ---------   -----------------------
+//        64 - 127   64        truncated   <- RMSC's own holder. OURS.
+//       128 - 250    0        GONE        <- rmtools. NOT OURS.
+//
+// Past 127 the name is not shortened, it is absent. So ANY two definitions
+// whose file names are 128 characters or longer collide - not because they
+// resemble each other, but because neither has a name. They need share no
+// prefix at all.
+//
+// ROOT CAUSE, confirmed by the project owner against rmtools: PATH_BASENAME_t
+// is varchar(128). A 133-character file name is cut to 128, the '.yaml' goes
+// with the cut, the scanr for the dot returns 0, and the basename extraction
+// raises into an empty string behind a MONITOR. The dot has to survive the
+// cut, which is why the boundary is a base name of 127 and is 127 for '.yml'
+// as well as for '.yaml'. It is to be fixed separately and not soon.
+//
+// SO THE CASES SPLIT, and the split is in their NAMES:
+//
+//   ..._is_whole / ..._are_two_services    65 to 127. Real expectations. RED
+//                                          today, GREEN when this work lands.
+//   ..._blocked_on_rmtools                 128 and up. Assert what happens
+//                                          TODAY and say so in their own text.
+//
+// The blocked ones use the idiom tools/error-delivery-test.sh calls `pinned`:
+// assert the behaviour that is really there, so a later change to it is
+// VISIBLE rather than silent, and so tools/verify.sh is not left reporting
+// FAILED every run until another repository ships. Each of them fails THE
+// MOMENT rmtools lands, which is the point of writing them rather than
+// deleting them - nobody has to remember. A failure there is the fix
+// arriving, not a defect.
+//
+// THE HEADLINE CASE IS BELOW THE BOUNDARY AND STAYS A REAL ONE. Its two names
+// are 100 characters, so 105 on disk - well inside the 128 rmtools can carry -
+// and they collide purely on RMSC's own 64-wide key. That is the case this
+// work exists to fix, and it is unaffected by any of the above.
+//
+// A COUNT IS NOT ENOUGH ON ITS OWN, and both halves are asserted throughout:
+//
+//   the count alone   would still pass if some future change kept both files
+//                     but recorded them under ONE name, or under a name
+//                     neither file has.
+//   the names alone   would still pass, today, against SCCOLL_find - see next.
+//
+// SCCOLL_find IS NOT TRUSTED AS THE ONLY WITNESS, and this is the trap worth
+// naming. Its name parameter is very likely the same type being widened. If it
+// is, then today a look-up with a whole 100-character name passes only 64
+// characters, matches the 64 that were stored, and SUCCEEDS - reporting the
+// defect as a pass. The instrument would share the fault it is measuring. So
+// wholeness is established by walking the collection with SCCOLL_get and
+// comparing def.short_name in a varchar(2048) of this suite's own, and
+// SCCOLL_find is asserted IN ADDITION to that, never instead of it.
+//
+// ONE DIRECTORY PER LENGTH, which is the discipline the cfl_ block above
+// already sets out and it is load-bearing here. A first attempt put all five
+// lengths in one directory and asserted a count of five in every case. Two of
+// those cases are CONTROLS - 64 and an ordinary name - and both went red,
+// because the 250 and 251 fixtures share the empty name described above and
+// collapse into one entry. A control that dies on someone else's defect before
+// it reaches the thing it controls is not a control. So each length now has a
+// directory holding one file, and the aggregate count has a procedure of its
+// own where it is the subject rather than a preamble.
+//
+// GROUPS REACH A SECOND HOLDER, and the brief for this work does not mention
+// it. def.groups is being widened to 512, but SCCOLL_groups copies the
+// distinct group names into a structure of its own, and that one is what the
+// `groups` command prints and what every `--groups` filter matches against.
+// Widening the first and not the second would leave a long group cut at
+// exactly the point the user sees it. Flagged rather than assumed - if the
+// decision is that only def.groups widens, that case is wrong and should be
+// removed rather than adjusted.
+//
+// A REFUSED sbmjob_jobname MUST NOT TAKE THE DIRECTORY WITH IT, on the same
+// argument test_long_start_cmd_recorded_not_fatal already makes about an
+// over-long scalar: a refusal implemented as a stop is worse than the silent
+// truncation it replaces.
+//##############################################################################
+
+//------------------------------------------------------------------------------
+// tr_name - lower-case alphanumeric filler of exactly LEN characters
+//
+// Lower case throughout, so every value is inside the character class
+// upstream's file-name rule accepts - [a-z0-9_-] - and nothing here can be
+// rejected for its spelling instead of its length. It also means the short
+// name RMSC derives is the base name unchanged, so the expected value needs no
+// folding applied to it by hand.
+//
+// The tag goes at the FRONT so names of different lengths differ within their
+// first dozen characters rather than only past several hundred.
+//------------------------------------------------------------------------------
+dcl-proc tr_name;
+  dcl-pi *n varchar(2048);
+    tag varchar(16) const;
+    len like(INTEGER_t) const;
+  end-pi;
+
+  dcl-c LCFILL const('abcdefghijklmnopqrstuvwxyz0123456789');
+  dcl-s v varchar(2100);
+
+  v = 'rmsctr' + %trimr(tag);
+
+  dow %len(v) < len;
+    v += LCFILL;
+  enddo;
+
+  return %subst(v: 1: len);
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// tr_tail / tr_equal - compare values longer than aEqualV can carry
+//
+// THIS SUITE'S aEqualV IS 512 WIDE, and 512 is one of the widths under test. A
+// value handed to it at or past that arrives cut on BOTH sides, compares
+// equal, and reports the defect as a pass. cfl_index carries the same warning
+// about its own parameter for the same reason. Do not narrow these.
+//------------------------------------------------------------------------------
+dcl-proc tr_tail;
+  dcl-pi *n varchar(64);
+    v varchar(2048) const;
+  end-pi;
+
+  dcl-s t varchar(2048);
+
+  t = %trimr(v);
+  if %len(t) <= 48;
+    return t;
+  endif;
+
+  return %subst(t: %len(t) - 47: 48);
+
+end-proc;
+
+dcl-proc tr_equal;
+  dcl-pi *n;
+    expected varchar(2048) const;
+    actual   varchar(2048) const;
+    ctx      varchar(200) const;
+  end-pi;
+
+  if %trimr(expected) = %trimr(actual);
+    assert(*on: %trim(ctx));
+    return;
+  endif;
+
+  assert(*off: %trim(ctx) + ': expected ' + %char(%len(%trimr(expected))) +
+               ' chars ending "' + %trim(tr_tail(expected)) + '" but got ' +
+               %char(%len(%trimr(actual))) + ' chars ending "' +
+               %trim(tr_tail(actual)) + '"');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// tr_stored - assert that some definition in the collection carries WANT as its
+// short name, whole
+//
+// Walks with SCCOLL_get rather than asking SCCOLL_find, so the answer does not
+// depend on the width of a parameter that is itself being changed. See the
+// block header.
+//
+// On failure it reports the length and tail of every short name the collection
+// DOES hold, because "not found" on its own cannot tell a missing service from
+// a truncated one from a nameless one, and those are three different defects -
+// two of which are live in this code today.
+//------------------------------------------------------------------------------
+dcl-proc tr_stored;
+  dcl-pi *n;
+    coll likeds(SCCOLL_t);
+    want varchar(2048) const;
+    ctx  varchar(200) const;
+  end-pi;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s i   like(INTEGER_t);
+  dcl-s got varchar(2048);
+  dcl-s msg varchar(2048);
+
+  for i = 1 to SCCOLL_count(coll);
+    if not SCCOLL_get(coll: i: def);
+      leave;
+    endif;
+    got = def.short_name;
+    if %trimr(got) = %trimr(want);
+      assert(*on: %trim(ctx));
+      return;
+    endif;
+    if %len(msg) < 600;
+      msg += ' [' + %char(%len(%trimr(got))) + ' chars ending "' +
+             %trim(tr_tail(got)) + '"]';
+    endif;
+  endfor;
+
+  assert(*off: %trim(ctx) + ': no definition carries the ' +
+               %char(%len(%trimr(want))) + '-character name ending "' +
+               %trim(tr_tail(want)) + '". The collection holds' + %trim(msg));
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// tr_short_at - the short name stored at RRN, for the blocked markers
+//
+// tr_stored asserts that a name IS present, which is the wrong shape for a
+// case whose whole subject is a name that is ABSENT. This returns what is
+// actually there so the marker can assert its length is zero, and go red the
+// day it stops being zero.
+//------------------------------------------------------------------------------
+dcl-proc tr_short_at;
+  dcl-pi *n varchar(2048);
+    coll likeds(SCCOLL_t);
+    rrn  like(INTEGER_t) const;
+  end-pi;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+
+  if not SCCOLL_get(coll: rrn: def);
+    return '*NOTREAD';
+  endif;
+
+  return def.short_name;
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// tr_load - load one width fixture subdirectory into a fresh collection
+//------------------------------------------------------------------------------
+dcl-proc tr_load;
+  dcl-pi *n;
+    suffix varchar(32) const;
+    coll   likeds(SCCOLL_t);
+  end-pi;
+
+  SCCOLL_init(coll);
+  assert(SCCOLL_load_dir(coll: %trim(g_tr) + '/' + %trim(suffix)):
+         'width fixture ' + %trim(suffix) + ' loaded');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// tr_setup - one directory per statement
+//
+//   prefix   two 100-character names identical for 64 characters
+//   nameless two 130-character names sharing NOTHING
+//   all      one file per length, for the aggregate count
+//   l64 l65 l128 l250 l251 lord   one file each, for wholeness
+//   grp      one definition carrying a 500-character group
+//   jn       an over-long sbmjob_jobname between two good definitions
+//------------------------------------------------------------------------------
+dcl-proc tr_setup;
+
+  dcl-s y    like(STRING_t);
+  dcl-s base varchar(2048);
+  dcl-s pad  varchar(64);
+
+  g_tr = '/tmp/rmsc-sccoll-width-' + %trim(psds.current_user);
+  IFS_crtdir(g_tr);
+  IFS_crtdir(%trim(g_tr) + '/prefix');
+  IFS_crtdir(%trim(g_tr) + '/nameless');
+  IFS_crtdir(%trim(g_tr) + '/all');
+  IFS_crtdir(%trim(g_tr) + '/past');
+  IFS_crtdir(%trim(g_tr) + '/l64');
+  IFS_crtdir(%trim(g_tr) + '/l65');
+  IFS_crtdir(%trim(g_tr) + '/l127');
+  IFS_crtdir(%trim(g_tr) + '/l128');
+  IFS_crtdir(%trim(g_tr) + '/l250');
+  IFS_crtdir(%trim(g_tr) + '/l251');
+  IFS_crtdir(%trim(g_tr) + '/lord');
+  IFS_crtdir(%trim(g_tr) + '/grp');
+  IFS_crtdir(%trim(g_tr) + '/jn');
+
+  y = 'name: Width probe' + LF;
+  y += 'start_cmd: /usr/bin/rmsctr' + LF;
+  y += 'check_alive: 8170' + LF;
+
+  // TWO NAMES IDENTICAL FOR 64 CHARACTERS AND DIFFERENT AFTERWARDS. Built from
+  // one shared base, so the prefix really is the same by construction rather
+  // than by two literals somebody has to keep in step by hand. The 36
+  // characters that follow are all 'a' in one and all 'b' in the other, so the
+  // two differ at character 65 AND at every character after it - there is no
+  // way for a comparison stopping anywhere past 64 to still confuse them.
+  base = tr_name('shared': 64);
+  pad  = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  g_tra = base + pad;
+  pad  = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+  g_trb = base + pad;
+
+  write_file(%trim(g_tr) + '/prefix/' + %trim(g_tra) + '.yaml': y);
+  write_file(%trim(g_tr) + '/prefix/' + %trim(g_trb) + '.yaml': y);
+
+  // TWO NAMES OF 130 THAT SHARE NOTHING. Different from character one, so no
+  // prefix rule of any width can explain a collision between them. Today both
+  // arrive with NO name and collide on that.
+  //
+  // The two characters in front are not decoration. tr_name puts a common
+  // 'rmsctr' on everything it builds, so two names from it alone agree for
+  // six characters - and the claim this fixture has to support is that these
+  // two share NOTHING. Prefixing them makes that true by construction rather
+  // than by hope, and the test asserts it before relying on it.
+  //
+  // NOTHING IS ASSERTED IN THIS PROCEDURE, deliberately. An assert here is an
+  // assert in setUpSuite, and a failing one there abandons the whole suite -
+  // measured: 0 test cases run and 149 assertions lost, from one wrong
+  // fixture claim. Fixture shape is established in the test that depends on
+  // it, where a failure costs that test and nothing else.
+  g_trc = 'cx' + tr_name('n1': 128);
+  g_trd = 'dy' + tr_name('n2': 128);
+
+  write_file(%trim(g_tr) + '/nameless/' + %trim(g_trc) + '.yaml': y);
+  write_file(%trim(g_tr) + '/nameless/' + %trim(g_trd) + '.yaml': y);
+
+  // ONE NAME PER LENGTH. 251 takes '.yml', which is four characters, so it is
+  // 255 on disk exactly as the 250 with '.yaml' is.
+  g_tr64  = tr_name('l64':  64);
+  g_tr65  = tr_name('l65':  65);
+  g_tr127 = tr_name('l127': 127);
+  g_tr128 = tr_name('l128': 128);
+  g_tr250 = tr_name('l250': 250);
+  g_tr251 = tr_name('l251': 251);
+
+  write_file(%trim(g_tr) + '/l64/'  + %trim(g_tr64)  + '.yaml': y);
+  write_file(%trim(g_tr) + '/l65/'  + %trim(g_tr65)  + '.yaml': y);
+  write_file(%trim(g_tr) + '/l127/' + %trim(g_tr127) + '.yaml': y);
+  write_file(%trim(g_tr) + '/l128/' + %trim(g_tr128) + '.yaml': y);
+  write_file(%trim(g_tr) + '/l250/' + %trim(g_tr250) + '.yaml': y);
+  write_file(%trim(g_tr) + '/l251/' + %trim(g_tr251) + '.yml':  y);
+  write_file(%trim(g_tr) + '/lord/rmsctr_ordinary.yaml': y);
+
+  // THE AGGREGATE IS SPLIT AT THE BOUNDARY, because one directory spanning
+  // both bands could only ever assert a number that mixed a defect this work
+  // fixes with one it cannot reach.
+  //
+  //   all/    everything at or below 127 - a real expectation
+  //   past/   everything at or above 128 - a blocked marker
+  write_file(%trim(g_tr) + '/all/'  + %trim(g_tr64)  + '.yaml': y);
+  write_file(%trim(g_tr) + '/all/'  + %trim(g_tr65)  + '.yaml': y);
+  write_file(%trim(g_tr) + '/all/'  + %trim(g_tr127) + '.yaml': y);
+  write_file(%trim(g_tr) + '/all/rmsctr_ordinary.yaml': y);
+
+  write_file(%trim(g_tr) + '/past/' + %trim(g_tr128) + '.yaml': y);
+  write_file(%trim(g_tr) + '/past/' + %trim(g_tr250) + '.yaml': y);
+  write_file(%trim(g_tr) + '/past/' + %trim(g_tr251) + '.yml':  y);
+
+  // A 500-character group - inside the 512 a sequence item holds, so the item
+  // guard cannot be what cuts it
+  g_trg = tr_name('g500': 500);
+  y = 'name: Group width probe' + LF;
+  y += 'start_cmd: /usr/bin/rmsctr' + LF;
+  y += 'check_alive: 8171' + LF;
+  y += 'groups:' + LF;
+  y += '- ' + %trim(g_trg) + LF;
+  write_file(%trim(g_tr) + '/grp/rmsctr_grp.yaml': y);
+
+  // AN OVER-LONG sbmjob_jobname BETWEEN TWO GOOD DEFINITIONS, so a loader that
+  // stops at the bad file and one that skips the rest of the directory are
+  // told apart by WHICH neighbour survives.
+  g_trjn = 'RMSCTRJOBNAME20CHARS';
+
+  y = 'name: Job name probe' + LF;
+  y += 'start_cmd: /usr/bin/rmsctr' + LF;
+  y += 'check_alive: 8172' + LF;
+  write_file(%trim(g_tr) + '/jn/rmsctrjn_before.yaml': y);
+  write_file(%trim(g_tr) + '/jn/rmsctrjn_after.yaml': y);
+
+  y = 'name: Job name probe' + LF;
+  y += 'start_cmd: /usr/bin/rmsctr' + LF;
+  y += 'check_alive: 8172' + LF;
+  y += 'sbmjob_jobname: ' + %trim(g_trjn) + LF;
+  write_file(%trim(g_tr) + '/jn/rmsctrjn_bad.yaml': y);
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// tr_teardown
+//------------------------------------------------------------------------------
+dcl-proc tr_teardown;
+
+  cfl_rmdir(%trim(g_tr) + '/prefix');
+  cfl_rmdir(%trim(g_tr) + '/nameless');
+  cfl_rmdir(%trim(g_tr) + '/all');
+  cfl_rmdir(%trim(g_tr) + '/past');
+  cfl_rmdir(%trim(g_tr) + '/l64');
+  cfl_rmdir(%trim(g_tr) + '/l65');
+  cfl_rmdir(%trim(g_tr) + '/l127');
+  cfl_rmdir(%trim(g_tr) + '/l128');
+  cfl_rmdir(%trim(g_tr) + '/l250');
+  cfl_rmdir(%trim(g_tr) + '/l251');
+  cfl_rmdir(%trim(g_tr) + '/lord');
+  cfl_rmdir(%trim(g_tr) + '/grp');
+  cfl_rmdir(%trim(g_tr) + '/jn');
+
+  IFS_dltdir(g_tr);
+
+  assert((not IFS_isa_directory(g_tr)):
+         'Width fixture tree ' + %trim(g_tr) + ' not removed');
+
+end-proc;
+
+//==============================================================================
+// THE ONE THAT MATTERS - two names sharing a 64-character prefix are two
+// services, and one of them must not vanish
+//
+// Two files on disk, both valid, both loadable on their own. Today the
+// collection holds ONE of them and says nothing: no error, no warning, no
+// bad-definition entry. A service is simply not there.
+//
+// THE FIXTURE IS ESTABLISHED FIRST. Both names are 100 characters and agree
+// for 64, so if either had failed to reach disk intact the directory would
+// hold one file and the count would be 1 - which is exactly what the defect
+// produces. A red result has to mean the defect and not a fixture that never
+// landed.
+//==============================================================================
+
+dcl-proc test_two_names_sharing_a_64_prefix_are_two_services export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t) inz(*likeds);
+
+  iEqual(100: %len(g_tra): 'the first name is 100 characters');
+  iEqual(100: %len(g_trb): 'and so is the second');
+  assert((%subst(g_tra: 1: 64) = %subst(g_trb: 1: 64)):
+         'they are identical for their first 64 characters');
+  assert((%subst(g_tra: 65) <> %subst(g_trb: 65)):
+         'and differ at every character after that');
+
+  tr_load('prefix': coll);
+
+  iEqual(2: SCCOLL_count(coll):
+         'TWO files, TWO services. Today the second replaces the first and ' +
+         'one service is silently gone - and a row that disappears from ' +
+         'check is the failure this project guards against hardest');
+
+  tr_stored(coll: g_tra:
+            'the first name is stored whole - walked with SCCOLL_get, not ' +
+            'looked up, so the answer does not depend on the width of a ' +
+            'parameter that is itself being changed');
+  tr_stored(coll: g_trb: 'and so is the second');
+
+  // ADDITIONAL to the two above, never instead of them. If SCCOLL_find takes
+  // the same narrow type then today it passes 64 characters, matches the 64
+  // that were stored, and succeeds - so on its own it would report the defect
+  // as a pass. It is asserted because after the fix a look-up by the whole
+  // name is what a user actually does.
+  nEqual(true: SCCOLL_find(coll: g_tra: def):
+         'the first is findable by its whole name');
+  nEqual(true: SCCOLL_find(coll: g_trb: def):
+         'and so is the second');
+
+end-proc;
+
+//==============================================================================
+// AND TWO NAMES THAT SHARE NOTHING AT ALL ARE LOST TOO - BLOCKED ON rmtools
+//
+// 130 characters each, differing from character one. No prefix rule of any
+// width can bring these together. They collide today because past 127 a name
+// is not truncated but ABSENT, so both definitions arrive under the empty name
+// and the second overwrites the first on it.
+//
+// This is the broader of the two vanishing paths - it cannot be reasoned about
+// from the file names at all - and it is the one this repository cannot close.
+// PATH_BASENAME_t is varchar(128) in rmtools, so no width RMSC chooses gives
+// these two definitions distinct names.
+//
+// SO IT IS A MARKER, not a failing expectation. It asserts the collapse that
+// really happens today. The day rmtools widens PATH_BASENAME_t both names
+// arrive whole, the count becomes 2, and THIS GOES RED - at which point flip
+// it to the real expectation below the assertion and rename it
+// test_two_names_with_nothing_in_common_are_two_services.
+//==============================================================================
+
+dcl-proc test_two_nameless_definitions_collide_blocked_on_rmtools export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-s  got  varchar(2048);
+
+  iEqual(130: %len(g_trc): 'the first name is 130 characters');
+  iEqual(130: %len(g_trd): 'and so is the second');
+  assert((%subst(g_trc: 1: 1) <> %subst(g_trd: 1: 1)):
+         'they differ at their very first character, so no prefix rule of ' +
+         'any width can be what brings them together');
+  assert((%subst(g_trc: 1: 2) <> %subst(g_trd: 1: 2)):
+         'and at their second');
+
+  tr_load('nameless': coll);
+
+  iEqual(1: SCCOLL_count(coll):
+         'BLOCKED ON rmtools, NOT A DEFECT IN THIS REPOSITORY. Two files ' +
+         'that have nothing whatever in common become ONE service, because ' +
+         'past 127 characters PATH_BASENAME_t leaves both with no name and ' +
+         'they collide on that. RMSC cannot widen its way out of this. ' +
+         'IF THIS FAILS, rmtools HAS LANDED - expect 2 here, assert both ' +
+         'names whole with tr_stored, and rename this to ' +
+         'test_two_names_with_nothing_in_common_are_two_services');
+
+  got = tr_short_at(coll: 1);
+  iEqual(0: %len(%trimr(got)):
+         'and the one that survived has no name at all - which is what makes ' +
+         'this a collision rather than a file that failed to load');
+
+end-proc;
+
+//==============================================================================
+// FOUR NAMES, ALL INSIDE THE BAND THIS WORK OWNS, ALL PRESENT AND ALL WHOLE
+//
+// The aggregate, split at 127 so that it states something this work can
+// actually deliver. The per-length cases below each hold ONE file, so none can
+// be brought down by another length's defect; this is where they are asked
+// about together, and it is the only place a fixed-size array's stride could
+// show - four long names stored side by side rather than one at a time.
+//
+// THE COUNT IS GREEN TODAY AND THE WHOLENESS IS NOT. All four names differ
+// within their first dozen characters, so truncating them to 64 leaves them
+// distinct and the count comes out right either way. That is exactly why the
+// count is not the assertion here: it agrees with the defect. The four
+// tr_stored calls are what separate.
+//==============================================================================
+
+dcl-proc test_names_below_the_rmtools_limit_are_all_present export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+
+  tr_load('all': coll);
+
+  iEqual(4: SCCOLL_count(coll):
+         'four files, four services - true today as well, because the four ' +
+         'names stay distinct even cut at 64. The wholeness below is what ' +
+         'this case is for');
+
+  tr_stored(coll: g_tr64:  'the 64-character name is whole');
+  tr_stored(coll: g_tr65:  'and the 65-character one');
+  tr_stored(coll: g_tr127: 'and the 127-character one - the longest name ' +
+                           'this work has to carry');
+  tr_stored(coll: 'rmsctr_ordinary': 'and the ordinary one is untouched');
+
+end-proc;
+
+//==============================================================================
+// AND THREE NAMES PAST IT COLLAPSE INTO ONE - BLOCKED ON rmtools
+//
+// 128, 250 and 251. Three files, three quite different names, one service.
+// Same cause as everywhere else in this band: none of them has a name, so they
+// all collide on the empty one.
+//
+// IF THIS FAILS, rmtools HAS LANDED - expect 3 and assert all three whole.
+//==============================================================================
+
+dcl-proc test_names_past_the_rmtools_limit_collapse_blocked_on_rmtools export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-s  got  varchar(2048);
+
+  tr_load('past': coll);
+
+  iEqual(1: SCCOLL_count(coll):
+         'BLOCKED ON rmtools. Three files of 128, 250 and 251 characters ' +
+         'become ONE service, all of them nameless. IF THIS FAILS, rmtools ' +
+         'HAS LANDED - expect 3 and assert g_tr128, g_tr250 and g_tr251 ' +
+         'whole with tr_stored');
+
+  got = tr_short_at(coll: 1);
+  iEqual(0: %len(%trimr(got)):
+         'and the survivor has no name');
+
+end-proc;
+
+//==============================================================================
+// THE LENGTHS - 64, 65, 128, 250, 251 and an ordinary name
+//
+// One case per procedure and ONE FILE PER DIRECTORY, so a red case is a
+// statement about its own length and nothing else. The count of 1 is asserted
+// first in each: a name lost to truncation and a file not loaded at all are
+// different defects, and only the count separates them.
+//==============================================================================
+
+dcl-proc test_coll_short_name_at_64_is_whole export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+
+  iEqual(64: %len(g_tr64): 'a base name of exactly 64 characters');
+
+  tr_load('l64': coll);
+  iEqual(1: SCCOLL_count(coll): 'one file, one service');
+
+  tr_stored(coll: g_tr64:
+            'THE CONTROL AT THE OLD WIDTH - a 64-character name is stored ' +
+            'whole today, and a fix that moved the boundary the wrong way ' +
+            'would fail here and nowhere else');
+
+end-proc;
+
+dcl-proc test_coll_short_name_at_65_is_whole export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+
+  iEqual(65: %len(g_tr65): 'one character more than the case above');
+
+  tr_load('l65': coll);
+  iEqual(1: SCCOLL_count(coll): 'one file, one service');
+
+  tr_stored(coll: g_tr65:
+            'a 65-character name is stored whole - today it arrives cut at ' +
+            '64, which is what lets two names collide');
+
+end-proc;
+
+dcl-proc test_coll_short_name_at_127_is_whole export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+
+  iEqual(127: %len(g_tr127):
+         'the longest name rmtools can hand back with its dot intact, and ' +
+         'so the longest this work has to carry');
+
+  tr_load('l127': coll);
+  iEqual(1: SCCOLL_count(coll): 'one file, one service');
+
+  tr_stored(coll: g_tr127:
+            'a 127-character name is stored whole - today it arrives cut at ' +
+            '64. This is the TOP of the band this work owns, and the case a ' +
+            'widening to 100 rather than 255 would fail while every other ' +
+            'real case here went green');
+
+end-proc;
+
+dcl-proc test_coll_short_name_at_128_blocked_on_rmtools export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-s  got  varchar(2048);
+
+  iEqual(128: %len(g_tr128):
+         'one character past the last name rmtools can hand back whole');
+
+  tr_load('l128': coll);
+  iEqual(1: SCCOLL_count(coll):
+         'one file, one service - the definition does load, which is why ' +
+         'nothing reports this');
+
+  got = tr_short_at(coll: 1);
+  iEqual(0: %len(%trimr(got)):
+         'BLOCKED ON rmtools, NOT A DEFECT IN THIS REPOSITORY. At 128 the ' +
+         'stored short name is EMPTY, because PATH_BASENAME_t is ' +
+         'varchar(128) and the dot does not survive the cut. IF THIS ' +
+         'FAILS, rmtools HAS LANDED - use tr_stored(coll: g_tr128: ...) ' +
+         'and rename this to test_coll_short_name_at_128_is_whole');
+
+end-proc;
+
+dcl-proc test_coll_short_name_at_250_blocked_on_rmtools export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-s  got  varchar(2048);
+
+  iEqual(250: %len(g_tr250): 'the longest base name a .yaml file can carry');
+
+  tr_load('l250': coll);
+  iEqual(1: SCCOLL_count(coll): 'one file, one service');
+
+  got = tr_short_at(coll: 1);
+  iEqual(0: %len(%trimr(got)):
+         'BLOCKED ON rmtools, as at 128 and for the same reason. IF THIS ' +
+         'FAILS, rmtools HAS LANDED - use tr_stored(coll: g_tr250: ...) ' +
+         'and rename this to test_coll_short_name_at_250_is_whole');
+
+end-proc;
+
+dcl-proc test_coll_short_name_at_251_yml_blocked_on_rmtools export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-s  got  varchar(2048);
+
+  // THE 251 IS STILL THE POINT OF THIS CASE, and it outlives the block. The
+  // measured bound is 251 and not 250: the IFS accepts a file name of 255
+  // characters and refuses 256, and '.yml' is four characters where '.yaml'
+  // is five. So a holder of 250 would be one character short of what the file
+  // system can hand it. That is confirmed and is being acted on; it simply
+  // cannot be OBSERVED from here until PATH_BASENAME_t widens, because 251 is
+  // in the blocked band. The assertion below is what is true today; the
+  // sentence above is what has to be true when it goes red.
+  iEqual(251: %len(g_tr251):
+         'the longest base name a .yml file can carry - measured, not ' +
+         'assumed');
+
+  tr_load('l251': coll);
+  iEqual(1: SCCOLL_count(coll): 'one file, one service');
+
+  got = tr_short_at(coll: 1);
+  iEqual(0: %len(%trimr(got)):
+         'BLOCKED ON rmtools, as at 128 and 250. IF THIS FAILS, rmtools HAS ' +
+         'LANDED - use tr_stored(coll: g_tr251: ...), rename this to ' +
+         'test_coll_short_name_at_251_yml_is_whole, and check that RMSC''s ' +
+         'own holder is 255 and not 250: 251 is the case that tells those ' +
+         'two apart, and it is the only one that can');
+
+end-proc;
+
+dcl-proc test_coll_short_name_ordinary_is_whole export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t) inz(*likeds);
+
+  tr_load('lord': coll);
+  iEqual(1: SCCOLL_count(coll): 'one file, one service');
+
+  tr_stored(coll: 'rmsctr_ordinary':
+            'THE CONTROL - an everyday name is untouched');
+
+  nEqual(true: SCCOLL_find(coll: 'rmsctr_ordinary': def):
+         'and is still findable, which a widening that broke the lower ' +
+         'casing or the extension strip would fail');
+
+end-proc;
+
+//==============================================================================
+// A GROUP REACHES THE GROUPS LIST WHOLE - a second holder, not named in the
+// brief
+//
+// def.groups is being widened to 512. SCCOLL_groups copies the distinct group
+// names somewhere else, and THAT is what the `groups` command prints and what
+// every `--groups` filter matches against. Widening one and not the other
+// leaves a long group cut at the point the user would see it, with everything
+// upstream of that point correct.
+//
+// 500 is inside the 512 a sequence item holds, so the item guard cannot be
+// what produces a short answer here - test_seq_item_groups_block_at_513_is_
+// rejected in SCDEF.TEST owns the other side of that boundary.
+//
+// FLAGGED RATHER THAN ASSUMED: if the decision is that only def.groups widens
+// and the groups list stays as it is, this case is wrong and should be removed
+// rather than adjusted. It is written because the alternative was to leave the
+// question unasked.
+//==============================================================================
+
+dcl-proc test_long_group_reaches_the_groups_list_whole export;
+
+  dcl-ds coll   likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds groups likeds(SCCOLL_GROUPS_t) inz(*likeds);
+  dcl-s  got    varchar(2048);
+
+  iEqual(500: %len(g_trg): 'a group of 500 characters, inside the item cap');
+
+  tr_load('grp': coll);
+  iEqual(1: SCCOLL_count(coll): 'one definition');
+
+  SCCOLL_groups(coll: groups);
+  iEqual(1: groups.count: 'one distinct group');
+
+  got = groups.name(1);
+  tr_equal(g_trg: got:
+           'the group reaches the groups list whole - this is the holder ' +
+           'the groups command and the --groups filter read from');
+
+end-proc;
+
+//==============================================================================
+// AN OVER-LONG sbmjob_jobname IS RECORDED, AND ITS NEIGHBOURS LOAD
+//
+// The refusal itself is pinned in SCDEF.TEST. What belongs here is that it is a
+// REFUSAL and not a STOP: one unusable job name in one file must not take the
+// rest of the directory with it. That would be worse than the truncation it
+// replaces, and it is what the count detects - SCCOLL_count would come back 0
+// or 1 rather than 2.
+//
+// Same shape and same argument as test_long_start_cmd_recorded_not_fatal.
+//==============================================================================
+
+dcl-proc test_long_sbmjob_jobname_recorded_not_fatal export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t) inz(*likeds);
+
+  iEqual(20: %len(g_trjn): 'a job name of 20, twice what one may be');
+
+  tr_load('jn': coll);
+
+  iEqual(2: SCCOLL_count(coll):
+         'the two good definitions survive and the bad one is not among ' +
+         'them - today all three load and one would be submitted under a ' +
+         'name nobody wrote');
+
+  nEqual(true: SCCOLL_find(coll: 'rmsctrjn_before': def):
+         'the neighbour written before it');
+  nEqual(true: SCCOLL_find(coll: 'rmsctrjn_after': def):
+         'and the neighbour written after it - the load did not stop');
+  nEqual(false: SCCOLL_find(coll: 'rmsctrjn_bad': def):
+         'the definition whose job name can never be submitted is not usable');
+
+  iEqual(1: coll.bad_count: 'one bad definition, recorded');
+  aEqualV('rmsctrjn_bad': coll.bad_name(1): 'named');
+  assert((%len(coll.bad_err(1)) > 0): 'reason recorded');
+
+end-proc;
+
+//==============================================================================
+// A GROUP LIST AT THE LIMIT STILL EXCLUDES THE GROUP AT THE END OF IT
+//
+// --ignore-groups= names the groups to EXCLUDE from check, list and groups
+// output. Its value is a comma-separated list of n names held in one field,
+// and the command line it arrives on is twice as wide as that field, so the
+// value can be longer than the holder. Measured on this build:
+//
+//   SCMAIN_ARGS_t   1024      opts.ignore_groups   512      SCDEF_NAME_t  512
+//
+// The parse side is guarded in SCMAIN.TEST: 512 is accepted, 513 is refused.
+// What is asserted HERE is the half a parse-side test cannot see. Storing the
+// value whole and then truncating it when MATCHING gives exactly the same
+// answer to every assertion in that suite, and it is not a contrived failure
+// mode - the matching side takes the same delimited text through the same
+// 512-character type, and a copy through anything narrower on the way loses
+// the tail with nothing to report it.
+//
+// WHY THE FAILURE HAS TO BE CAUGHT BY NAME. A dropped tail means the groups
+// in the tail are NOT excluded, so the failure ADDS services to the output
+// rather than removing them. A count is no use: five groups is what you get
+// when the filter works on a different fixture, and a count that happens to
+// match the wrong answer proves nothing. Every assertion below names a
+// definition or a group.
+//
+// HOW THE PAIR SEPARATES. Both tests use a list of EXACTLY 512 characters
+// with the same filler, differing only in the last element:
+//
+//   ...,filgrp_mx   a group two of the six fixtures declare
+//   ...,nosuchgrp   the same length, and nothing declares it
+//
+// The filler is elements of seven 'g's, which no fixture declares either. So
+// if the tail survives, the first list excludes rmscfil_a and rmscfil_e and
+// the second excludes nothing; if the tail is dropped anywhere - stored short
+// by the parser, or cut by the matcher - the two lists are indistinguishable
+// and both exclude nothing. That is the disagreement the pair exists for, and
+// it is why the second test is not just a copy of an unfiltered case.
+//
+// The value goes through SCMAIN_parse rather than being built here, so that
+// "stored whole" and "matched whole" are one assertion rather than two that
+// could both hold while the pipeline between them loses the tail.
+//
+// aEqualV in this suite is varchar(512) - exactly the width under test - so
+// nothing here compares the list through it. The list is checked by %len, and
+// the exclusions by name.
+//==============================================================================
+
+///
+// lim_list - a comma-separated list of an EXACT length ending in the group
+// the caller names. Elements of seven 'g's, which no fixture declares.
+///
+dcl-proc lim_list;
+  dcl-pi *n varchar(1024);
+    len  like(INTEGER_t) const;
+    tail varchar(64) const;
+  end-pi;
+
+  dcl-s fill char(1024) inz(*all'g');
+  dcl-s buf  varchar(1024);
+  dcl-s want like(INTEGER_t);
+  dcl-s i    like(INTEGER_t);
+
+  want = len - %len(%trimr(tail)) - 1;
+  assert((want >= 1): 'lim_list: length ' + %char(len) +
+         ' leaves no room for the tail ' + %trim(tail));
+
+  buf = %subst(fill: 1: want);
+
+  for i = 8 by 8 to want - 1;
+    %subst(buf: i: 1) = ',';
+  endfor;
+
+  return buf + ',' + %trimr(tail);
+
+end-proc;
+
+dcl-proc test_long_ignore_list_still_excludes export;
+
+  dcl-ds coll   likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds groups likeds(SCCOLL_GROUPS_t) inz(*likeds);
+  dcl-ds def    likeds(SCDEF_t) inz(*likeds);
+  dcl-ds opts   likeds(SCMAIN_OPTS_t) inz(*likeds);
+  dcl-s  args   like(SCMAIN_ARGS_t);
+  dcl-s  ignore like(SCDEF_NAME_t);
+  dcl-s  val    varchar(1024);
+
+  val = lim_list(512: 'filgrp_mx');
+  iEqual(512: %len(val): 'the list handed to the parser is exactly 512');
+
+  args = 'groups --ignore-groups=' + val;
+  iEqual(0: SCMAIN_parse(args: opts): 'a 512-character list parses');
+  iEqual(512: %len(opts.ignore_groups): 'and the parser stored it whole');
+
+  ignore = opts.ignore_groups;
+  iEqual(512: %len(ignore):
+         'and it still fits the type the matcher is handed');
+
+  // Named services, not a count. rmscfil_a declares filgrp_zx and filgrp_mx,
+  // so the last element of the list excludes it; rmscfil_b declares only
+  // filgrp_ax and rmscfil_f declares nothing, so neither may be excluded by
+  // any of this.
+  fil_get('rmscfil_a': def);
+  nEqual(true: SCCOLL_in_groups(def: ignore):
+         'rmscfil_a is excluded by the group at the END of a 512-char list');
+
+  fil_get('rmscfil_e': def);
+  nEqual(true: SCCOLL_in_groups(def: ignore):
+         'and so is rmscfil_e, which declares the same group');
+
+  fil_get('rmscfil_b': def);
+  nEqual(false: SCCOLL_in_groups(def: ignore):
+         'rmscfil_b declares none of the groups in the list');
+
+  fil_get('rmscfil_f': def);
+  nEqual(false: SCCOLL_in_groups(def: ignore):
+         'rmscfil_f declares no groups at all');
+
+  // And through the filter the option actually reaches, again by name:
+  // excluding the two declarers of filgrp_mx takes filgrp_mx and filgrp_zx
+  // away with them, and leaves the three groups nothing excluded declares.
+  fil_load(coll);
+  SCCOLL_groups(coll: groups: ignore);
+
+  nEqual(false: fil_has(groups: 'filgrp_mx'):
+         'filgrp_mx is gone - it is the last element of the list');
+  nEqual(false: fil_has(groups: 'filgrp_zx'):
+         'filgrp_zx is gone with its only declarer');
+  nEqual(true: fil_has(groups: 'filgrp_ax'):
+         'filgrp_ax survives on rmscfil_b');
+  nEqual(true: fil_has(groups: 'filgrp_9x'): 'filgrp_9x survives');
+  nEqual(true: fil_has(groups: 'filgrp__x'): 'filgrp__x survives');
+  iEqual(3: groups.count: 'three groups left, and these three');
+
+end-proc;
+
+//==============================================================================
+// The same list with an unknown group at the end excludes NOTHING
+//
+// The other half of the pair. Without it, the test above is satisfied by a
+// matcher that excludes rmscfil_a for some reason of its own - a prefix
+// match, a blank element, anything - and a 512-character list of filler that
+// matched nothing would look identical to one whose tail was honoured.
+//==============================================================================
+
+dcl-proc test_long_ignore_list_filler_matches_nothing export;
+
+  dcl-ds coll   likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds groups likeds(SCCOLL_GROUPS_t) inz(*likeds);
+  dcl-ds def    likeds(SCDEF_t) inz(*likeds);
+  dcl-ds opts   likeds(SCMAIN_OPTS_t) inz(*likeds);
+  dcl-s  args   like(SCMAIN_ARGS_t);
+  dcl-s  ignore like(SCDEF_NAME_t);
+  dcl-s  val    varchar(1024);
+
+  // 'nosuchgrp' is the same nine characters as 'filgrp_mx', so this list and
+  // the one above have byte-for-byte the same filler and the same length.
+  val = lim_list(512: 'nosuchgrp');
+  iEqual(512: %len(val): 'the same 512 characters, a different last element');
+
+  args = 'groups --ignore-groups=' + val;
+  iEqual(0: SCMAIN_parse(args: opts): 'it parses');
+  ignore = opts.ignore_groups;
+
+  fil_get('rmscfil_a': def);
+  nEqual(false: SCCOLL_in_groups(def: ignore):
+         'nothing in the filler matches rmscfil_a');
+
+  fil_get('rmscfil_e': def);
+  nEqual(false: SCCOLL_in_groups(def: ignore):
+         'nor rmscfil_e');
+
+  fil_load(coll);
+  SCCOLL_groups(coll: groups: ignore);
+
+  iEqual(5: groups.count: 'all five groups survive a list that names none');
+  nEqual(true: fil_has(groups: 'filgrp_mx'): 'filgrp_mx is still there');
+  nEqual(true: fil_has(groups: 'filgrp_zx'): 'and filgrp_zx');
+
+end-proc;
+
+//##############################################################################
+//##                                                                          ##
+//##  THE SORT KEY IS THE WHOLE NAME, NOT THE FIRST 64 CHARACTERS OF IT       ##
+//##                                                                          ##
+//##############################################################################
+//
+// Short names now hold 512 characters and two names sharing a 64-character
+// prefix are two services - test_two_names_sharing_a_64_prefix_are_two_services
+// above pins that and passes. What was NOT widened with them is the key the
+// collection SORTS on, which is a separate 64-byte holder.
+//
+// So two names that agree for 64 characters and differ afterwards arrive as two
+// distinct services carrying ONE key. Their order in the collection is then
+// whatever the sort does with two entries it believes are equal - insertion
+// order, or the reverse of it, or neither. `check`, `list` and `groups` are all
+// byte-exact operations printed one row per service in collection order, so an
+// arbitrary order is a byte-exact diff that moves under the feet of whoever
+// captured the baseline.
+//
+// THE PAIR IS WRITTEN TWICE, IN OPPOSITE CREATION ORDERS, and that is the whole
+// design. With one directory a truncated key that happens to leave the two in
+// insertion order gives the right answer for the wrong reason, and the case
+// goes green against the defect. Written both ways round, a sort that cannot
+// tell the two apart must get one of the two directories wrong whatever it does
+// with a tie.
+//
+// AND EACH DIRECTION PROVES WHAT readdir HANDED THE LOADER BEFORE CONCLUDING
+// ANYTHING FROM IT. The argument above rests on the loader being offered the
+// two files in the order they were created. If a future file system hands them
+// back sorted, both directories present the same order, both cases pass, and
+// the pair silently stops separating anything - which is precisely the shape of
+// vacuous test this project has been bitten by three times. So each case asks
+// IFS_readdir itself which file comes first and asserts it, and a sorted
+// readdir fails that assertion loudly instead of quietly excusing the defect.
+//
+// THE DIFFERING CHARACTER IS A DIGIT AGAINST A LETTER, for the reason
+// test_order_by_short_name and test_group_order_is_codepoint both give: the
+// comparison is on a UTF-8 key and must be code-point order, where '9' (0x39)
+// sorts BEFORE 'a' (0x61). A native RPG comparison is EBCDIC, where 'a' (0x81)
+// sorts before '9' (0xF9) and the answer reverses. A pair differing only in
+// letters collates the same way under both and could not tell a correct
+// comparator from one that was never converted.
+//
+// THE CONTROL IS THE SAME PAIR WITH THE DIFFERENCE MOVED INSIDE THE KEY. Two
+// names of the same 100 characters differing at character 10, created in the
+// reverse of their expected order. It is green today: the difference is inside
+// the 64 the key holds, so the sort sees it. Without it a red on the two cases
+// above has two readings - the key is short, or long names are not sorted at
+// all - and they are different repairs.
+//
+// 07/09/2026 - test author - written against the defect, before the fix
+//##############################################################################
+
+//------------------------------------------------------------------------------
+// sk_name - lower-case alphanumeric filler of exactly LEN characters
+//------------------------------------------------------------------------------
+dcl-proc sk_name;
+  dcl-pi *n varchar(2048);
+    tag varchar(16) const;
+    len like(INTEGER_t) const;
+  end-pi;
+
+  dcl-c LCFILL const('abcdefghijklmnopqrstuvwxyz0123456789');
+  dcl-s v varchar(2100);
+
+  v = 'rmscsk' + %trimr(tag);
+
+  dow %len(v) < len;
+    v += LCFILL;
+  enddo;
+
+  return %subst(v: 1: len);
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// sk_first_entry - the first name IFS_readdir hands back from a directory
+//
+// The instrument for the fixture claim each case makes about creation order.
+// It reads the directory the same way SCCOLL_load_dir must, so what it reports
+// is what the loader was offered and not a guess about it.
+//------------------------------------------------------------------------------
+dcl-proc sk_first_entry;
+  dcl-pi *n varchar(2048);
+    dir_path like(STMF_t) const;
+  end-pi;
+
+  dcl-s dir      pointer;
+  dcl-s filename like(IFS_DIR_FILENAME_t);
+  dcl-s got      varchar(2048);
+
+  dir = IFS_opendir(dir_path);
+  if dir = *null;
+    return '*NODIR';
+  endif;
+
+  dow IFS_readdir(dir: filename);
+    if filename <> '.' and filename <> '..';
+      got = %trimr(filename);
+      leave;
+    endif;
+  enddo;
+
+  IFS_closedir(dir);
+
+  if %len(got) = 0;
+    return '*EMPTY';
+  endif;
+
+  return got;
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// sk_assert_order - load one sort-key directory and pin the order of the two
+//
+// Walks with SCCOLL_get and tr_short_at rather than asking SCCOLL_find, for the
+// reason tr_stored gives: the answer must not depend on the width of a
+// parameter that is itself being changed.
+//
+// The count is asserted first. Two names that collided into one service is a
+// different defect from two services in the wrong order, and only the count
+// tells them apart - that defect is pinned separately in
+// test_two_names_sharing_a_64_prefix_are_two_services and must not be re-read
+// here as an ordering failure.
+//------------------------------------------------------------------------------
+dcl-proc sk_assert_order;
+  dcl-pi *n;
+    suffix varchar(32) const;
+    first  varchar(2048) const;
+    second varchar(2048) const;
+    ctx    varchar(200) const;
+  end-pi;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-s  got  varchar(2048);
+
+  SCCOLL_init(coll);
+  assert(SCCOLL_load_dir(coll: %trim(g_sk) + '/' + %trim(suffix)):
+         'sort-key fixture ' + %trim(suffix) + ' loaded');
+
+  iEqual(2: SCCOLL_count(coll):
+         %trim(ctx) + ': two files, two services - if this is 1 the names ' +
+         'collided and the ordering below would be a different defect');
+
+  got = tr_short_at(coll: 1);
+  tr_equal(first: got:
+           %trim(ctx) + ' - rrn 1 must be the name whose differing ' +
+           'character is the DIGIT, because a UTF-8 key sorts 0x39 before ' +
+           '0x61. EBCDIC gives the opposite answer and a 64-byte key gives ' +
+           'no answer at all');
+
+  got = tr_short_at(coll: 2);
+  tr_equal(second: got: %trim(ctx) + ' - rrn 2 is the other one');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// sk_setup - three directories, one pair each
+//
+//   fwd  the pair created in its expected order
+//   rev  the same pair created in the opposite order
+//   ctl  a pair differing at character 10 instead of 65, created in reverse
+//
+// NOTHING IS ASSERTED HERE, for the reason tr_setup gives: a failed assertion
+// in setUpSuite abandons the whole suite and costs every case in it. The
+// fixture claims are made in the cases that depend on them.
+//------------------------------------------------------------------------------
+dcl-proc sk_setup;
+
+  dcl-s y    like(STRING_t);
+  dcl-s base varchar(2048);
+
+  g_sk = '/tmp/rmsc-sccoll-sortkey-' + %trim(psds.current_user);
+  IFS_crtdir(g_sk);
+  IFS_crtdir(%trim(g_sk) + '/fwd');
+  IFS_crtdir(%trim(g_sk) + '/rev');
+  IFS_crtdir(%trim(g_sk) + '/ctl');
+
+  y = 'name: Sort key probe' + LF;
+  y += 'start_cmd: /usr/bin/rmscsk' + LF;
+  y += 'check_alive: 8180' + LF;
+
+  // IDENTICAL FOR 64 CHARACTERS, DIFFERENT AT 65. Built from one shared base
+  // so the prefix is the same by construction. The 35 characters after the
+  // differing one are identical in both, so the ONLY thing a comparator can
+  // decide on is character 65 - which is the character a 64-byte key never
+  // reaches.
+  base  = sk_name('shared': 64);
+  g_ska = base + '9' + 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz';
+  g_skb = base + 'a' + 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz';
+
+  write_file(%trim(g_sk) + '/fwd/' + %trim(g_ska) + '.yaml': y);
+  write_file(%trim(g_sk) + '/fwd/' + %trim(g_skb) + '.yaml': y);
+
+  write_file(%trim(g_sk) + '/rev/' + %trim(g_skb) + '.yaml': y);
+  write_file(%trim(g_sk) + '/rev/' + %trim(g_ska) + '.yaml': y);
+
+  // THE CONTROL - the same 100 characters, the same digit against the same
+  // letter, at character 10 instead of 65. Created in reverse, so it is a real
+  // sort and not a reading of the directory.
+  g_skc = 'rmscskctl' + '9' + 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz' +
+          'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz';
+  g_skd = 'rmscskctl' + 'a' + 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz' +
+          'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz';
+
+  write_file(%trim(g_sk) + '/ctl/' + %trim(g_skd) + '.yaml': y);
+  write_file(%trim(g_sk) + '/ctl/' + %trim(g_skc) + '.yaml': y);
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// sk_teardown
+//------------------------------------------------------------------------------
+dcl-proc sk_teardown;
+
+  cfl_rmdir(%trim(g_sk) + '/fwd');
+  cfl_rmdir(%trim(g_sk) + '/rev');
+  cfl_rmdir(%trim(g_sk) + '/ctl');
+
+  IFS_dltdir(g_sk);
+
+  assert((not IFS_isa_directory(g_sk)):
+         'Sort-key fixture tree ' + %trim(g_sk) + ' not removed');
+
+end-proc;
+
+//==============================================================================
+// TWO NAMES SHARING 64 CHARACTERS SORT BY WHAT COMES AFTER THEM
+//
+// The pair in its expected creation order. On its own this case is satisfied by
+// a sort that leaves a tie where it found it, which is why the reverse below is
+// written and why neither is worth having without the other.
+//==============================================================================
+
+dcl-proc test_sort_key_past_64_created_in_order export;
+
+  dcl-s got varchar(2048);
+
+  iEqual(100: %len(g_ska): 'the first name is 100 characters');
+  iEqual(100: %len(g_skb): 'and so is the second');
+  assert((%subst(g_ska: 1: 64) = %subst(g_skb: 1: 64)):
+         'they are identical for their first 64 characters, so a 64-byte ' +
+         'sort key cannot tell them apart');
+  assert((%subst(g_ska: 65: 1) = '9' and %subst(g_skb: 65: 1) = 'a'):
+         'and they differ at character 65, digit against letter, so the ' +
+         'code-point answer and the EBCDIC answer are opposites');
+  assert((%subst(g_ska: 66) = %subst(g_skb: 66)):
+         'everything after character 65 is the same in both, so character ' +
+         '65 is the only thing a comparator can decide on');
+
+  // THE FIXTURE CLAIM, MEASURED RATHER THAN ASSUMED. Everything this case
+  // concludes rests on the loader being offered the digit file first.
+  got = sk_first_entry(%trim(g_sk) + '/fwd');
+  tr_equal(g_ska + '.yaml': got:
+           'readdir hands the fwd directory back in creation order - if it ' +
+           'does not, this case and its reverse are reading the same order ' +
+           'twice and neither separates anything');
+
+  sk_assert_order('fwd': g_ska: g_skb: 'created in code-point order');
+
+end-proc;
+
+//==============================================================================
+// AND THE SAME PAIR CREATED THE OTHER WAY ROUND
+//
+// THE SEPARATING CASE. The two names arrive in the reverse of the order they
+// must come back in, so a collection that cannot compare past character 64 has
+// nothing to reorder them with and returns them as it found them.
+//==============================================================================
+
+dcl-proc test_sort_key_past_64_created_in_reverse export;
+
+  dcl-s got varchar(2048);
+
+  assert((%subst(g_ska: 1: 64) = %subst(g_skb: 1: 64)):
+         'the same pair, identical for 64 characters');
+
+  got = sk_first_entry(%trim(g_sk) + '/rev');
+  tr_equal(g_skb + '.yaml': got:
+           'readdir hands the rev directory back with the LETTER file ' +
+           'first, which is the whole point of this directory. A sorted ' +
+           'readdir would make this case a copy of the one above');
+
+  sk_assert_order('rev': g_ska: g_skb:
+                  'created in the reverse of code-point order - the order ' +
+                  'must come from the NAME and not from the directory');
+
+end-proc;
+
+//==============================================================================
+// THE CONTROL - the same shape, differing inside the 64 the key holds
+//
+// Green today and green after. Two 100-character names differing at character
+// 10, created in reverse. It separates "the sort key is too short" from "long
+// names are not sorted at all", and a fix that widened the key would leave it
+// exactly as it is.
+//==============================================================================
+
+dcl-proc test_sort_key_within_64_is_ordered export;
+
+  dcl-s got varchar(2048);
+
+  iEqual(100: %len(g_skc): 'the first name is 100 characters');
+  iEqual(100: %len(g_skd): 'and so is the second');
+  assert((%subst(g_skc: 1: 9) = %subst(g_skd: 1: 9)):
+         'identical for nine characters');
+  assert((%subst(g_skc: 10: 1) = '9' and %subst(g_skd: 10: 1) = 'a'):
+         'and differing at character 10 - inside the key, digit against ' +
+         'letter, so this is still a code-point question and not merely a ' +
+         'length one');
+
+  got = sk_first_entry(%trim(g_sk) + '/ctl');
+  tr_equal(g_skd + '.yaml': got:
+           'readdir hands back the LETTER file first, so the expected order ' +
+           'is not the order they were read in');
+
+  sk_assert_order('ctl': g_skc: g_skd:
+                  'a difference inside the first 64 characters is already ' +
+                  'sorted correctly - so a red above is about the WIDTH of ' +
+                  'the key and not about long names being unsorted');
 
 end-proc;

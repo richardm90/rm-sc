@@ -144,6 +144,7 @@ dcl-proc SCDEF_from_doc export;
   dcl-s n    like(INTEGER_t);
   dcl-s key  like(SCYAML_KEY_t);
   dcl-s num_ok like(BOOLEAN_t);
+  dcl-s jobname like(SCYAML_VALUE_t);
 
   def = SCDEF_BLANK;
 
@@ -184,8 +185,52 @@ dcl-proc SCDEF_from_doc export;
     def.enabled = enabled_is_true(SCYAML_value(doc: 'enabled'));
   endif;
 
-  if %len(SCYAML_value(doc: 'sbmjob_jobname')) > 0;
-    def.sbmjob_jobname = SCYAML_value(doc: 'sbmjob_jobname');
+  // REFUSED rather than widened, and that is the difference between this and
+  // every other field in this change. Ten is a real external limit - an IBM i
+  // job name is ten characters - so a longer value is INVALID, not merely
+  // long. Widening would store something that can never be submitted and
+  // defer the failure to start time.
+  //
+  // What it did before was worse than either: a 1024-wide scalar assigned into
+  // a 10-wide field, so `sbmjob_jobname: THISNAMEISWAYTOOLONG` submitted the
+  // job as THISNAMEIS - a name the author never wrote, silently. Upstream
+  // keeps all 20 and lets SBMJOB reject it.
+  //
+  // The DERIVED name is a different case and still truncates on purpose: when
+  // this key is absent SCLAUNCH builds a name from the service name and cuts
+  // it to ten, which is right because the author did not choose it. Only an
+  // explicit value that cannot fit is an error.
+  // MEASURED AND STORED FROM ONE EXPRESSION. The first version of this guard
+  // measured %trim(...) and then stored the UNtrimmed value, so a quoted
+  // scalar keeping its interior blanks walked straight through it:
+  //
+  //     sbmjob_jobname: "  ABCDEFGHIJ"
+  //
+  // is 12 stored and 10 trimmed. The guard saw 10 and allowed it, the
+  // assignment cut 12 into a 10-wide field leaving '  ABCDEFGH', and the
+  // launcher trimmed that to an EIGHT character name the author never wrote -
+  // the exact harm the guard was added to prevent, surviving through the
+  // quoted form.
+  //
+  // That is the third time this week one string was validated and another
+  // converted. Hoisting it into a local is what makes it impossible here.
+  // UNTRIMMED, and that is the rule rather than an oversight. The first fix
+  // hoisted this into a local (right) and applied %trim to it (wrong), which
+  // did not make the two consistent - it changed the question. A value of
+  // '  ABCDEFGHIJ' trims to ten, fits, and was accepted, so RMSC stored
+  // ABCDEFGHIJ: still not the name the file contains.
+  //
+  // What is STORED is what must fit, because the field is what the launcher
+  // reads. '  ABCDEFGH' is ten stored and eight trimmed - it fits, is kept,
+  // and the launcher trims it to ABCDEFGH, which is a name derived from what
+  // the author wrote. '  ABCDEFGHIJ' is twelve and is refused.
+  jobname = SCYAML_value(doc: 'sbmjob_jobname');
+  if %len(jobname) > 0;
+    if %len(jobname) > SCDEF_JOBNAME_MAX;
+      def.err = 'Invalid value specified for attribute ''sbmjob_jobname''';
+      return false;
+    endif;
+    def.sbmjob_jobname = jobname;
   endif;
 
   // A stop_cmd of null is the same as no stop_cmd: fall back to ENDJOB

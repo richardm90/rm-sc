@@ -123,9 +123,48 @@ dcl-proc SCMAIN_parse export;
         opts.all = true;
         opts.ignore_globals = false;
         opts.ignore_groups = '';
-      when %len(word) > 16 and %subst(word: 1: 16) = '--ignore-groups=';
-        opts.ignore_groups = %subst(word: 17);
+      // >= 16, not > 16. `--ignore-groups=` with an EMPTY value is meaningful
+      // - it clears the default `system` exclusion, and upstream treats it as
+      // equivalent to -a: measured, 36 rows against 4 for a bare `list`. At
+      // `> 16` the empty form is exactly 16 characters, misses this branch
+      // entirely and falls through to `Unknown option`, so RMSC refused a
+      // form upstream accepts.
+      //
+      // Worth knowing WHY this is here rather than in its own change: a guard
+      // written as "the value must be between 1 and 512 characters" would
+      // have cemented that bug rather than exposed it. The test author found
+      // it while writing the controls for the guard and reported it as a
+      // separate failing case rather than folding it into one that was
+      // already red.
+      when %len(word) >= 16 and %subst(word: 1: 16) = '--ignore-groups=';
+        // Checked BEFORE the assignment, because the assignment is the
+        // truncation. A list longer than the holder was silently cut, and the
+        // groups named in the tail were then NOT excluded - so services the
+        // caller asked to hide appeared. Every other field of this class was
+        // fixed by sizing the holder to its source; that cannot work here,
+        // because the source is a list of n names and there is no n.
+        if %len(word) - 16 > SCDEF_NAME_MAX;
+          opts.err = 'Value for --ignore-groups is longer than ' +
+                     %char(SCDEF_NAME_MAX) + ' characters';
+          return SCMAIN_EXIT_USAGE;
+        endif;
+        // %SUBST rejects a start position beyond the string rather than
+        // returning an empty one - the same trap that abended on a trailing
+        // comma in `--ignore-groups=web,` and was fixed in 031b524.
+        if %len(word) = 16;
+          opts.ignore_groups = '';
+        else;
+          opts.ignore_groups = %subst(word: 17);
+        endif;
       when %len(word) > 13 and %subst(word: 1: 13) = '--sampletime=';
+        // The same guard. Left at `> 13` rather than `>= 13` deliberately:
+        // an empty --sampletime= has no measured meaning upstream, so this
+        // change does not invent one for it.
+        if %len(word) - 13 > SCDEF_NAME_MAX;
+          opts.err = 'Value for --sampletime is longer than ' +
+                     %char(SCDEF_NAME_MAX) + ' characters';
+          return SCMAIN_EXIT_USAGE;
+        endif;
         opts.sampletime = %subst(word: 14);
 
       when %len(word) > 1 and %subst(word: 1: 1) = '-';

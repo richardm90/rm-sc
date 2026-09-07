@@ -27,7 +27,13 @@
 dcl-c SCYAML_MAX_KEYS       const(32);
 dcl-c SCYAML_MAX_ITEMS      const(64);
 
-dcl-c SCYAML_KEY_SIZE       const(64);
+// 128. A key was the one source still unguarded while values (1024) and
+// sequence items (512) were not: two keys longer than 64 sharing a 64-character
+// prefix collapsed to the same name, and add_key treats a repeat as a REPLACE.
+// Real attribute names are under 30, so 128 is far past anything legitimate -
+// and unlike the other two, a key over the limit is refused rather than the
+// holder being sized to the source, because the source here is a whole line.
+dcl-c SCYAML_KEY_SIZE       const(128);
 dcl-c SCYAML_VALUE_SIZE     const(1024);
 dcl-c SCYAML_ITEM_SIZE      const(512);
 dcl-c SCYAML_ERROR_SIZE     const(256);

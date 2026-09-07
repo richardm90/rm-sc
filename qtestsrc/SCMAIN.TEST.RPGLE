@@ -85,6 +85,21 @@ dcl-pr assert_no_message;
   ctx  varchar(64) const;
 end-pr;
 
+dcl-pr assert_message_names;
+  opts likeds(SCMAIN_OPTS_t) const;
+  want varchar(64) const;
+  ctx  varchar(64) const;
+end-pr;
+
+dcl-pr mk_value varchar(1024);
+  len  like(INTEGER_t) const;
+  tail varchar(64) const;
+end-pr;
+
+dcl-pr mk_digits varchar(1024);
+  len like(INTEGER_t) const;
+end-pr;
+
 //==============================================================================
 // Helpers
 //==============================================================================
@@ -861,5 +876,393 @@ dcl-proc test_all_options_together export;
   nEqual(false: opts.all:            'all was not asked for');
   aEqualV('5': opts.sampletime: 'sampletime');
   aEqualV('web,db': opts.ignore_groups: 'ignore_groups');
+
+end-proc;
+
+//==============================================================================
+// A LIST-VALUED OPTION IS REFUSED WHEN IT WILL NOT FIT, NOT TRUNCATED
+//
+// --ignore-groups= and --sampletime= both arrive as free text and are both
+// held in a 512-character field, while the command line they arrive on is
+// 1024. Measured on this build, with the probe that produced these numbers
+// removed again:
+//
+//   SCMAIN_ARGS_t          1024      opts.err              1024
+//   opts.ignore_groups      512      opts.spec              256
+//   opts.sampletime         512      SCDEF_NAME_t           512
+//
+// So the value after `--ignore-groups=` can be longer than the field that
+// holds it. The longest one that fits on the command line is 1003 - 1024 less
+// the 16 characters of `--ignore-groups=`, less the shortest operation word
+// and the blank after it (`list`, `stop`, `info`; with `check` it is 1002).
+// The brief's figure of 1007 is not reachable: it leaves no room for an
+// operation, and a command line with no operation is refused before any
+// option is looked at.
+//
+// Every other field of this class was fixed by sizing the holder to its
+// source. That cannot be done here, because the source is a list of n names
+// and there is no n. The rule is therefore a GUARD: a value that does not fit
+// is REFUSED - status 255, a message naming the option, and nothing run - in
+// preference to being silently cut.
+//
+// WHY TRUNCATION IS NOT COSMETIC. --ignore-groups names the groups to EXCLUDE
+// from output. Cutting the tail off the list means the groups named in the
+// tail are NOT excluded, so services the caller asked to hide APPEAR in
+// check, list and groups output. The failure adds rows rather than removing
+// them, which is why a count is no way to test it - see
+// test_long_ignore_list_still_excludes in SCCOLL.TEST, which names the
+// services instead.
+//
+// DIVERGENCE FROM UPSTREAM, DELIBERATE. sc is Java and has no such limit; a
+// 4000-character list works there. This is the same sanctioned divergence as
+// the wait-time and scalar-length rules already in docs/parity.md: RMSC
+// refuses what it cannot represent rather than quietly doing something other
+// than what was asked. A failure here is a decision to revisit, not
+// necessarily a defect - but a PASS at 513 that returns 0 is the defect.
+//
+// WHAT EACH CASE RULES OUT. The pair at 512/513 is the whole of it: 512 is
+// the widest value that fits and must be ACCEPTED WHOLE, 513 is the narrowest
+// that does not and must be REFUSED. An implementation that truncates and one
+// that guards agree about every value below 512 and disagree about 513, so a
+// suite that tested only 600, or only short values, would not be able to tell
+// them apart. 511 and 512 are here so that a guard written one off - refusing
+// at 512, or comparing against the arriving argument rather than the value -
+// shows up as a red control rather than as a green over-strict parser.
+//==============================================================================
+
+///
+// A refusal that does not name the option leaves the user to find which of
+// their arguments was too long by bisection.
+///
+dcl-proc assert_message_names;
+  dcl-pi *n;
+    opts likeds(SCMAIN_OPTS_t) const;
+    want varchar(64) const;
+    ctx  varchar(64) const;
+  end-pi;
+
+  assert((%scan(%trimr(want): opts.err) > 0):
+         %trim(ctx) + ': expected opts.err to name ' + %trim(want) +
+         ', but it was "' + %trim(opts.err) + '"');
+
+end-proc;
+
+///
+// mk_value - a comma-separated group list of an EXACT length, ending in a
+// group name the caller chooses.
+//
+// The length is the whole point of these tests, so it is computed rather than
+// counted by hand: `len` characters, elements of seven 'g's separated by
+// commas, and the caller's tail as the last element. Nothing in the filler
+// is a real group name in any fixture, which is what lets a test tell "the
+// tail was kept" from "something in this list matched".
+///
+dcl-proc mk_value;
+  dcl-pi *n varchar(1024);
+    len  like(INTEGER_t) const;
+    tail varchar(64) const;
+  end-pi;
+
+  dcl-s fill char(1024) inz(*all'g');
+  dcl-s buf  varchar(1024);
+  dcl-s want like(INTEGER_t);
+  dcl-s i    like(INTEGER_t);
+
+  want = len - %len(%trimr(tail)) - 1;
+  assert((want >= 1): 'mk_value: length ' + %char(len) +
+         ' leaves no room for the tail ' + %trim(tail));
+
+  buf = %subst(fill: 1: want);
+
+  for i = 8 by 8 to want - 1;
+    %subst(buf: i: 1) = ',';
+  endfor;
+
+  return buf + ',' + %trimr(tail);
+
+end-proc;
+
+///
+// mk_digits - a value of an exact length that is nothing but digits.
+//
+// --sampletime= takes a number, so a filler of 'g's would risk a refusal for
+// a reason that has nothing to do with length, and a green test that proves
+// only that the parser dislikes letters.
+///
+dcl-proc mk_digits;
+  dcl-pi *n varchar(1024);
+    len like(INTEGER_t) const;
+  end-pi;
+
+  dcl-s fill char(1024) inz(*all'5');
+
+  return %subst(fill: 1: len);
+
+end-proc;
+
+//==============================================================================
+// 512 characters of --ignore-groups is accepted, and kept WHOLE
+//
+// The control half of the separating pair, and the one that a fix could get
+// wrong in the quiet direction: a guard that refuses at 512 rather than at
+// 513 turns a working command line into a usage error, and a guard that
+// accepts 512 but stores 500 of it is the defect this work is about wearing a
+// different number.
+//
+// The last element is asserted by name as well as by length. A holder that
+// keeps the first 512 characters of a 512-character value and one that keeps
+// all of it are the same thing here; a holder that keeps 512 characters of
+// SOMETHING ELSE - the argument including `--ignore-groups=`, say - has the
+// right length and the wrong tail.
+//==============================================================================
+
+dcl-proc test_ignore_groups_at_512_accepted export;
+
+  dcl-ds opts likeds(SCMAIN_OPTS_t) inz(*likeds);
+  dcl-s  val  varchar(1024);
+  dcl-s  args like(SCMAIN_ARGS_t);
+
+  val = mk_value(512: 'lastgrp');
+  iEqual(512: %len(val): 'the fixture value is exactly 512 characters');
+
+  args = 'check --ignore-groups=' + val;
+  iEqual(PARSE_OK: parse_args(args: opts): '512 characters is accepted');
+  assert_no_message(opts: 'a 512-character list');
+
+  iEqual(512: %len(opts.ignore_groups): 'stored whole, not clipped');
+  aEqualV(val: opts.ignore_groups: 'ignore_groups');
+  aEqualV('lastgrp':
+          %subst(opts.ignore_groups: %len(opts.ignore_groups) - 6):
+          'the last group in the list');
+
+end-proc;
+
+//==============================================================================
+// 511 characters is accepted too - the guard is not one off
+//==============================================================================
+
+dcl-proc test_ignore_groups_at_511_accepted export;
+
+  dcl-ds opts likeds(SCMAIN_OPTS_t) inz(*likeds);
+  dcl-s  val  varchar(1024);
+  dcl-s  args like(SCMAIN_ARGS_t);
+
+  val = mk_value(511: 'lastgrp');
+  iEqual(511: %len(val): 'the fixture value is exactly 511 characters');
+
+  args = 'check --ignore-groups=' + val;
+  iEqual(PARSE_OK: parse_args(args: opts): '511 characters is accepted');
+  assert_no_message(opts: 'a 511-character list');
+  iEqual(511: %len(opts.ignore_groups): 'stored whole');
+
+end-proc;
+
+//==============================================================================
+// 513 characters of --ignore-groups is REFUSED
+//
+// The separating case. One character over the field, and the only value in
+// this suite about which a truncating parser and a guarding one disagree by a
+// single character.
+//==============================================================================
+
+dcl-proc test_ignore_groups_at_513_refused export;
+
+  dcl-ds opts likeds(SCMAIN_OPTS_t) inz(*likeds);
+  dcl-s  val  varchar(1024);
+  dcl-s  args like(SCMAIN_ARGS_t);
+
+  val = mk_value(513: 'lastgrp');
+  iEqual(513: %len(val): 'the fixture value is exactly 513 characters');
+
+  args = 'check --ignore-groups=' + val;
+  iEqual(PARSE_USAGE: parse_args(args: opts):
+         'one character past the field is a usage error, not a silent cut');
+  assert_message_set(opts: 'a 513-character list');
+  assert_message_names(opts: '--ignore-groups': '513-character list');
+
+end-proc;
+
+//==============================================================================
+// 600 characters of --ignore-groups is REFUSED
+//
+// Well past the field rather than one past it. Both cases matter: a guard
+// written as a comparison against the wrong quantity can refuse the far value
+// and accept the near one.
+//==============================================================================
+
+dcl-proc test_ignore_groups_at_600_refused export;
+
+  dcl-ds opts likeds(SCMAIN_OPTS_t) inz(*likeds);
+  dcl-s  val  varchar(1024);
+  dcl-s  args like(SCMAIN_ARGS_t);
+
+  val = mk_value(600: 'lastgrp');
+  iEqual(600: %len(val): 'the fixture value is exactly 600 characters');
+
+  args = 'check --ignore-groups=' + val;
+  iEqual(PARSE_USAGE: parse_args(args: opts): '600 characters is refused');
+  assert_message_set(opts: 'a 600-character list');
+  assert_message_names(opts: '--ignore-groups': '600-character list');
+
+end-proc;
+
+//==============================================================================
+// The short values still work
+//
+// The controls, green today and green after. `system` is the default value
+// and the one nearly every invocation uses; `a,b,c` is the multi-group list
+// that the guard has to keep letting through.
+//
+// Both are covered elsewhere in this suite as part of a test about something
+// else. They are gathered here as well because they are the cases a length
+// guard is most likely to break, and a control that lives in another test's
+// assertions is a control nobody looks at when this one goes red.
+//
+// The EMPTY value is a control too, and it is NOT in here - it has its own
+// test below because it was red when this block was written, for a reason that
+// had nothing to do with length, and a control that is already red controls
+// nothing. That defect has since been fixed and both are green.
+//==============================================================================
+
+dcl-proc test_ignore_groups_short_values_unaffected export;
+
+  dcl-ds opts likeds(SCMAIN_OPTS_t) inz(*likeds);
+
+  iEqual(PARSE_OK: parse_args('check --ignore-groups=system': opts):
+         'the ordinary case, and the default value given explicitly');
+  assert_no_message(opts: '--ignore-groups=system');
+  aEqualV('system': opts.ignore_groups: 'system');
+
+  iEqual(PARSE_OK: parse_args('check --ignore-groups=a,b,c': opts):
+         'a short list');
+  assert_no_message(opts: '--ignore-groups=a,b,c');
+  aEqualV('a,b,c': opts.ignore_groups: 'kept whole');
+
+end-proc;
+
+//==============================================================================
+// AN EMPTY --ignore-groups= VALUE CLEARS THE DEFAULT EXCLUSION
+//
+// RED WHEN WRITTEN, AND NOT BECAUSE OF THE LENGTH GUARD. This was a second
+// defect, found while writing the controls for the first, and it was stated
+// here rather than left out because a length guard written as "the value must
+// be between 1 and 512 characters" would have cemented it - and would have
+// passed every other case in this suite while doing so. It is green now.
+//
+// MEASURED on this box, sc 1.7.1 against RMSC as it stands:
+//
+//   sc  list --ignore-groups=     36 rows, exit 0   - same as `sc list -a`
+//   sc  list                       4 rows           - the `system` default
+//   scr list --ignore-groups=     'sc: Unknown option --ignore-groups='
+//
+// So upstream reads the empty value as "exclude nothing" - identical to -a -
+// and RMSC does not recognise the argument at all. The reading is the one
+// test_ignore_groups_replaces_default already pins for the non-empty case:
+// the supplied list REPLACES the default, and an empty supplied list replaces
+// it with nothing. It is also the form a script gets for free when it builds
+// the argument from a variable that happens to be empty.
+//
+// The assertions are upstream's behaviour, and when they were written they
+// were not yet RMSC's - this was the one test in this block that did not state
+// what RMSC did. RMSC now accepts the empty value and it passes.
+//==============================================================================
+
+dcl-proc test_ignore_groups_empty_value_clears_default export;
+
+  dcl-ds opts likeds(SCMAIN_OPTS_t) inz(*likeds);
+
+  iEqual(PARSE_OK: parse_args('check --ignore-groups=': opts):
+         'an empty value is meaningful and must parse');
+  assert_no_message(opts: '--ignore-groups= (empty)');
+  aEqualV('': opts.ignore_groups: 'an empty value clears the default');
+
+  // And it is the value, not the option, that is empty: the operation and
+  // everything after the option still have to survive it.
+  iEqual(PARSE_OK: parse_args('list --ignore-groups= -v': opts):
+         'an empty value in the middle of a command line');
+  aEqualV('list': opts.operation: 'operation');
+  nEqual(true: opts.verbose: 'the option after it is still seen');
+
+end-proc;
+
+//==============================================================================
+// --sampletime= has the identical shape, and the identical guard
+//
+// Two lines away in the parser and the same 512-character holder. The filler
+// is digits rather than letters so that an accepted case cannot be confused
+// with a parser that refuses non-numeric text: what is under test is the
+// length, and a 512-digit sampletime is meaningless as a duration but is
+// exactly as long as the field that holds it.
+//
+// If a future change validates the number as well, THIS TEST WILL GO RED AT
+// THE 512 CASE and must be changed to a value that is both long and valid -
+// not relaxed to a shorter one, which would stop separating anything.
+//==============================================================================
+
+dcl-proc test_sampletime_at_512_accepted export;
+
+  dcl-ds opts likeds(SCMAIN_OPTS_t) inz(*likeds);
+  dcl-s  val  varchar(1024);
+  dcl-s  args like(SCMAIN_ARGS_t);
+
+  val = mk_digits(512);
+  iEqual(512: %len(val): 'the fixture value is exactly 512 characters');
+
+  args = 'perfinfo webproxy --sampletime=' + val;
+  iEqual(PARSE_OK: parse_args(args: opts): '512 characters is accepted');
+  assert_no_message(opts: 'a 512-character sampletime');
+  iEqual(512: %len(opts.sampletime): 'stored whole, not clipped');
+  aEqualV(val: opts.sampletime: 'sampletime');
+
+end-proc;
+
+dcl-proc test_sampletime_at_513_refused export;
+
+  dcl-ds opts likeds(SCMAIN_OPTS_t) inz(*likeds);
+  dcl-s  val  varchar(1024);
+  dcl-s  args like(SCMAIN_ARGS_t);
+
+  val = mk_digits(513);
+  iEqual(513: %len(val): 'the fixture value is exactly 513 characters');
+
+  args = 'perfinfo webproxy --sampletime=' + val;
+  iEqual(PARSE_USAGE: parse_args(args: opts):
+         'one character past the field is a usage error');
+  assert_message_set(opts: 'a 513-character sampletime');
+  assert_message_names(opts: '--sampletime': '513-character sampletime');
+
+end-proc;
+
+dcl-proc test_sampletime_at_600_refused export;
+
+  dcl-ds opts likeds(SCMAIN_OPTS_t) inz(*likeds);
+  dcl-s  val  varchar(1024);
+  dcl-s  args like(SCMAIN_ARGS_t);
+
+  val = mk_digits(600);
+  iEqual(600: %len(val): 'the fixture value is exactly 600 characters');
+
+  args = 'perfinfo webproxy --sampletime=' + val;
+  iEqual(PARSE_USAGE: parse_args(args: opts): '600 characters is refused');
+  assert_message_set(opts: 'a 600-character sampletime');
+  assert_message_names(opts: '--sampletime': '600-character sampletime');
+
+end-proc;
+
+//==============================================================================
+// The ordinary sampletime values still parse
+//==============================================================================
+
+dcl-proc test_sampletime_short_values_unaffected export;
+
+  dcl-ds opts likeds(SCMAIN_OPTS_t) inz(*likeds);
+
+  iEqual(PARSE_OK: parse_args('perfinfo webproxy --sampletime=1': opts):
+         'the default value given explicitly');
+  aEqualV('1': opts.sampletime: 'sampletime 1');
+
+  iEqual(PARSE_OK: parse_args('perfinfo webproxy --sampletime=2.5': opts):
+         'a fractional sample time');
+  aEqualV('2.5': opts.sampletime: 'sampletime 2.5');
 
 end-proc;

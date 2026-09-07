@@ -1058,7 +1058,8 @@ end-proc;
 //##                                                                          ##
 //##############################################################################
 //
-// Tests for UNUSABLE criteria - written before the fix, and red today.
+// Tests for UNUSABLE criteria - written before the fix, and red then. They
+// pass now.
 //
 // A criterion can be UNUSABLE rather than merely UNSATISFIED:
 //
@@ -2925,7 +2926,7 @@ end-proc;
 //
 //     57 chars ->  65 rendered   THE SEPARATING CASE. One character longer
 //                                than the row above and identical in every
-//                                other respect. Red today. No reading of
+//                                other respect. Red when written. No reading of
 //                                "carried correctly at every length"
 //                                survives 64 passing and 65 failing.
 //
@@ -3059,12 +3060,12 @@ end-proc;
 //==============================================================================
 // THE SEPARATING CASE - 65 rendered, one character past the entry
 //
-// RED TODAY, and expected to be. 57-character value, 65 rendered. It differs
-// from the row above in exactly one character of one job name and in nothing
-// else - same fixture shape, same key, same case, same live port beside it.
-// So a pass above and a failure here can only be about the length, which is
-// what makes this the value that separates "carried correctly at every
-// length" from the truth.
+// RED WHEN WRITTEN, and expected to be; green since the entry was widened.
+// 57-character value, 65 rendered. It differs from the row above in exactly
+// one character of one job name and in nothing else - same fixture shape, same
+// key, same case, same live port beside it. So a pass above and a failure here
+// could only have been about the length, which is what makes this the value
+// that separates "carried correctly at every length" from the truth.
 //
 // The failure to expect is a cut entry: 'JOBNAME:' plus the first 56
 // characters of the value. Read the message carefully - the two strings agree
@@ -3105,10 +3106,10 @@ end-proc;
 //==============================================================================
 // THE FAR END - 136 rendered, the documented criterion limit
 //
-// RED TODAY. 128-character value, 136 rendered: the longest criterion a
-// definition may legitimately carry, measured against sc 1.7.1 and recorded
-// in test_criterion_text_job_not_truncated. SCDEF renders it whole; this asks
-// whether the evaluation still carries it.
+// RED WHEN WRITTEN, green since. 128-character value, 136 rendered: the
+// longest criterion a definition may legitimately carry, measured against
+// sc 1.7.1 and recorded in test_criterion_text_job_not_truncated. SCDEF
+// renders it whole; this asks whether the evaluation still carries it.
 //
 // It is here because a fix that only moved the edge would pass the 65 above
 // and fail this: 72 and 128 are both plausible widths to widen a 64-wide
@@ -3145,10 +3146,10 @@ end-proc;
 //==============================================================================
 // THE SUFFIX MATERIAL ALONE, at the separating length
 //
-// RED TODAY. The four tests above assert ev.failed(1) BEFORE ev.failed_text,
-// and assert() ends the procedure at the first failure - so on the current
-// build the failed_text half of the separating case is never reached and its
-// state is unreported. That matters more than the usual "one assertion per
+// RED WHEN WRITTEN, green since. The four tests above assert ev.failed(1)
+// BEFORE ev.failed_text, and assert() ends the procedure at the first failure -
+// so on the build this was written against the failed_text half of the
+// separating case was never reached and its state went unreported. That matters more than the usual "one assertion per
 // test" argument would suggest, because failed_text is the half that reaches
 // the CONSUMER: it is what SCOUT_not_running_suffix turns into
 // '[not running at -->...]' on a check row, and CLAUDE.md's first rule is
@@ -3743,8 +3744,8 @@ end-proc;
 //==============================================================================
 // THE SEPARATING CASE - PGM- reaches the same criterion from both directions
 //
-// Red today: the ad-hoc side renders JOBNAME:ZZNOSUCHPGM where the file side
-// renders JOBNAME:PGM-ZZNOSUCHPGM.
+// Red when written: the ad-hoc side rendered JOBNAME:ZZNOSUCHPGM where the
+// file side rendered JOBNAME:PGM-ZZNOSUCHPGM. Both now render the same.
 //
 // The program cannot exist. ZZ- names nothing on this box, which is the same
 // convention the rest of this suite's dead fixtures follow, and the criterion

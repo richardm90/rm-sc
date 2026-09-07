@@ -24,8 +24,19 @@ dcl-c SCCOLL_MAX_ORDER   const(64);
 // does, and silence is the reason these are not smaller: an operator shown
 // sixteen of twenty claimants fixes sixteen and believes the job is done.
 // A family of services sharing one job name is the realistic way to exceed
-// it, and that is not far-fetched. About 70KB of automatic storage at these
-// sizes, which is not worth economising on against that failure.
+// it, and that is not far-fetched.
+//
+// STORAGE, corrected 6 September 2026: this said "about 70KB", which was true
+// when a name was 64 characters. SCDEF_NAME_t is now 512, so the conflicts
+// structure is 32 x 32 x 514, about 530KB of automatic storage - eight times
+// the figure this comment used to give as its justification. Still far inside
+// the 16MB limit and still not worth economising on, but the number is stated
+// as a reason and a reason that is wrong by 8x is worse than no number.
+//
+// The same widening roughly doubled SCDEF_t, from about 24KB to about 45KB.
+// The collection holds one per service in a user space capped at 16MB, so the
+// ceiling moved from roughly 680 definitions to roughly 400. The box carries
+// 35.
 dcl-c SCCOLL_MAX_CONFLICTS const(32);
 dcl-c SCCOLL_MAX_CLAIMANTS const(32);
 
@@ -87,7 +98,24 @@ end-ds;
 // confines to [a-z0-9_-] - one byte each in UTF-8.
 ///
 
-dcl-s SCCOLL_KEY_t char(64) ccsid(*utf8) template;
+// 512, AND IT MUST MOVE WITH SCDEF_NAME_t. This is the collection's sort key
+// and the only comparator, so it decides the order of `check`, `list` and
+// `groups` - all three byte-exact.
+//
+// It was left at 64 when SCDEF_NAME_t went to 512, and the consequence was
+// subtle: two names identical for their first 64 characters became two
+// services correctly, then carried the SAME key, so their order was whatever
+// the directory read happened to give rather than code point. Fixing the
+// vanishing service introduced an ordering defect in its place, and only a
+// review caught it - the gate could not, because no real service on any box
+// has a name like that.
+//
+// char(n) ccsid(*utf8), not varchar: assigning into a UTF-8 field converts,
+// and comparing two of them compares UTF-8 bytes, which is code-point order
+// and so upstream's. An EBCDIC comparison puts digits on the wrong side of
+// letters - measured, and recorded in the plan as the reason an early sort
+// probe was worthless.
+dcl-s SCCOLL_KEY_t char(512) ccsid(*utf8) template;
 
 ///
 // Does the first name sort before the second, the way upstream orders them?

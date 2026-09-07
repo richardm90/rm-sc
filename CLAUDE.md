@@ -18,7 +18,7 @@ must stay off when stdout is not a terminal, for the same reason. Verify by diff
 captured baselines, never by eye.
 
 **`RMSC.BND` pins a `SIGNATURE`, and it guards less than it looks like it guards.** It is
-`'RMSC 0.2.0'` today.
+`'RMSC 0.3.0'` today.
 
 *Export order is the part it does cover.* Add exports at the end. Inserting one in the middle
 shifts every export after it, and already-compiled callers reach the wrong procedure — the
@@ -104,6 +104,14 @@ asked for could not separate anything, then measured why rather than quietly del
 **Give it the measurement, never the mechanism.** Tell it what upstream does and which rival
 reading each case has to rule out. If it asks for an interface it cannot read, paste the
 prototype — never the body.
+
+**And know where the wall leaks.** A `RUCRTRPG` listing carries the compiler's unreferenced-name
+cross-reference, which prints field names and widths straight out of the copybooks. An author
+grepping that listing for diagnostics can pull back the shapes it is not supposed to see — ours
+did, disclosed it unprompted, and noted that nothing it had written depended on it. So the rule
+in practice is: grep a compile listing for `COMPILE_RC` and `highest severity` only, never for
+`RNF[0-9]{4}` or anything that matches a body of text. The wall is a discipline, not a
+mechanism, and it needs the traps named.
 
 ## Build and test
 

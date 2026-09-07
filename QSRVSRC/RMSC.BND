@@ -1,4 +1,4 @@
-STRPGMEXP PGMLVL(*CURRENT) SIGNATURE('RMSC 0.2.0')
+STRPGMEXP PGMLVL(*CURRENT) SIGNATURE('RMSC 0.3.0')
   /* The signature is fixed, so the ORDER of these exports is the contract.
      Add new exports at the END only. Inserting one shifts every export after
      it by a position: the binder stays silent because the signature still

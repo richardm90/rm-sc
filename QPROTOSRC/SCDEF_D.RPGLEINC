@@ -42,8 +42,50 @@ dcl-c SCDEF_CHECK_PGM       const('PGM');
 // Template field definitions
 ///
 
-dcl-s SCDEF_NAME_t     varchar(64)   template;
-dcl-s SCDEF_FRIENDLY_t varchar(128)  template;
+// 512, and every one of these numbers is a SOURCE bound rather than a guess.
+//
+// This one type is the universal "a service or group name" across every
+// module - short_name, service_dependencies, groups, the distinct-group list,
+// the conflict claimants, bad_name, the start order, and the parameters that
+// carry them. So it must be as wide as the widest thing that can reach any of
+// them, which is a YAML sequence item at 512.
+//
+// AT 64 IT TRUNCATED, AND ONE CASE WAS WORSE THAN TRUNCATION. Measured
+// against sc 1.7.1: a 100-character group came back cut to 64, a
+// 100-character filename gave a 64-character service name, and TWO FILENAMES
+// SHARING A 64-CHARACTER PREFIX BECAME ONE SERVICE - upstream lists two,
+// RMSC listed one, and the other simply was not there. A row vanishing from
+// `check` is the failure this project guards against hardest.
+//
+// A service name cannot exceed 251 (a filename is at most 255 including
+// '.yaml', or '.yml' at four) and a group is a sequence item at 512, so 512
+// covers both with nothing able to exceed it. Sized to the source, not to a
+// number that felt roomy - which is what the previous five caps each were.
+//
+// NOT FULLY EFFECTIVE FOR short_name YET, and deliberately committed anyway:
+// rmtools' PATH_BASENAME_t is varchar(128), and PATH_name truncates a longer
+// filename, loses the '.yaml' off the end, fails to find the dot, and returns
+// an EMPTY name through a MONITOR. So today this fixes names of 65 to 127
+// characters; 128 to 251 needs rmtools widened to 255 and its pos=0 case
+// repaired. Richard is doing that separately. The suites carry
+// `..._blocked_on_rmtools` markers that assert today's behaviour and FAIL the
+// moment it lands, so nobody has to remember.
+dcl-s SCDEF_NAME_t     varchar(512)  template;
+
+// The same number as a constant, because a guard elsewhere has to REFUSE what
+// will not fit this type and a literal 512 in that test would not say why.
+//
+// They must move together. The command line's --ignore-groups= list is checked
+// against this before it is stored, and the matching side takes the list in a
+// SCDEF_NAME_t - so if this type ever narrows and the guard does not follow,
+// the divergence moves from "refused" back to "silently cut" one layer down,
+// where nothing is looking.
+dcl-c SCDEF_NAME_MAX const(512);
+// 1024, matching the YAML scalar bound. `name:` is a plain scalar and scalars
+// are guarded at 1024, so nothing can now exceed this. At 128 a 200-character
+// `name:` was cut to 128 while upstream kept all 200 - on the description
+// column of the byte-exact path.
+dcl-s SCDEF_FRIENDLY_t varchar(1024) template;
 dcl-s SCDEF_CMD_t      varchar(1024) template;
 // One criterion as written. 128 rather than 64: at 64 a job name of 65
 // characters was silently cut, and the cut was INVISIBLE because the rendering
@@ -88,6 +130,11 @@ dcl-s SCDEF_CRIT_t     varchar(128)  template;
 dcl-s SCDEF_CRITTEXT_t varchar(160)  template;
 dcl-s SCDEF_ENVVAR_t   varchar(512)  template;
 dcl-s SCDEF_KIND_t     char(4)       template;
+// Ten, because an IBM i object name is ten. Named as a constant as well as a
+// width because SCDEF_from_doc has to REFUSE a longer sbmjob_jobname rather
+// than truncate it, and a literal 10 in that test would not say why.
+dcl-c SCDEF_JOBNAME_MAX const(10);
+
 dcl-s SCDEF_OBJ_t      varchar(10)   template;
 
 ///

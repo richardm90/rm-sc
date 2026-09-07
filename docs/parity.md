@@ -204,6 +204,40 @@ Both paths that can exceed the width are guarded — `key: value` and a block se
 the message names the key and the line, because a file may carry several long values and the
 excess is by definition invisible in the loaded value.
 
+**Four more things RMSC refuses that upstream accepts.** All measured 6 September 2026, all
+instances of the same rule — RMSC refuses what it cannot represent rather than quietly doing
+something different from what was asked — and all recorded here because the gate is documented to
+fail when behaviour changes without this list moving.
+
+| input | upstream | RMSC |
+|---|---|---|
+| `sbmjob_jobname` longer than 10 | keeps all 20 and lets `SBMJOB` reject it at start time | **definition refused** |
+| `--ignore-groups=` value over 512 characters | no limit | **usage error, exit 255** |
+| `--sampletime=` value over 512 characters | no limit | **usage error, exit 255** |
+| a YAML key over 128 characters | warns `Unrecognized attribute` and loads | recorded as an unrecognised attribute under its first 128 characters; **the service still loads** |
+
+The first three cost a row: a refused definition has no line in `check`, and the two option
+errors stop the command. That is the cost this project accepts knowingly — see the wait-time
+entry above for the reasoning, which is Richard's and applies unchanged.
+
+**Why `sbmjob_jobname` is a refusal rather than a widening**, since it is the odd one out: ten is
+a real external limit, an IBM i job name, not an arbitrary holder width. A longer value is
+*invalid*, not merely long. What it did before was worse than either — a 1024-wide scalar into a
+10-wide field, so `sbmjob_jobname: THISNAMEISWAYTOOLONG` submitted the job as `THISNAMEIS`, a
+name the author never wrote. The **derived** name, used when the key is absent, still truncates
+to ten on purpose: the author did not choose it, so cutting it to fit is reasonable.
+
+**The fourth is the one that changed direction after review.** A long key first refused the whole
+definition, which made a service vanish where upstream lists it. It is now recorded as an
+unrecognised attribute — the service loads, the typo is still reported, and RMSC matches
+upstream. Refusing was over-reach.
+
+**And one parity defect fixed rather than added:** `--ignore-groups=` with an EMPTY value clears
+the default `system` exclusion upstream — measured, 36 rows against 4 for a bare `list`. RMSC
+rejected it outright with `Unknown option --ignore-groups=`, because the parse tested for a value
+*longer* than the option name and the empty form is exactly its length. Now accepted, and the two
+agree.
+
 ## Differences still undecided
 
 The exact texts, and what is measured versus merely captured, are in **`docs/messages.md`** — the

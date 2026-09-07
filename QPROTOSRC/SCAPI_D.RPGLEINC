@@ -38,8 +38,24 @@ dcl-c SC_PARTIAL     const('PARTIAL');
 // changing what it pages through.
 ///
 
-dcl-s SC_NAME_t   varchar(64)  template;
-dcl-s SC_DESC_t   varchar(128) template;
+// 512 and 1024, matching SCDEF_NAME_t and SCDEF_FRIENDLY_t. The API was not
+// swept when those widened, so every row it handed a green-screen caller was
+// still cut at 64 and 128 while the command line had stopped cutting.
+//
+// AND THE IGNORE LIST CANNOT BE GUARDED, which is why this is a widening and
+// not a check. `ignore_groups` is a fixed-width CONST parameter, so a caller
+// passing a longer argument has it truncated at the CALLER'S compile - SCAPI
+// never receives the excess and has nothing to detect. Measured: RUCRTRPG
+// compiled a 1024-character argument into the 64-wide parameter with 00
+// highest severity, not even a warning.
+//
+// So the only defence is a parameter wide enough for any legitimate value.
+// Even at 512 a caller passing more is cut silently, and nothing anywhere can
+// see it. That is a property of the interface rather than a defect in it, and
+// it is the opposite of the command line, where the value arrives in a wide
+// buffer and IS guarded.
+dcl-s SC_NAME_t   varchar(512) template;
+dcl-s SC_DESC_t   varchar(1024) template;
 dcl-s SC_STATUS_t varchar(20)  template;
 dcl-s SC_MSG_t    varchar(512) template;
 

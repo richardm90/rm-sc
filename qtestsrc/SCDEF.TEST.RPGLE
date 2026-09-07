@@ -87,6 +87,18 @@ dcl-pr qa_doubled varchar(2100);
   v varchar(2048) const;
 end-pr;
 
+// User-text width block - see USER TEXT IS NOT SILENTLY SHORTENED at the
+// foot of this suite. ut_lc is the lower-case filler; the upper-case one
+// (sl_value) is reused where case cannot matter.
+dcl-pr ut_lc varchar(2048);
+  tag varchar(16) const;
+  len like(INTEGER_t) const;
+end-pr;
+
+dcl-pr ut_entry_len like(INTEGER_t);
+  prefix varchar(512) const;
+end-pr;
+
 //==============================================================================
 // Suite set-up and tear-down
 //==============================================================================
@@ -2411,8 +2423,9 @@ end-proc;
 //==============================================================================
 // THE VALUE THAT STARTED THIS - check_alive of 1031, refused
 //
-// Eight values of 128 with seven commas. RED today: it loads, seven characters
-// short, and says nothing.
+// Eight values of 128 with seven commas. It was RED when written: the
+// definition loaded, seven characters short, and said nothing. It is refused
+// now.
 //==============================================================================
 
 dcl-proc test_scalar_check_alive_1031_is_rejected export;
@@ -3222,8 +3235,8 @@ end-proc;
 //==============================================================================
 // THE SCALAR PAIR, DOUBLE QUOTED - 1024 inside the quotes is accepted whole
 //
-// RED today: the raw text is 1026, the guard reads the raw, and the definition
-// is refused. The unquoted 1024 in
+// It was RED when written: the raw text is 1026, the guard read the raw, and
+// the definition was refused. The unquoted 1024 in
 // test_scalar_start_cmd_at_1024_is_accepted_whole is the same value and loads,
 // which is what makes this a defect rather than a limit.
 //==============================================================================
@@ -3375,8 +3388,8 @@ end-proc;
 //==============================================================================
 // THE ITEM PAIR, BLOCK FORM, DOUBLE QUOTED
 //
-// The item limit is 512 and it keeps its own number. RED today for the same
-// reason as the scalar: the raw item is 514.
+// The item limit is 512 and it keeps its own number. It was RED when written
+// for the same reason as the scalar: the raw item is 514.
 //==============================================================================
 
 dcl-proc test_seq_item_block_double_quoted_at_512_is_accepted_whole export;
@@ -3575,5 +3588,1133 @@ dcl-proc test_seq_item_apostrophe_stored_512_is_accepted_whole export;
   sl_equal(it: got:
            'and the stored item is the UNESCAPED one - a single apostrophe ' +
            'where two were written');
+
+end-proc;
+
+//##############################################################################
+//##                                                                          ##
+//##  USER TEXT IS NOT SILENTLY SHORTENED                                     ##
+//##                                                                          ##
+//##############################################################################
+//
+// MEASURED, 7 September 2026, against sc 1.7.1 and RMSC side by side. Four
+// fields holding text the USER wrote are narrower than the text that can reach
+// them, and the excess is cut with nothing reported:
+//
+//   what was written                    upstream           RMSC
+//   --------------------------------    ---------------    -----------------
+//   a 100-character file name           name column 100    cut at 64
+//   a 200-character `name:`             description 200    cut at 128
+//   a 100-character group               kept whole         cut at 64
+//   a service_dependencies entry        kept whole         cut at 64
+//
+// NOTHING IS NEWLY REFUSED BY THIS BLOCK. The scalar cap of 1024 and the
+// sequence-item cap of 512 are already in place and already tested above; every
+// value here is inside both, so a red case in this block can only be a
+// TRUNCATION and never a guard firing. Each field is being widened to the bound
+// its SOURCE already has - a file name to 255, a `name:` to the scalar's 1024,
+// a group and a dependency to the item's 512 - so that truncation becomes
+// impossible rather than merely rarer.
+//
+// WHOLENESS IS THE ASSERTION, not loading. This is the whole reason the block
+// exists and it is worth being blunt about: a truncated name still loads, still
+// counts as one service, still has one group and still renders a row. Every
+// structural assertion in this suite agrees with the defect. Only comparing the
+// TEXT can tell a cut value from a whole one - which is exactly how the 1024
+// scalar cap was found, and it is the same lesson twice.
+//
+// THE PAIRS. Each field gets a value AT the old width, one OVER it, one near
+// the new bound, and a short control:
+//
+//   short_name    64 / 65 / 250      the base name of the file
+//   friendly     128 / 129 / 1000    `name:`
+//   groups        64 /  65 /  500    one block-sequence item
+//   deps          64 /  65 /  500    one block-sequence item
+//
+// The value AT the old width was green when this block was written and must
+// STAY green - it is the half a fix that moves the boundary the wrong way, or
+// narrows something on the way past, would fail. The value ONE OVER was red
+// and is what separates "handled at every length" from "handled up to 64". The
+// value near the new bound was red and is what separates a real widening from
+// a boundary nudged by one. The widening has landed and all of them pass.
+//
+// sl_equal IS THE COMPARATOR, not aEqualV. aEqualV is 512 wide - which is one
+// of the boundaries under test - so a 1000-character value handed to it would
+// arrive cut on BOTH sides, compare equal, and report the defect as a pass.
+// The same argument the scalar block already makes; it applies here with more
+// force because 512 is not merely nearby, it is a value this block uses.
+//
+// WITNESSES THAT WOULD NOT DO, and why they are not used:
+//
+//   criteria(n).job_name   10 wide - useless for anything past ten characters
+//   def.groups(n)          the field under test, so it cannot witness deps
+//   def.deps(n)            likewise, so it cannot witness groups
+//
+// so groups and deps are each measured on themselves and never against one
+// another, and every comparison goes through a local varchar(2048).
+//
+// ONE CASE PER PROCEDURE, as in the blocks above: a failed assertion ends its
+// procedure, so two lengths sharing one would leave the second dark.
+//##############################################################################
+
+//------------------------------------------------------------------------------
+// ut_lc - LOWER-CASE alphanumeric filler of exactly LEN characters
+//
+// Lower case, where sl_value is upper. Three of the four fields here fold or
+// are compared against a folded value:
+//
+//   short_name   lower-cased from the file name
+//   deps         lower-cased
+//   groups       lower-cased
+//
+// so a lower-case fixture value renders identically whether the folding rule is
+// applied or not, and these cases stay about LENGTH. It also keeps every file
+// name inside the character class upstream's name rule accepts - [a-z0-9_-] -
+// so nothing in this block can be rejected for its spelling instead of its
+// length. `name:` is kept verbatim and uses sl_value; the case is irrelevant
+// there and the upper-case helper already exists.
+//
+// The tag is at the FRONT, so two values of different lengths differ within
+// their first dozen characters rather than only past several hundred.
+//------------------------------------------------------------------------------
+dcl-proc ut_lc;
+  dcl-pi *n varchar(2048);
+    tag varchar(16) const;
+    len like(INTEGER_t) const;
+  end-pi;
+
+  dcl-c LCFILL const('abcdefghijklmnopqrstuvwxyz0123456789');
+  dcl-s v varchar(2100);
+
+  v = 'rmscut' + %trimr(tag);
+
+  dow %len(v) < len;
+    v += LCFILL;
+  enddo;
+
+  return %subst(v: 1: len);
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// ut_entry_len - the LENGTH of the first fixture directory entry starting with
+// PREFIX, or 0 when nothing matches
+//
+// THE FIXTURE IS VERIFIED BEFORE IT IS TRUSTED, and at 250 characters that is
+// not a formality. If a long name were cut on its way to disk the file would
+// land under a SHORTER name, and RMSC would then be handed a short name and
+// return a short one - which is indistinguishable, by its result, from the
+// defect these cases exist to detect. A red result has to mean the defect and
+// not a broken fixture, so the length on disk is established first.
+//
+// The parameter is 512 and not 64 on purpose: a narrow one here would be the
+// same mistake the instrument is measuring, and this suite has made it before.
+//------------------------------------------------------------------------------
+dcl-proc ut_entry_len;
+  dcl-pi *n like(INTEGER_t);
+    prefix varchar(512) const;
+  end-pi;
+
+  dcl-s dir      pointer;
+  dcl-s filename like(IFS_DIR_FILENAME_t);
+  dcl-s found    like(INTEGER_t) inz(0);
+
+  dir = IFS_opendir(g_dir);
+  if dir = *null;
+    return 0;
+  endif;
+
+  dow IFS_readdir(dir: filename);
+    if %len(filename) >= %len(prefix)
+       and %subst(filename: 1: %len(prefix)) = prefix;
+      found = %len(filename);
+      leave;
+    endif;
+  enddo;
+
+  IFS_closedir(dir);
+
+  return found;
+
+end-proc;
+
+//==============================================================================
+// SHORT NAME - the base name of the file, at 64, 65 and 250
+//
+// `name:` is written SHORT in every one of these, and deliberately. The
+// friendly name falls back to the short name when the key is absent, so a long
+// file name with no `name:` would exercise two fields at once and a red result
+// could not say which of them cut the value. Here only short_name is long.
+//
+// 250 IS THE LARGEST A '.yaml' FILE CAN CARRY. Measured on this box the same
+// day: the IFS accepts a file name of 255 characters and refuses 256, so
+// 250 + '.yaml' is exactly at the limit. (A '.yml' file can carry 251, which
+// SCCOLL.TEST covers on real directory entries - see the note there.)
+//
+// THERE ARE TWO DEFECTS HERE, NOT ONE, THEY LIVE IN DIFFERENT REPOSITORIES,
+// AND ONLY THE FIRST CAN BE FIXED BY THIS WORK. Measured by loading one
+// definition per base-name length, 113 to 130 and then in steps to 250, and
+// reading back %len(def.short_name):
+//
+//     base name   short name that arrives
+//     ---------   -----------------------
+//        64 - 127   64        truncated   <- RMSC's own holder. OURS.
+//       128 - 250    0        GONE        <- rmtools. NOT OURS.
+//
+// ROOT CAUSE OF THE SECOND, confirmed by the project owner against rmtools:
+// PATH_BASENAME_t is varchar(128). A file name of 133 characters truncates to
+// 128, which drops the '.yaml' off the end; the scanr for the dot then returns
+// 0, %subst(basename: 1: pos - 1) becomes %subst(x: 1: -1) and raises, and a
+// MONITOR swallows it into ''. So the name does not shorten, it disappears.
+// The dot has to survive the cut, which is why the boundary is a base name of
+// 127 and not 128, and why it is 127 for '.yml' as well as for '.yaml'.
+//
+// PATH_BASENAME_t IS IN rmtools, NOT IN THIS REPOSITORY. It is to be widened
+// to 255 with the pos = 0 guard repaired, separately and not soon. Until then
+// no width RMSC chooses can help: PATH_name cannot return more than 128
+// characters however wide our own field is.
+//
+// SO THE CASES SPLIT, and the split is marked in their NAMES:
+//
+//   ..._is_whole                 65 to 127. A real expectation. RED when
+//                                written, GREEN since this work landed.
+//   ..._blocked_on_rmtools       128 and up. Asserts what happens TODAY, and
+//                                says so in its own failure text.
+//
+// WHY THE BLOCKED ONES ASSERT THE DEFECT RATHER THAN THE FIX. tools/verify.sh
+// runs every suite and reports one verdict. A case that cannot pass until
+// another repository ships would make that verdict FAILED on every run for
+// months, and this project has already written down what that does: a suite
+// red for a known reason trains everyone to wave through the next red. The
+// idiom is the one tools/error-delivery-test.sh calls `pinned` - assert the
+// behaviour that is really there, so that a later change to it is VISIBLE
+// rather than silent.
+//
+// AND EACH ONE FAILS THE MOMENT rmtools LANDS. That is the point of writing it
+// this way rather than deleting the case: nobody has to remember. The day
+// PATH_BASENAME_t widens, these go red, and whoever sees it flips the
+// assertion to the real expectation - the whole name - and renames it
+// ..._is_whole like its neighbours. A failure here is not a defect arriving;
+// it is the fix arriving.
+//
+// EVERY BLOCKED CASE STILL PROVES ITS FIXTURE FIRST. A marker that passed
+// because its file was never written would be the worst of both worlds - it
+// reports success and measures nothing - so ut_entry_len establishes the name
+// really is on disk at its full length before anything is concluded from an
+// empty short name.
+//
+// 127 IS THE CASE THAT GUARDS THE BAND WE OWN. It is the largest name our own
+// widening has to handle, and without it a fix that went from 64 to 100 would
+// turn 65 green and leave nothing to catch it - every other real case here is
+// at or below 65.
+//==============================================================================
+
+dcl-proc test_short_name_at_64_is_whole export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  nm  varchar(2048);
+  dcl-s  got varchar(2048);
+
+  nm = ut_lc('sn64': 64);
+  iEqual(64: %len(nm): 'a base name of exactly 64 characters');
+
+  assert(load_fixture(nm + '.yaml':
+    'name: probe' + LF +
+    'start_cmd: /usr/bin/rmscut' + LF +
+    'check_alive: 8080' + LF: def):
+    'a 64-character file name still loads');
+
+  got = def.short_name;
+  sl_equal(nm: got:
+           'the short name is whole at 64 - the width it has today, so this ' +
+           'is the half a fix that moves the boundary the wrong way fails');
+
+end-proc;
+
+dcl-proc test_short_name_at_65_is_whole export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  nm  varchar(2048);
+  dcl-s  got varchar(2048);
+
+  nm = ut_lc('sn65': 65);
+  iEqual(65: %len(nm): 'one character more than the case above');
+
+  assert(load_fixture(nm + '.yaml':
+    'name: probe' + LF +
+    'start_cmd: /usr/bin/rmscut' + LF +
+    'check_alive: 8080' + LF: def):
+    'a 65-character file name still loads');
+
+  iEqual(70: ut_entry_len('rmscutsn65'):
+         'the fixture really did land on disk with all 65 characters and ' +
+         'its extension - without this a red below could be a broken ' +
+         'fixture rather than the defect');
+
+  got = def.short_name;
+  sl_equal(nm: got:
+           'the short name is whole at 65 - today it arrives 64 characters ' +
+           'long and nothing says so');
+
+end-proc;
+
+dcl-proc test_short_name_at_127_is_whole export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  nm  varchar(2048);
+  dcl-s  got varchar(2048);
+
+  nm = ut_lc('sn127': 127);
+  iEqual(127: %len(nm):
+         'the largest base name RMSC can be handed whole - one more and the ' +
+         'dot no longer survives rmtools'' 128-character cut');
+
+  assert(load_fixture(nm + '.yaml':
+    'name: probe' + LF +
+    'start_cmd: /usr/bin/rmscut' + LF +
+    'check_alive: 8080' + LF: def):
+    'a 127-character file name still loads');
+
+  iEqual(132: ut_entry_len('rmscutsn127'):
+         'the fixture really did land on disk as 127 characters of base ' +
+         'name and five of extension');
+
+  got = def.short_name;
+  sl_equal(nm: got:
+           'the short name is whole at 127 - today it arrives cut at 64. ' +
+           'This is the TOP of the band this work owns, and the case a ' +
+           'widening that went to 100 rather than 255 would fail while ' +
+           'every other real case here went green');
+
+end-proc;
+
+dcl-proc test_short_name_at_128_blocked_on_rmtools export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  nm  varchar(2048);
+  dcl-s  got varchar(2048);
+
+  nm = ut_lc('sn128': 128);
+  iEqual(128: %len(nm): 'one character past the last name rmtools can hand ' +
+                        'back with its dot intact');
+
+  assert(load_fixture(nm + '.yaml':
+    'name: probe' + LF +
+    'start_cmd: /usr/bin/rmscut' + LF +
+    'check_alive: 8080' + LF: def):
+    'the definition still loads, and that is the trouble - it loads with no ' +
+    'name and says nothing');
+
+  iEqual(133: ut_entry_len('rmscutsn128'):
+         'the fixture really did land on disk as 128 characters of base ' +
+         'name and five of extension - a marker that passed because its ' +
+         'file was never written would measure nothing');
+
+  got = def.short_name;
+  iEqual(0: %len(%trimr(got)):
+         'BLOCKED ON rmtools, NOT A DEFECT IN THIS REPOSITORY. At 128 the ' +
+         'short name comes back EMPTY because PATH_BASENAME_t is ' +
+         'varchar(128): the file name is cut to 128, the dot goes with it, ' +
+         'and the basename extraction raises into an empty string. No width ' +
+         'RMSC chooses can change that. This asserts what happens TODAY. ' +
+         'IF THIS FAILS, rmtools HAS LANDED - assert the whole 128-character ' +
+         'name instead and rename this to test_short_name_at_128_is_whole');
+
+end-proc;
+
+dcl-proc test_short_name_at_250_blocked_on_rmtools export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  nm  varchar(2048);
+  dcl-s  got varchar(2048);
+
+  nm = ut_lc('sn250': 250);
+  iEqual(250: %len(nm): 'the longest base name a .yaml file can carry');
+
+  assert(load_fixture(nm + '.yaml':
+    'name: probe' + LF +
+    'start_cmd: /usr/bin/rmscut' + LF +
+    'check_alive: 8080' + LF: def):
+    'the longest file name the IFS will hold still loads');
+
+  iEqual(255: ut_entry_len('rmscutsn250'):
+         'the fixture really did land on disk as 255 characters - 250 of ' +
+         'base name and five of extension');
+
+  got = def.short_name;
+  iEqual(0: %len(%trimr(got)):
+         'BLOCKED ON rmtools, as the 128 case above and for the same ' +
+         'reason - everything from 128 upwards arrives with no name at all. ' +
+         'Kept as well as the 128 one because 128 is the boundary and 250 ' +
+         'is the longest name a .yaml file can carry, and a partial rmtools ' +
+         'fix could move one without the other. IF THIS FAILS, rmtools HAS ' +
+         'LANDED - assert the whole 250-character name and rename this to ' +
+         'test_short_name_at_250_is_whole');
+
+end-proc;
+
+dcl-proc test_short_name_ordinary_is_whole export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  got varchar(2048);
+
+  assert(load_fixture('rmscut_ordinary.yaml':
+    'name: probe' + LF +
+    'start_cmd: /usr/bin/rmscut' + LF +
+    'check_alive: 8080' + LF: def):
+    'an ordinary file name still loads');
+
+  got = def.short_name;
+  sl_equal('rmscut_ordinary': got:
+           'THE CONTROL - an everyday name is untouched, which a widening ' +
+           'that broke the lower-casing or the extension strip would fail');
+
+end-proc;
+
+//==============================================================================
+// FRIENDLY NAME - `name:`, at 128, 129 and 1000
+//
+// 1000 is inside the 1024 a scalar holds, so nothing here can be the scalar
+// guard firing. test_scalar_long_but_within_the_cap_still_loads above already
+// pins that a 200-character value loads; this is about what ARRIVES.
+//==============================================================================
+
+dcl-proc test_friendly_at_128_is_whole export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  fv  varchar(2048);
+  dcl-s  got varchar(2048);
+
+  fv = sl_value('FR128': 128);
+  iEqual(128: %len(fv): 'a name: of exactly 128 characters');
+
+  assert(load_fixture('utfr128.yaml':
+    'name: ' + fv + LF +
+    'start_cmd: /usr/bin/rmscut' + LF +
+    'check_alive: 8080' + LF: def):
+    'a 128-character name: still loads');
+
+  got = def.friendly;
+  sl_equal(fv: got:
+           'the friendly name is whole at 128 - the width it has today');
+
+end-proc;
+
+dcl-proc test_friendly_at_129_is_whole export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  fv  varchar(2048);
+  dcl-s  got varchar(2048);
+
+  fv = sl_value('FR129': 129);
+  iEqual(129: %len(fv): 'one character more than the case above');
+
+  assert(load_fixture('utfr129.yaml':
+    'name: ' + fv + LF +
+    'start_cmd: /usr/bin/rmscut' + LF +
+    'check_alive: 8080' + LF: def):
+    'a 129-character name: still loads');
+
+  got = def.friendly;
+  sl_equal(fv: got:
+           'the friendly name is whole at 129 - today it arrives 128 ' +
+           'characters long and the description printed by check is short ' +
+           'by one, silently');
+
+end-proc;
+
+dcl-proc test_friendly_at_1000_is_whole export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  fv  varchar(2048);
+  dcl-s  got varchar(2048);
+
+  fv = sl_value('FR1000': 1000);
+  iEqual(1000: %len(fv): 'inside the 1024 a scalar holds, far past 128');
+
+  assert(load_fixture('utfr1000.yaml':
+    'name: ' + fv + LF +
+    'start_cmd: /usr/bin/rmscut' + LF +
+    'check_alive: 8080' + LF: def):
+    'a name: of 1000 is inside the scalar cap, so it must still load - a ' +
+    'refusal here would be the scalar guard firing on a value it does not ' +
+    'cover');
+
+  got = def.friendly;
+  sl_equal(fv: got:
+           'and it arrives whole - 1000 is what separates a widening to the ' +
+           'scalar bound from one to 256 or 512');
+
+end-proc;
+
+dcl-proc test_friendly_ordinary_is_whole export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  got varchar(2048);
+
+  assert(load_fixture('utfrshort.yaml':
+    'name: Web Proxy (staging)' + LF +
+    'start_cmd: /usr/bin/rmscut' + LF +
+    'check_alive: 8080' + LF: def):
+    'an ordinary name: still loads');
+
+  got = def.friendly;
+  sl_equal('Web Proxy (staging)': got:
+           'THE CONTROL - an everyday description is kept verbatim, spaces, ' +
+           'brackets, mixed case and all');
+
+end-proc;
+
+//==============================================================================
+// GROUPS - one block-sequence item, at 64, 65 and 500
+//
+// 500 is inside the 512 an item holds, so a refusal at 500 would be the item
+// guard firing on a value it does not cover - which is why 500 and not 513.
+// test_seq_item_groups_block_at_513_is_rejected above owns the other side of
+// that boundary and this block does not touch it.
+//
+// def.deps IS NOT USED AS A WITNESS HERE. It is the same holder and the same
+// defect, so a dependency that agreed with a group would prove only that the
+// two were cut alike.
+//==============================================================================
+
+dcl-proc test_group_at_64_is_whole export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  gv  varchar(2048);
+  dcl-s  got varchar(2048);
+
+  gv = ut_lc('gr64': 64);
+  iEqual(64: %len(gv): 'a group of exactly 64 characters');
+
+  assert(load_fixture('utgr64.yaml':
+    'start_cmd: /usr/bin/rmscut' + LF +
+    'check_alive: 8080' + LF +
+    'groups:' + LF +
+    '- ' + gv + LF: def): 'a 64-character group still loads');
+
+  iEqual(1: def.group_count: 'one group');
+
+  got = def.groups(1);
+  sl_equal(gv: got: 'the group is whole at 64 - the width it has today');
+
+end-proc;
+
+dcl-proc test_group_at_65_is_whole export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  gv  varchar(2048);
+  dcl-s  got varchar(2048);
+
+  gv = ut_lc('gr65': 65);
+  iEqual(65: %len(gv): 'one character more than the case above');
+
+  assert(load_fixture('utgr65.yaml':
+    'start_cmd: /usr/bin/rmscut' + LF +
+    'check_alive: 8080' + LF +
+    'groups:' + LF +
+    '- ' + gv + LF: def): 'a 65-character group still loads');
+
+  iEqual(1: def.group_count:
+         'one group - and the count says nothing about its length, which is ' +
+         'the whole reason the text is compared below');
+
+  got = def.groups(1);
+  sl_equal(gv: got:
+           'the group is whole at 65 - today it arrives 64 characters long, ' +
+           'so two groups differing only past 64 become one');
+
+end-proc;
+
+dcl-proc test_group_at_500_is_whole export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  gv  varchar(2048);
+  dcl-s  got varchar(2048);
+
+  gv = ut_lc('gr500': 500);
+  iEqual(500: %len(gv): 'inside the 512 a sequence item holds, far past 64');
+
+  assert(load_fixture('utgr500.yaml':
+    'start_cmd: /usr/bin/rmscut' + LF +
+    'check_alive: 8080' + LF +
+    'groups:' + LF +
+    '- ' + gv + LF: def):
+    'a group of 500 is inside the item cap, so it must still load');
+
+  iEqual(1: def.group_count: 'one group');
+
+  got = def.groups(1);
+  sl_equal(gv: got:
+           'and it arrives whole - 500 is what separates a widening to the ' +
+           'item bound from one to 128 or 256');
+
+end-proc;
+
+dcl-proc test_group_ordinary_is_whole export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  got varchar(2048);
+
+  assert(load_fixture('utgrshort.yaml':
+    'start_cmd: /usr/bin/rmscut' + LF +
+    'check_alive: 8080' + LF +
+    'groups:' + LF +
+    '- web' + LF +
+    '- autostart' + LF: def): 'an ordinary pair of groups still loads');
+
+  iEqual(2: def.group_count: 'two groups');
+
+  got = def.groups(1);
+  sl_equal('web': got: 'THE CONTROL - the first group, whole');
+  got = def.groups(2);
+  sl_equal('autostart': got:
+           'and the SECOND, which is where a widening that got the array ' +
+           'element stride wrong would show first');
+
+end-proc;
+
+//==============================================================================
+// SERVICE DEPENDENCIES - the same holder, the same defect, its own cases
+//
+// The brief for this work says deps share the groups holder. That is a claim
+// about the implementation, and a test that took it on trust would cover one
+// field and report two. So deps are measured on themselves at the same three
+// lengths, and def.groups is not used as a witness for any of them.
+//==============================================================================
+
+dcl-proc test_dep_at_64_is_whole export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  dv  varchar(2048);
+  dcl-s  got varchar(2048);
+
+  dv = ut_lc('dp64': 64);
+  iEqual(64: %len(dv): 'a dependency of exactly 64 characters');
+
+  assert(load_fixture('utdp64.yaml':
+    'start_cmd: /usr/bin/rmscut' + LF +
+    'check_alive: 8080' + LF +
+    'service_dependencies:' + LF +
+    '- ' + dv + LF: def): 'a 64-character dependency still loads');
+
+  iEqual(1: def.dep_count: 'one dependency');
+
+  got = def.deps(1);
+  sl_equal(dv: got: 'the dependency is whole at 64 - the width it has today');
+
+end-proc;
+
+dcl-proc test_dep_at_65_is_whole export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  dv  varchar(2048);
+  dcl-s  got varchar(2048);
+
+  dv = ut_lc('dp65': 65);
+  iEqual(65: %len(dv): 'one character more than the case above');
+
+  assert(load_fixture('utdp65.yaml':
+    'start_cmd: /usr/bin/rmscut' + LF +
+    'check_alive: 8080' + LF +
+    'service_dependencies:' + LF +
+    '- ' + dv + LF: def): 'a 65-character dependency still loads');
+
+  iEqual(1: def.dep_count: 'one dependency');
+
+  got = def.deps(1);
+  sl_equal(dv: got:
+           'the dependency is whole at 65 - today it arrives cut at 64, so ' +
+           'the name RMSC then looks up is not the one that was written');
+
+end-proc;
+
+dcl-proc test_dep_at_500_is_whole export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  dv  varchar(2048);
+  dcl-s  got varchar(2048);
+
+  dv = ut_lc('dp500': 500);
+  iEqual(500: %len(dv): 'inside the 512 a sequence item holds, far past 64');
+
+  assert(load_fixture('utdp500.yaml':
+    'start_cmd: /usr/bin/rmscut' + LF +
+    'check_alive: 8080' + LF +
+    'service_dependencies:' + LF +
+    '- ' + dv + LF: def):
+    'a dependency of 500 is inside the item cap, so it must still load');
+
+  iEqual(1: def.dep_count: 'one dependency');
+
+  got = def.deps(1);
+  sl_equal(dv: got: 'and it arrives whole');
+
+end-proc;
+
+dcl-proc test_dep_ordinary_is_whole export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  got varchar(2048);
+
+  assert(load_fixture('utdpshort.yaml':
+    'start_cmd: /usr/bin/rmscut' + LF +
+    'check_alive: 8080' + LF +
+    'service_dependencies:' + LF +
+    '- db' + LF +
+    '- messagequeue' + LF: def):
+    'an ordinary pair of dependencies still loads');
+
+  iEqual(2: def.dep_count: 'two dependencies');
+
+  got = def.deps(1);
+  sl_equal('db': got: 'THE CONTROL - the first dependency, whole');
+  got = def.deps(2);
+  sl_equal('messagequeue': got: 'and the second');
+
+end-proc;
+
+//##############################################################################
+//##                                                                          ##
+//##  sbmjob_jobname IS NOT WIDENED - IT IS REFUSED                           ##
+//##                                                                          ##
+//##############################################################################
+//
+// This field is NOT in the block above and the difference is the point. An IBM
+// i job name is at most 10 characters. That is an external limit, not a holder
+// width RMSC chose, so a longer value can NEVER work - widening the field would
+// store something unusable and move the failure to start time, where it costs
+// more and says less.
+//
+// So the rule is the one this suite has already applied twice: a value RMSC
+// cannot represent INVALIDATES THE DEFINITION, reported on stderr and joined to
+// the collection's bad-definition list. Same rule as an over-long scalar and an
+// unusable wait time.
+//
+// MEASURED, 7 September 2026: a `sbmjob_jobname:` of 20 characters is accepted
+// by RMSC and arrives as 10. So RMSC would submit the job under a name the
+// author did not write, and every later `stop` and `check` that looks for the
+// name in the file would look for the wrong thing.
+//
+// THE CONTROL IS THE HALF THAT MATTERS. There are TWO paths to a batch job
+// name, and only one of them is being changed:
+//
+//   sbmjob_jobname GIVEN     the author chose it     -> refuse if it cannot work
+//   sbmjob_jobname ABSENT    RMSC derives one        -> truncating is CORRECT
+//
+// The derived path cuts to 10 on purpose, because nobody chose that name. A fix
+// that refused a long value on BOTH paths would refuse most services on any
+// system, and it would pass every refusal case below. The control for the
+// derived path lives in SCLAUNCH.TEST, where the derived name is observable -
+// see test_job_name_derived_from_a_long_name there. What this suite can hold is
+// the weaker half of it: a definition with a long short name and NO
+// sbmjob_jobname must still LOAD.
+//
+// WORDING IS NOT ASSERTED, only that a reason was recorded and that it names
+// the attribute at fault - as every other rejection in this suite does.
+//##############################################################################
+
+dcl-proc test_sbmjob_jobname_at_10_is_accepted_whole export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  jn  varchar(2048);
+  dcl-s  got varchar(2048);
+
+  jn = sl_value('JN10': 10);
+  iEqual(10: %len(jn): 'exactly the length an IBM i job name may be');
+
+  assert(load_fixture('utjn10.yaml':
+    'start_cmd: /usr/bin/rmscut' + LF +
+    'check_alive: 8080' + LF +
+    'sbmjob_jobname: ' + jn + LF: def):
+    'a job name of exactly 10 is usable, so the definition loads');
+
+  got = def.sbmjob_jobname;
+  sl_equal(jn: got:
+           'and it is kept whole - green today and it must stay green, ' +
+           'because a refusal that started at 10 would refuse every ' +
+           'definition that names its job at full length');
+
+end-proc;
+
+dcl-proc test_sbmjob_jobname_at_11_is_rejected export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  jn  varchar(2048);
+  dcl-s  got varchar(2048);
+
+  jn = sl_value('JN11': 11);
+  iEqual(11: %len(jn): 'one character more than a job name may be');
+
+  if load_fixture('utjn11.yaml':
+       'start_cmd: /usr/bin/rmscut' + LF +
+       'check_alive: 8080' + LF +
+       'sbmjob_jobname: ' + jn + LF: def);
+    // Not nEqual(false: load_fixture(...)): the interesting part of the red is
+    // WHAT ARRIVED, and a bare true says nothing about the cut.
+    got = def.sbmjob_jobname;
+    assert(*off: 'a job name of 11 can never be submitted, so the ' +
+                 'definition must be refused - instead it loaded and the ' +
+                 'name arrived ' + %char(%len(%trimr(got))) +
+                 ' characters, as "' + %trim(got) + '", which is not the ' +
+                 'name the file asks for');
+  endif;
+
+  assert((%len(def.err) > 0): 'a reason is recorded');
+  assert((%scan('sbmjob_jobname': def.err) > 0):
+         'and the reason names the attribute at fault');
+
+end-proc;
+
+dcl-proc test_sbmjob_jobname_at_20_is_rejected export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  jn  varchar(2048);
+  dcl-s  got varchar(2048);
+
+  jn = sl_value('JN20': 20);
+  iEqual(20: %len(jn): 'the length measured against upstream');
+
+  if load_fixture('utjn20.yaml':
+       'start_cmd: /usr/bin/rmscut' + LF +
+       'check_alive: 8080' + LF +
+       'sbmjob_jobname: ' + jn + LF: def);
+    got = def.sbmjob_jobname;
+    assert(*off: 'a job name of 20 must be refused - instead it loaded and ' +
+                 'the name arrived ' + %char(%len(%trimr(got))) +
+                 ' characters, as "' + %trim(got) + '", so RMSC would ' +
+                 'submit under a name nobody wrote');
+  endif;
+
+  assert((%len(def.err) > 0): 'a reason is recorded');
+  assert((%scan('sbmjob_jobname': def.err) > 0):
+         'and the reason names the attribute at fault');
+
+end-proc;
+
+dcl-proc test_sbmjob_jobname_absent_long_name_still_loads export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  nm  varchar(2048);
+
+  nm = ut_lc('jnderived': 100);
+  iEqual(100: %len(nm): 'a service name ten times longer than a job name');
+
+  assert(load_fixture(nm + '.yaml':
+    'start_cmd: /usr/bin/rmscut' + LF +
+    'check_alive: 8080' + LF: def):
+    'THE CONTROL - no sbmjob_jobname, so the job name is DERIVED and the ' +
+    'derivation truncates on purpose. This must still load. A refusal ' +
+    'applied to both paths would refuse most services on the system and ' +
+    'would still pass every rejection case above');
+
+  assert((%len(def.err) = 0):
+         'and nothing is recorded against it - a long SERVICE name is not a ' +
+         'long JOB name, and only the second is refused');
+
+  // WHOLENESS IS DELIBERATELY NOT ASSERTED HERE. This procedure is the
+  // control for the DERIVED path and it must be green today and green after
+  // the widening; an assertion that is red today would make it a second
+  // separating case wearing a control's name, and the thing it controls
+  // would go unwatched. What arrives in short_name is measured at 65 and 250
+  // above.
+
+end-proc;
+
+//##############################################################################
+//##                                                                          ##
+//##  THE JOB-NAME GUARD MEASURES ONE STRING AND STORES ANOTHER               ##
+//##                                                                          ##
+//##############################################################################
+//
+// The block above refuses a `sbmjob_jobname:` longer than 10 characters, and
+// test_sbmjob_jobname_at_11_is_rejected and _at_20_ pin it. Both values are
+// unquoted and neither has a blank in it, so for both of them the value AS
+// WRITTEN, the value AS STORED and the value AS TRIMMED are the same string and
+// nothing can tell them apart.
+//
+// A DOUBLE-QUOTED SCALAR KEEPS ITS INTERIOR BLANKS, and that is where the three
+// come apart. Written
+//
+//     sbmjob_jobname: "  ABCDEFGHIJ"
+//
+// the stored value is 12 characters and the trimmed one is 10. A guard that
+// measures the trimmed string sees 10, allows it, and hands the assignment 12
+// characters to put in a 10-wide field. What lands there is '  ABCDEFGH' - the
+// author's last two characters gone - and the launcher trims that to
+// 'ABCDEFGH'. The job is then submitted under an eight-character name nobody
+// wrote, and every later `stop` and `check` looks for the name in the file.
+//
+// THAT IS THE SAME HARM THE BLOCK ABOVE EXISTS TO PREVENT, reached by a value
+// the guard lets through, which is why it belongs beside those cases rather
+// than in a block of its own.
+//
+// THE FIXTURE CLAIM IS ESTABLISHED FIRST, and it is not a formality. Everything
+// here rests on RMSC keeping the blanks inside double quotes. If it strips
+// them, "  ABCDEFGHIJ" stores ten characters, is legitimately accepted, and a
+// case asserting a refusal would be red today and red after any fix - a test
+// nobody could ever make pass. So the first case below asks a field with no
+// width guard on it whether the blanks survive at all, and the two that follow
+// mean nothing without it.
+//
+// THE PAIR SEPARATES "MEASURE THE RIGHT STRING" FROM "REFUSE ANYTHING WITH A
+// BLANK IN IT". The obvious cheap fix is to reject a value whose spelling is
+// not a bare job name, and it makes the refusal case green while breaking the
+// acceptance case beside it:
+//
+//     "  ABCDEFGHIJ"    12 stored, 10 trimmed   must be REFUSED
+//     "  ABCDEFGH"      10 stored,  8 trimmed   must be ACCEPTED
+//
+// Both are the same shape and the same spelling. Only the length of what is
+// stored differs, so a guard reading the stored string answers them
+// differently and one reading anything else answers them the same way.
+//
+// WHAT THE LAUNCHER DOES WITH THE ACCEPTED ONE IS ASSERTED IN SCLAUNCH.TEST -
+// see test_job_name_explicit_with_leading_blanks there. This suite can see what
+// was stored; only that suite can see what would be submitted.
+//
+// WORDING IS NOT ASSERTED, only that a reason was recorded and that it names
+// the attribute at fault, as everywhere else in this suite.
+//
+// 07/09/2026 - test author - written against the defect, before the fix
+//##############################################################################
+
+//==============================================================================
+// THE FIXTURE CLAIM - a double-quoted value keeps its leading blanks
+//
+// Asked of start_cmd, which has no width guard anywhere near this length, so
+// nothing here can be answered by a refusal instead of by the blanks. If this
+// is red the two cases below are not measuring what their headers say and
+// should be re-read before anything is fixed.
+//==============================================================================
+
+dcl-proc test_quoted_value_keeps_its_leading_blanks export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  got varchar(2048);
+
+  assert(load_fixture('utqblank.yaml':
+    'start_cmd: "  /usr/bin/rmscut"' + LF +
+    'check_alive: 8080' + LF: def):
+    'a double-quoted command with two leading blanks loads');
+
+  got = def.start_cmd;
+  iEqual(17: %len(%trimr(got)):
+         'and the two blanks inside the quotes are part of the value - 15 ' +
+         'characters of command plus the two in front. If this is 15 then ' +
+         'RMSC strips leading blanks and the job-name cases below cannot ' +
+         'construct a value that is longer stored than trimmed');
+
+  sl_equal('  /usr/bin/rmscut': got:
+           'and what is stored is exactly what was inside the quotes');
+
+end-proc;
+
+//==============================================================================
+// SEPARATING - 12 characters stored, 10 after trimming, and it is REFUSED
+//
+// The guard reads the trimmed string today, sees ten, and lets a value through
+// that cannot be held. RED until it reads what is stored.
+//==============================================================================
+
+dcl-proc test_sbmjob_jobname_quoted_12_stored_10_trimmed_is_rejected export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  got varchar(2048);
+
+  if load_fixture('utjnq12.yaml':
+       'start_cmd: /usr/bin/rmscut' + LF +
+       'check_alive: 8080' + LF +
+       'sbmjob_jobname: "  ABCDEFGHIJ"' + LF: def);
+    // Not nEqual(false: load_fixture(...)): the interesting part of the red is
+    // WHAT ARRIVED, exactly as in the two unquoted rejection cases above.
+    got = def.sbmjob_jobname;
+    assert(*off: 'twelve characters were stored where ten fit, so the ' +
+                 'definition must be refused - instead it loaded and the ' +
+                 'name arrived ' + %char(%len(%trimr(got))) +
+                 ' characters, as "' + %trim(got) + '". The launcher trims ' +
+                 'that, so this service would be submitted under a name ' +
+                 'the file does not contain');
+  endif;
+
+  assert((%len(def.err) > 0): 'a reason is recorded');
+  assert((%scan('sbmjob_jobname': def.err) > 0):
+         'and the reason names the attribute at fault');
+
+end-proc;
+
+//==============================================================================
+// THE OTHER HALF - 10 stored, 8 after trimming, and it is ACCEPTED
+//
+// Green today, and it is the half a fix of "refuse anything with a blank in it"
+// breaks. Without it the case above is satisfied by refusing every quoted
+// value, or every value that is not already a bare job name.
+//
+// WHAT IS ASSERTED ABOUT THE STORED VALUE IS THE NAME THE LAUNCHER WILL USE,
+// not its exact spelling. A fix that keeps the blanks and one that strips them
+// on the way in are both correct here and both give the launcher ABCDEFGH;
+// pinning one spelling would fail the other for no reason this case is about.
+//==============================================================================
+
+dcl-proc test_sbmjob_jobname_quoted_10_stored_8_trimmed_is_accepted export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  got varchar(2048);
+
+  assert(load_fixture('utjnq10.yaml':
+    'start_cmd: /usr/bin/rmscut' + LF +
+    'check_alive: 8080' + LF +
+    'sbmjob_jobname: "  ABCDEFGH"' + LF: def):
+    'ten characters are stored and ten characters fit, so this definition ' +
+    'must load - a guard that refused a blank rather than a length would ' +
+    'refuse it, and would still pass every rejection case in this block');
+
+  assert((%len(def.err) = 0):
+         'and nothing is recorded against it');
+
+  got = def.sbmjob_jobname;
+  aEqualV('ABCDEFGH': %trim(got):
+          'and the name the launcher will submit under is the one the file ' +
+          'asks for, whole - not a prefix of it');
+
+end-proc;
+
+//##############################################################################
+//##                                                                          ##
+//##  A KEY TOO LONG TO HOLD IS AN UNRECOGNISED ATTRIBUTE, NOT A DEAD FILE    ##
+//##                                                                          ##
+//##############################################################################
+//
+// A YAML key longer than 128 characters refuses the whole definition today. The
+// service disappears - not from one attribute, from `check`, `list` and
+// everything else.
+//
+// UPSTREAM WARNS AND CARRIES ON. `Unrecognized attribute '<key>'` and the
+// service loads, which is what RMSC already does for an ordinary key it does
+// not know - test_unknown_key_is_not_fatal above pins that and passes. So a key
+// that is merely LONG is a key RMSC does not recognise, and the length is not a
+// reason to treat it differently from any other unrecognised spelling.
+//
+// A DEFINITION THAT LOADS BUT LOSES SOMETHING WOULD PASS A NAIVE CHECK, which
+// is why loading is not the assertion. A fix that recovered from the long key
+// by abandoning the rest of the parse leaves a service with no start_cmd and no
+// check_alive, and `load returned true` cannot tell that from a healthy one. So
+// the real attributes are asserted, by value, after the load.
+//
+// 200 CHARACTERS, well past the 128 that refuses today, and inside the 1024 a
+// scalar line may hold - so nothing here can be answered by the scalar guard
+// firing on the length of the line instead of the key.
+//
+// THE TWO CONTROLS ARE BOTH DIRECTIONS OF THE SAME QUESTION:
+//
+//   an ordinary unknown key is still recorded   ruled out: a fix that records
+//                                               nothing at all, which would
+//                                               make the long-key count agree
+//                                               with 0 rather than with 1
+//   a definition with no unknown keys reports   ruled out: a fix that records
+//   none                                        something for every key it
+//                                               reads, which would make every
+//                                               count agree
+//
+// The first is test_unknown_key_is_not_fatal, already in this suite and left
+// where it is. The second is written below because nothing here asserted it.
+//
+// WHAT IS RECORDED FOR THE LONG KEY IS ASSERTED AS ITS LEADING TEXT, not as its
+// whole 200 characters, AND THAT IS A DECISION RATHER THAN AN OMISSION. It was
+// asked as a separate flagged case and answered by the project owner on
+// 7 September 2026: SCYAML_KEY_SIZE stays at 128 and a longer key is recorded
+// under its first 128 characters. `unknown` is a 16-element array in every
+// definition, so carrying a key whole would cost some 16KB per definition and
+// drop the collection's ceiling by about a third - to identify an attribute
+// that 128 characters already identifies uniquely. It is a deliberate
+// truncation of a typo's NAME, and of nothing that acts.
+//
+// THE COLLISION IT STILL CLOSES is the one that made the width worth asking
+// about: two keys agreeing for their first 64 characters used to collapse into
+// one, and a repeated key is treated as a REPLACE, so a definition could
+// silently lose an attribute it had set. At 128 that needs two 128-character
+// keys agreeing throughout, which no typo produces.
+//
+// So the case that asserted wholeness has been DELETED rather than adjusted,
+// which is what its own header said to do if the answer came back this way. Do
+// not write it again. What is asserted below - that the recorded entry begins
+// with the same 32 characters as the key in the file - is unaffected by the
+// truncation and is the part that matters: it says the right attribute was
+// named.
+//
+// 07/09/2026 - test author - written against the defect, before the fix
+//##############################################################################
+
+dcl-proc test_long_key_is_recorded_not_fatal export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  key varchar(2048);
+  dcl-s  got varchar(2048);
+
+  key = ut_lc('longkey': 200);
+  iEqual(200: %len(key):
+         'a key of 200 characters - well past the 128 that refuses today, ' +
+         'and well inside the 1024 a scalar line may hold');
+
+  assert(load_fixture('utlongkey.yaml':
+    'start_cmd: /usr/bin/rmscut' + LF +
+    'check_alive: 8080' + LF +
+    %trim(key) + ': 42' + LF: def):
+    'a key RMSC cannot hold is a key RMSC does not RECOGNISE, and an ' +
+    'unrecognised key must not take the service with it - upstream warns ' +
+    'and loads. Today the whole definition is refused and the service is ' +
+    'gone from check and list');
+
+  // THE REAL ATTRIBUTES, BY VALUE. A recovery that abandoned the rest of the
+  // parse would return true here and leave nothing usable behind.
+  got = def.start_cmd;
+  sl_equal('/usr/bin/rmscut': got:
+           'the start command survived the long key');
+
+  iEqual(1: def.criteria_count: 'and one check-alive criterion survived');
+  aEqualV(SCDEF_CHECK_PORT: def.criteria(1).kind: 'and it is a port');
+  iEqual(8080: def.criteria(1).port: 'and it is the port the file asks for');
+
+  assert((%len(def.err) = 0):
+         'and nothing is recorded as an ERROR against the definition - an ' +
+         'unrecognised attribute is a warning, not a failure');
+
+  iEqual(1: def.unknown_count:
+         'the long key is recorded as an unrecognised attribute, exactly as ' +
+         'a short unknown key is');
+
+  got = def.unknown(1);
+  assert((%len(%trimr(got)) > 0):
+         'and something was recorded for it, not a blank entry');
+  assert((%len(%trimr(got)) >= 32
+          and %subst(%trimr(got): 1: 32) = %subst(key: 1: 32)):
+         'and what was recorded is THAT key - it begins with the same 32 ' +
+         'characters, so it is not some other attribute of the file being ' +
+         'reported in its place. Recorded ' +
+         %char(%len(%trimr(got))) + ' characters: "' + %trim(got) + '"');
+
+end-proc;
+
+//==============================================================================
+// THE SECOND CONTROL - a definition with no unknown keys reports none
+//
+// Green today and green after. Without it, a fix that recorded an entry for
+// every key it read would make the long-key count of 1 agree with itself and
+// with nothing else.
+//==============================================================================
+
+dcl-proc test_no_unknown_keys_reports_none export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+
+  assert(load_fixture('utnounknown.yaml':
+    'name: Known keys only' + LF +
+    'start_cmd: /usr/bin/rmscut' + LF +
+    'check_alive: 8080' + LF +
+    'startup_wait_time: 30' + LF: def): 'load');
+
+  iEqual(0: def.unknown_count:
+         'every key in this file is one RMSC knows, so nothing is ' +
+         'unrecognised');
 
 end-proc;
