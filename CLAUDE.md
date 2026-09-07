@@ -105,13 +105,19 @@ asked for could not separate anything, then measured why rather than quietly del
 reading each case has to rule out. If it asks for an interface it cannot read, paste the
 prototype — never the body.
 
-**And know where the wall leaks.** A `RUCRTRPG` listing carries the compiler's unreferenced-name
-cross-reference, which prints field names and widths straight out of the copybooks. An author
-grepping that listing for diagnostics can pull back the shapes it is not supposed to see — ours
-did, disclosed it unprompted, and noted that nothing it had written depended on it. So the rule
-in practice is: grep a compile listing for `COMPILE_RC` and `highest severity` only, never for
-`RNF[0-9]{4}` or anything that matches a body of text. The wall is a discipline, not a
-mechanism, and it needs the traps named.
+**And know where the wall leaks.** A `RUCRTRPG` listing prints **the whole expanded `/COPY`
+source**, plus a cross-reference of field names and widths. Not part of it — all of it. So an
+author grepping that listing for anything at all can pull back the copybooks it is forbidden to
+read.
+
+This was found twice, both times disclosed unprompted by the author that hit it: first grepping
+`RNF[0-9]{4}` for diagnostics, then grepping `created` and matching copybook header comments. The
+second correction is the important one, because the first version of this note said "do not grep
+for `RNF`", which reads as though some patterns are safe.
+
+**None are. Do not read a compile listing.** Take `COMPILE_RC` from the shell and nothing else;
+if a compile fails, bisect the source rather than reading the diagnostic. The wall is a
+discipline, not a mechanism, and a discipline survives only on its traps being named accurately.
 
 ## Build and test
 

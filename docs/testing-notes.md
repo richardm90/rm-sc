@@ -188,3 +188,35 @@ parameters in `.vscode/testing.json` to compile first.
 that `CRTSQLRPGI` refuses a multithreaded job is about `RUCRTRPG` compiling a `.SQLRPGLE`
 *test* source - a different command path - and is not a constraint on the build. Reaching for
 `SBMJOB` and `INLLIBL` to work around it costs an afternoon and fixes nothing.
+
+## A staged port is not free twice in a row
+
+A suite that opens a listener, connects to it and accepts the connection leaves
+the port in **TIME_WAIT for about two minutes** after it closes. So the second
+run of that suite cannot bind, and a fixture written the obvious way replaces
+one flaky failure with another — a different one, arriving on the *next* run
+rather than under load.
+
+`SO_REUSEADDR` is the fix, and on ILE the constants are not the ones most
+references give: `SOL_SOCKET` is **-1** and `SO_REUSEADDR` is **55**.
+
+It permits TIME_WAIT and still refuses a port something is *actively*
+listening on, which is the property that matters — verified both ways, because
+an option that made the bind always succeed would turn a fixture failure into
+a silent pass. `tools/gate-listen.py`'s header records the same reasoning for
+the shell side.
+
+## `out` is the OUT opcode
+
+A local variable named `out` will not compile: `out = x;` at statement start
+parses as the RPG **OUT** opcode. The diagnostic does not say so in terms that
+lead anywhere useful.
+
+This is the second instance of the same trap — `other` is the OTHER opcode and
+cost a rename across a suite earlier in the project. The general form is worth
+holding: **a short, obvious English word for a local is a coin flip against the
+opcode table.** `list`, `result`, `rows` are safe; `out`, `other`, `in`, `eval`,
+`call`, `return`, `test` are not.
+
+Found while fixing the flaky query suites, by bisecting probe sources — not by
+reading the compile listing, which CLAUDE.md now forbids outright.
