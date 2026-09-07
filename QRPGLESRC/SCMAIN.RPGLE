@@ -230,6 +230,8 @@ dcl-proc SCMAIN_adhoc export;
 
   dcl-s work  like(SCMAIN_SPEC_t);
   dcl-s value like(SCMAIN_SPEC_t);
+  dcl-s adhoc_port like(INTEGER_t);
+  dcl-s adhoc_norm like(SCDEF_CRIT_t);
   dcl-s slash like(INTEGER_t);
 
   // Assigned, not cleared: CLEAR would leave 'enabled' *off, so every ad-hoc
@@ -246,7 +248,52 @@ dcl-proc SCMAIN_adhoc export;
     def.criteria_count = 1;
     def.criteria(1).kind = SCDEF_CHECK_PORT;
     def.criteria(1).raw  = value;
-    def.criteria(1).port = %int(value);
+    // Converted ONLY when the text is usable, and both halves matter.
+    //
+    // The first attempt at this deleted the conversion outright, reasoning
+    // that leaving `.port` at zero would route the criterion into SCEXEC's
+    // unusable handling. That is true for an unusable value and FALSE for a
+    // good one: SCDEF_criterion_usable inspects `raw` alone, so `port:22`
+    // stayed usable, kept a zero port, and probed port 0. Every ad-hoc port
+    // check reported NOT RUNNING, including ones that were genuinely up.
+    //
+    // It survived a full test run because every case aimed at this line used
+    // a value that reports NOT RUNNING whether the code is right or wrong -
+    // port:-1, port:65536, port:abc. A listening port is the case where the
+    // fix and the break disagree, and nothing had asked for one.
+    //
+    // The line it replaced was `.port = %int(value)` with no check of any
+    // kind, so every unusable ad-hoc port brought the whole command down:
+    //
+    //     scr check port:abc             CEE9901 RNX0105
+    //     scr check port:4294967296      CEE9901 MCH1210
+    //     scr check port:99999999999999  CEE9901 MCH1210
+    //
+    // where upstream exits 253 with 'Invalid data for port number or job name
+    // criteria for service ...: PORT:<raw>'. Leaving `.port` at zero routes
+    // the criterion into SCEXEC's existing unusable handling, which already
+    // produces that message verbatim - so nothing new is written to report it,
+    // and the ad-hoc path now answers the same way the companion form does.
+    //
+    // port:-1 and port:65536 stay usable and report NOT RUNNING, as upstream
+    // does. Measured. They are the pair that rules out a 1..65535 range check,
+    // which is the wrong rule this could easily have been fixed into.
+    // Validated, converted and normalised from ONE string - the whole spec,
+    // not the truncated copy kept for display. See SCDEF_port_text.
+    if SCDEF_port_text(value: adhoc_port: adhoc_norm);
+      def.criteria(1).port = adhoc_port;
+    endif;
+
+    // `raw` is taken from the normalised text WHETHER OR NOT the value was
+    // usable, and that half matters as much as the conversion. Keeping the
+    // spec verbatim here left 128 leading zeros in a 128-wide field, which
+    // strip to '0' and read back as a perfectly usable port 0 - so an
+    // unusable value reported NOT RUNNING against port 0 instead of the
+    // error upstream gives. The normalised text is computed before usability
+    // is decided precisely so it is available on both paths.
+    if adhoc_norm <> '';
+      def.criteria(1).raw = adhoc_norm;
+    endif;
     return true;
   endif;
 
@@ -273,7 +320,20 @@ dcl-proc SCMAIN_adhoc export;
     def.friendly   = 'ad hoc program ' + %trim(value);
     def.criteria_count = 1;
     def.criteria(1).kind = SCDEF_CHECK_PGM;
-    def.criteria(1).raw  = value;
+    // WITH the prefix. `raw` is what SCDEF_criterion_text renders and what
+    // conflict detection compares, and the same program named in a FILE keeps
+    // it - `check_alive: PGM-X` renders JOBNAME:PGM-X, which is upstream's
+    // form. Storing the bare name here made RMSC disagree with itself:
+    //
+    //     ad-hoc PGM-X   ->  JOBNAME:X          (this line, before)
+    //     file   PGM-X   ->  JOBNAME:PGM-X      (upstream's form)
+    //
+    // The display half is cosmetic; the other half is not. Two criteria are
+    // the same criterion when their raw text matches, so an ad-hoc PGM-X was
+    // treated as claiming what a service whose JOB NAME is X claims.
+    //
+    // `program` stays bare - that is the value the query needs.
+    def.criteria(1).raw  = 'PGM-' + %trim(value);
     def.criteria(1).program = value;
     return true;
   endif;

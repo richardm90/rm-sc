@@ -465,7 +465,13 @@ dcl-proc SCCOLL_get export;
     def  likeds(SCDEF_t);
   end-pi;
 
-  clear def;
+  // SCDEF_clear, not CLEAR. RPG's CLEAR zeroes the structure, and an SCDEF_t
+  // zeroed that way arrives with `enabled` OFF where the declared default is
+  // ON - so a lookup that simply found nothing handed back a definition
+  // claiming to be a DISABLED service. Dormant, because every caller checks
+  // the return value first, but it is a lie waiting for the first caller that
+  // does not.
+  SCDEF_clear(def);
   if rrn < 1 or rrn > coll.count;
     return false;
   endif;
@@ -496,7 +502,9 @@ dcl-proc SCCOLL_find export;
     endif;
   endfor;
 
-  clear def;
+  // SCDEF_clear rather than CLEAR - see SCCOLL_get above. A name that is not
+  // in the collection is not a disabled service.
+  SCDEF_clear(def);
   return false;
 
 end-proc;

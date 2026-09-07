@@ -143,6 +143,49 @@ dcl-pr cp_before like(BOOLEAN_t);
   b_val varchar(512) const;
 end-pr;
 
+dcl-s g_wt like(STMF_t);
+
+dcl-pr wt_setup end-pr;
+
+dcl-pr wt_teardown end-pr;
+
+dcl-pr wt_write;
+  suffix varchar(32) const;
+  short  varchar(64) const;
+  wait   varchar(64) const;
+end-pr;
+
+dcl-pr wt_load;
+  suffix varchar(32) const;
+  coll   likeds(SCCOLL_t);
+end-pr;
+
+// Scalar-length block - see A SCALAR TOO LONG TO HOLD at the foot of this suite
+dcl-s g_sl like(STMF_t);
+
+dcl-pr sl_setup end-pr;
+
+dcl-pr sl_teardown end-pr;
+
+dcl-pr sl_write;
+  suffix varchar(32) const;
+  short  varchar(64) const;
+  cmd    varchar(2048) const;
+  check  varchar(2048) const;
+end-pr;
+
+dcl-pr sl_load;
+  suffix varchar(32) const;
+  coll   likeds(SCCOLL_t);
+end-pr;
+
+dcl-pr sl_long varchar(2048);
+  tag varchar(16) const;
+  len like(INTEGER_t) const;
+end-pr;
+
+dcl-pr sl_criteria varchar(2048) end-pr;
+
 //==============================================================================
 // Suite set-up
 //==============================================================================
@@ -236,6 +279,8 @@ dcl-proc setUpSuite export;
   blk_setup();
   cfl_setup();
   en_setup();
+  wt_setup();
+  sl_setup();
 
 end-proc;
 
@@ -248,6 +293,8 @@ dcl-proc tearDownSuite export;
   blk_teardown();
   cfl_teardown();
   en_teardown();
+  wt_teardown();
+  sl_teardown();
 
 end-proc;
 
@@ -4206,5 +4253,552 @@ dcl-proc test_enabled_quoted_on_diverges export;
   nEqual(true: SCCOLL_find(coll: 'rmscqt_sq': def): '''on''');
   nEqual(true: SCCOLL_find(coll: 'rmscqt_dq': def): '"on"');
   nEqual(true: SCCOLL_find(coll: 'rmscqt_up': def): '''ON''');
+
+end-proc;
+
+//##############################################################################
+//##                                                                          ##
+//##  A BAD WAIT TIME MUST NOT TAKE ITS NEIGHBOURS DOWN                       ##
+//##                                                                          ##
+//##############################################################################
+//
+// SCDEF.TEST pins what a bad startup_wait_time or stop_wait_time does to the
+// definition that carries it: the definition is rejected, where today a
+// non-numeric value is quietly replaced by the default and an out-of-range one
+// abends with MCH1210.
+//
+// This block pins what it does to the DIRECTORY, which is the part nobody
+// looks at until it goes wrong. A rejected definition goes onto the
+// collection's bad-definition list and the rest of the directory loads
+// normally - exactly as test_broken_definition_recorded already requires for a
+// definition missing a required key. Nothing about a wait time makes it a
+// different kind of rejection.
+//
+// THE FAILURE THIS EXISTS TO CATCH IS THE LOUD ONE. An MCH1210 in the loader
+// does not reject one file, it ends the load: every service in the directory
+// disappears at once because one of them has a typo in a number. That is a
+// worse outcome than either the old behaviour or upstream's, and it is the one
+// the count assertions below detect - SCCOLL_count would come back 0, or the
+// procedure would abend before reaching them.
+//
+// TWO FIXTURES, ONE PER SHAPE OF BAD INPUT, in separate directories so each
+// count is its own. They fail differently today - 'abc' loads with a
+// substituted default and is simply never recorded as bad, while 4294967296
+// abends - and a single directory holding both would only ever report the
+// abend.
+//
+// Every definition in each directory is otherwise identical and valid, so
+// nothing but the wait time can explain a difference in what survives.
+//##############################################################################
+
+//------------------------------------------------------------------------------
+// wt_setup - two directories, each one bad definition among two good ones
+//------------------------------------------------------------------------------
+dcl-proc wt_setup;
+
+  g_wt = '/tmp/rmsc-sccoll-waittime-' + %trim(psds.current_user);
+  IFS_crtdir(g_wt);
+  IFS_crtdir(%trim(g_wt) + '/nan');
+  IFS_crtdir(%trim(g_wt) + '/range');
+
+  // Not a number. Written between the two good ones rather than first or
+  // last, so a loader that stops at the bad file and one that skips the rest
+  // of the directory are told apart by WHICH neighbour survives.
+  wt_write('nan': 'rmscwt_before': '30');
+  wt_write('nan': 'rmscwt_bad':    'abc');
+  wt_write('nan': 'rmscwt_after':  '30');
+
+  // Out of range - the value that abends today
+  wt_write('range': 'rmscwr_before': '30');
+  wt_write('range': 'rmscwr_bad':    '4294967296');
+  wt_write('range': 'rmscwr_after':  '30');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// wt_write - one otherwise valid definition with the given startup_wait_time
+//------------------------------------------------------------------------------
+dcl-proc wt_write;
+  dcl-pi *n;
+    suffix varchar(32) const;
+    short  varchar(64) const;
+    wait   varchar(64) const;
+  end-pi;
+
+  dcl-s y like(STRING_t);
+
+  y = 'name: Wait time probe' + LF;
+  y += 'start_cmd: /usr/bin/rmscwt' + LF;
+  y += 'check_alive: 8150' + LF;
+  y += 'startup_wait_time: ' + %trim(wait) + LF;
+
+  write_file(%trim(g_wt) + '/' + %trim(suffix) + '/' +
+             %trim(short) + '.yaml': y);
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// wt_load - load one wait-time fixture directory into a fresh collection
+//------------------------------------------------------------------------------
+dcl-proc wt_load;
+  dcl-pi *n;
+    suffix varchar(32) const;
+    coll   likeds(SCCOLL_t);
+  end-pi;
+
+  SCCOLL_init(coll);
+  assert(SCCOLL_load_dir(coll: %trim(g_wt) + '/' + %trim(suffix)):
+         'the directory loads despite one bad definition in it');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// wt_teardown - reuses cfl_rmdir, which is general rather than
+// conflict-specific
+//------------------------------------------------------------------------------
+dcl-proc wt_teardown;
+
+  cfl_rmdir(%trim(g_wt) + '/nan');
+  cfl_rmdir(%trim(g_wt) + '/range');
+
+  IFS_dltdir(g_wt);
+
+  assert((not IFS_isa_directory(g_wt)):
+         'Wait time fixture tree ' + %trim(g_wt) + ' not removed');
+
+end-proc;
+
+//==============================================================================
+// A wait time that is not a number is recorded, and its neighbours load
+//==============================================================================
+
+dcl-proc test_bad_wait_time_recorded_not_fatal export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t) inz(*likeds);
+
+  wt_load('nan': coll);
+
+  iEqual(2: SCCOLL_count(coll):
+         'the two good definitions survive and the bad one is not among them');
+
+  nEqual(true: SCCOLL_find(coll: 'rmscwt_before': def):
+         'the neighbour written before it');
+  nEqual(true: SCCOLL_find(coll: 'rmscwt_after': def):
+         'and the neighbour written after it - the load did not stop');
+  nEqual(false: SCCOLL_find(coll: 'rmscwt_bad': def):
+         'the definition with the bad wait time is not usable');
+
+  iEqual(1: coll.bad_count: 'one bad definition, recorded');
+  aEqualV('rmscwt_bad': coll.bad_name(1): 'named');
+  assert((%len(coll.bad_err(1)) > 0): 'reason recorded');
+
+end-proc;
+
+//==============================================================================
+// And the same for one that is out of range
+//
+// This is the abend case. If it comes back as an ERROR rather than a FAILURE,
+// that is the MCH1210 - and an abend here means the whole directory was lost,
+// not one file.
+//==============================================================================
+
+dcl-proc test_out_of_range_wait_time_recorded_not_fatal export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t) inz(*likeds);
+
+  wt_load('range': coll);
+
+  iEqual(2: SCCOLL_count(coll):
+         'the two good definitions survive and the bad one is not among them');
+
+  nEqual(true: SCCOLL_find(coll: 'rmscwr_before': def):
+         'the neighbour written before it');
+  nEqual(true: SCCOLL_find(coll: 'rmscwr_after': def):
+         'and the neighbour written after it - the load did not stop');
+  nEqual(false: SCCOLL_find(coll: 'rmscwr_bad': def):
+         'the definition with the out-of-range wait time is not usable');
+
+  iEqual(1: coll.bad_count: 'one bad definition, recorded');
+  aEqualV('rmscwr_bad': coll.bad_name(1): 'named');
+  assert((%len(coll.bad_err(1)) > 0): 'reason recorded');
+
+end-proc;
+
+//##############################################################################
+//##                                                                          ##
+//##  A LOOKUP THAT FAILS MUST NOT HAND BACK A DISABLED DEFINITION            ##
+//##                                                                          ##
+//##############################################################################
+//
+// SCDEF_clear exists because a definition reset with RPG's CLEAR arrives with
+// its 'enabled' flag OFF, where the declared default is ON. Two lookups still
+// use CLEAR:
+//
+//     SCCOLL_get(coll: index: def)     when the index is out of range
+//     SCCOLL_find(coll: name: def)     when the name is not found
+//
+// Both return false, so a careful caller never reads def and the wrong value
+// is dormant today. It is still a lie: the definition says a service is
+// disabled when what actually happened is that no service was found. The next
+// caller to read def before testing the return value - or to test it and then
+// report on what it got - gets "disabled" for a name that does not exist.
+//
+// WHAT THE YARDSTICK IS. Every case below asserts, on a freshly initialised
+// structure and BEFORE the call, that the declared default really is ON. Two
+// reasons: it says in the test what the contract is rather than leaving it in
+// a copybook, and if the default ever moves these cases go red saying so
+// rather than silently changing what they demand.
+//
+// THE RETURN VALUE IS ASSERTED FIRST, in every case. The contract being
+// repaired is about a definition returned ALONGSIDE false; a case that landed
+// on the enabled assertion because a lookup had started succeeding would
+// report the wrong defect entirely.
+//
+// ONE CASE PER LOOKUP AND PER INDEX. A failed assertion ends its procedure, so
+// index 0 and an index past the end in one procedure would mean the second
+// never ran.
+//
+// WHAT CANNOT BE CONTROLLED FROM HERE, said plainly. A fix that simply forced
+// enabled ON at every exit of both procedures would be wrong - it would lie in
+// the other direction about a genuinely disabled service - and no case in this
+// suite can catch it, because SCCOLL never holds a disabled definition:
+// test_enabled_hidden measures that such a service is dropped at load and is
+// not in the collection to be found. So the control below is the strongest one
+// available - that a lookup which SUCCEEDS still returns the definition it
+// found, whole - and the direction that cannot be tested is recorded here
+// rather than left looking covered.
+//
+// 05/09/2026 - RM - written against the defect, before the fix
+//==============================================================================
+
+//==============================================================================
+// SCCOLL_get with index 0
+//==============================================================================
+
+dcl-proc test_get_index_zero_leaves_enabled_default export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t)  inz(*likeds);
+
+  SCCOLL_init(coll);
+  assert(SCCOLL_load_dir(coll: g_dir): 'load');
+
+  nEqual(true: def.enabled:
+         'the declared default is ON - the yardstick, before anything is ' +
+         'asked of the collection');
+
+  nEqual(false: SCCOLL_get(coll: 0: def):
+         'index 0 is out of range, whatever the collection holds');
+
+  nEqual(true: def.enabled:
+         'and a definition that was never found is not a disabled service');
+
+end-proc;
+
+//==============================================================================
+// SCCOLL_get with an index one past the end
+//
+// Taken from SCCOLL_count rather than written as a number, so the case still
+// asks its question if the fixture directory gains a definition.
+//==============================================================================
+
+dcl-proc test_get_index_past_end_leaves_enabled_default export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t)  inz(*likeds);
+  dcl-s  n    like(INTEGER_t);
+
+  SCCOLL_init(coll);
+  assert(SCCOLL_load_dir(coll: g_dir): 'load');
+
+  n = SCCOLL_count(coll);
+  assert((n > 0): 'the fixture holds definitions, so past the end means ' +
+                  'something');
+
+  nEqual(true: def.enabled: 'the declared default is ON');
+
+  nEqual(false: SCCOLL_get(coll: n + 1: def):
+         'one past the last definition is out of range');
+
+  nEqual(true: def.enabled:
+         'and the definition handed back is not a disabled service');
+
+end-proc;
+
+//==============================================================================
+// SCCOLL_find with a name that is not there
+//
+// 'nosuchthing' is the name test_find_by_name already uses for the absent
+// case, so the two agree on what absent means.
+//==============================================================================
+
+dcl-proc test_find_missing_leaves_enabled_default export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t)  inz(*likeds);
+
+  SCCOLL_init(coll);
+  assert(SCCOLL_load_dir(coll: g_dir): 'load');
+
+  nEqual(true: def.enabled: 'the declared default is ON');
+
+  nEqual(false: SCCOLL_find(coll: 'nosuchthing': def):
+         'the name is not in the collection');
+
+  nEqual(true: def.enabled:
+         'and not finding a service says nothing about whether it is ' +
+         'enabled');
+
+end-proc;
+
+//==============================================================================
+// THE CONTROL - a lookup that SUCCEEDS still returns what it found
+//
+// Green today and after the fix. Both halves matter: a fix that reached for
+// SCDEF_clear on the success path as well, or that initialised def before
+// searching and then failed to fill it, would satisfy all three cases above
+// and fail here. start_cmd is asserted as well as enabled so the case says
+// "the definition is intact", not merely "one flag is on".
+//==============================================================================
+
+dcl-proc test_lookup_success_returns_the_definition_control export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t)  inz(*likeds);
+
+  SCCOLL_init(coll);
+  assert(SCCOLL_load_dir(coll: g_dir): 'load');
+
+  nEqual(true: SCCOLL_find(coll: 'api': def): 'api is there');
+  aEqual('/usr/bin/api': def.start_cmd: 'and it is the api definition');
+  nEqual(true: def.enabled: 'a service in the collection is enabled');
+
+  clear def;
+
+  nEqual(true: SCCOLL_get(coll: 1: def): 'rrn 1 is there');
+  assert((%len(%trimr(def.short_name)) > 0): 'and it has a short name');
+  nEqual(true: def.enabled: 'and it too is enabled');
+
+end-proc;
+
+//##############################################################################
+//##                                                                          ##
+//##  A SCALAR TOO LONG TO HOLD MUST NOT TAKE ITS NEIGHBOURS DOWN             ##
+//##                                                                          ##
+//##############################################################################
+//
+// SCDEF.TEST pins what a scalar longer than 1024 characters does to the
+// definition that carries it: the definition is refused, where today the value
+// is silently cut at 1024 and the definition loads carrying a value nobody
+// wrote - for start_cmd, a command line that is still runnable and is the
+// WRONG command.
+//
+// This block pins what it does to the DIRECTORY. A refused definition goes on
+// the collection's bad-definition list and the rest of the directory loads
+// normally, exactly as test_broken_definition_recorded requires for a missing
+// key and test_bad_wait_time_recorded_not_fatal for a wait time. Nothing about
+// a long value makes it a different kind of refusal.
+//
+// THE FAILURE THIS EXISTS TO CATCH is a refusal implemented as a stop: one
+// over-long value in one file, and every service in the directory disappears
+// at once. That is worse than the silent truncation it replaces, and it is
+// what the count assertions detect - SCCOLL_count would come back 0 or 1
+// rather than 2, or the procedure would abend before reaching them.
+//
+// TWO DIRECTORIES, one per attribute, so each count is its own and a fix
+// applied to one reader and not the other cannot hide behind the other's
+// directory. The bad definition is written BETWEEN the two good ones in each,
+// so a loader that stops at the bad file and one that skips the rest of the
+// directory are told apart by WHICH neighbour survives.
+//
+// Every definition in each directory is otherwise identical and valid, so
+// nothing but the over-long value can explain a difference in what survives.
+//##############################################################################
+
+//------------------------------------------------------------------------------
+// sl_long - upper-case alphanumeric filler of exactly LEN characters
+//------------------------------------------------------------------------------
+dcl-proc sl_long;
+  dcl-pi *n varchar(2048);
+    tag varchar(16) const;
+    len like(INTEGER_t) const;
+  end-pi;
+
+  dcl-c FILLER const('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
+  dcl-s v varchar(2100);
+
+  v = 'RMSCSL' + %trimr(tag);
+
+  dow %len(v) < len;
+    v += FILLER;
+  enddo;
+
+  return %subst(v: 1: len);
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// sl_criteria - eight values of 128 with seven commas: 1031 characters
+//
+// Seven past the 1024 a scalar holds. Every value is 128, which is what a
+// criterion holds, so the criterion width cannot be what cuts this - only the
+// scalar cap can.
+//------------------------------------------------------------------------------
+dcl-proc sl_criteria;
+  dcl-pi *n varchar(2048);
+  end-pi;
+
+  dcl-s ca varchar(2048);
+  dcl-s i  like(INTEGER_t);
+
+  for i = 1 to 8;
+    if i = 1;
+      ca = sl_long('C' + %char(i): 128);
+    else;
+      ca += ',' + sl_long('C' + %char(i): 128);
+    endif;
+  endfor;
+
+  return ca;
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// sl_setup - two directories, each one over-long definition among two good ones
+//------------------------------------------------------------------------------
+dcl-proc sl_setup;
+
+  dcl-s cmd varchar(2048);
+  dcl-s ca  varchar(2048);
+
+  g_sl = '/tmp/rmsc-sccoll-scalar-' + %trim(psds.current_user);
+  IFS_crtdir(g_sl);
+  IFS_crtdir(%trim(g_sl) + '/cmd');
+  IFS_crtdir(%trim(g_sl) + '/chk');
+
+  cmd = '/usr/bin/rmscsl ' + sl_long('CMD': 1031 - 16);
+  assert((%len(cmd) = 1031): 'the over-long command really is 1031 characters');
+
+  ca = sl_criteria();
+  assert((%len(ca) = 1031): 'the over-long check_alive really is 1031');
+
+  // A start_cmd of 1031 - the case that runs the wrong command today
+  sl_write('cmd': 'rmscsc_before': '/usr/bin/rmscsl': '8160');
+  sl_write('cmd': 'rmscsc_bad':    cmd:               '8160');
+  sl_write('cmd': 'rmscsc_after':  '/usr/bin/rmscsl': '8160');
+
+  // A check_alive of 1031 - eight criteria, and the eighth arrives cut
+  sl_write('chk': 'rmscsk_before': '/usr/bin/rmscsl': '8160');
+  sl_write('chk': 'rmscsk_bad':    '/usr/bin/rmscsl': ca);
+  sl_write('chk': 'rmscsk_after':  '/usr/bin/rmscsl': '8160');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// sl_write - one definition with the given start_cmd and check_alive
+//------------------------------------------------------------------------------
+dcl-proc sl_write;
+  dcl-pi *n;
+    suffix varchar(32) const;
+    short  varchar(64) const;
+    cmd    varchar(2048) const;
+    check  varchar(2048) const;
+  end-pi;
+
+  dcl-s y like(STRING_t);
+
+  y = 'name: Scalar length probe' + LF;
+  y += 'start_cmd: ' + %trimr(cmd) + LF;
+  y += 'check_alive: ' + %trimr(check) + LF;
+
+  write_file(%trim(g_sl) + '/' + %trim(suffix) + '/' +
+             %trim(short) + '.yaml': y);
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// sl_load - load one scalar-length fixture directory into a fresh collection
+//------------------------------------------------------------------------------
+dcl-proc sl_load;
+  dcl-pi *n;
+    suffix varchar(32) const;
+    coll   likeds(SCCOLL_t);
+  end-pi;
+
+  SCCOLL_init(coll);
+  assert(SCCOLL_load_dir(coll: %trim(g_sl) + '/' + %trim(suffix)):
+         'the directory loads despite one over-long value in it');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// sl_teardown
+//------------------------------------------------------------------------------
+dcl-proc sl_teardown;
+
+  cfl_rmdir(%trim(g_sl) + '/cmd');
+  cfl_rmdir(%trim(g_sl) + '/chk');
+
+  IFS_dltdir(g_sl);
+
+  assert((not IFS_isa_directory(g_sl)):
+         'Scalar length fixture tree ' + %trim(g_sl) + ' not removed');
+
+end-proc;
+
+//==============================================================================
+// An over-long start_cmd is recorded, and its neighbours load
+//==============================================================================
+
+dcl-proc test_long_start_cmd_recorded_not_fatal export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t) inz(*likeds);
+
+  sl_load('cmd': coll);
+
+  iEqual(2: SCCOLL_count(coll):
+         'the two good definitions survive and the bad one is not among them');
+
+  nEqual(true: SCCOLL_find(coll: 'rmscsc_before': def):
+         'the neighbour written before it');
+  nEqual(true: SCCOLL_find(coll: 'rmscsc_after': def):
+         'and the neighbour written after it - the load did not stop');
+  nEqual(false: SCCOLL_find(coll: 'rmscsc_bad': def):
+         'the definition whose command cannot be held whole is not usable - ' +
+         'today it is usable and its command is the wrong one');
+
+  iEqual(1: coll.bad_count: 'one bad definition, recorded');
+  aEqualV('rmscsc_bad': coll.bad_name(1): 'named');
+  assert((%len(coll.bad_err(1)) > 0): 'reason recorded');
+
+end-proc;
+
+//==============================================================================
+// And the same for an over-long check_alive
+//==============================================================================
+
+dcl-proc test_long_check_alive_recorded_not_fatal export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t) inz(*likeds);
+
+  sl_load('chk': coll);
+
+  iEqual(2: SCCOLL_count(coll):
+         'the two good definitions survive and the bad one is not among them');
+
+  nEqual(true: SCCOLL_find(coll: 'rmscsk_before': def):
+         'the neighbour written before it');
+  nEqual(true: SCCOLL_find(coll: 'rmscsk_after': def):
+         'and the neighbour written after it - the load did not stop');
+  nEqual(false: SCCOLL_find(coll: 'rmscsk_bad': def):
+         'the definition with the over-long check_alive is not usable');
+
+  iEqual(1: coll.bad_count: 'one bad definition, recorded');
+  aEqualV('rmscsk_bad': coll.bad_name(1): 'named');
+  assert((%len(coll.bad_err(1)) > 0): 'reason recorded');
 
 end-proc;

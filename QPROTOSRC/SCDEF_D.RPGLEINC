@@ -260,6 +260,31 @@ end-pr;
 // can be settled without asking the system anything.
 ///
 
+///
+// Is this text a usable port, what number is it, and how should it be kept?
+//
+// One procedure because the three answers must come from ONE string. The
+// ad-hoc path used to validate a criterion's stored `raw` - already cut to
+// SCDEF_CRIT_t - and convert the caller's untruncated text, which abended on
+// `port:` + 128 zeros + `4294967296`.
+//
+// `norm` is the text with leading zeros stripped. It matters because
+// `port:<128 zeros>22` really is port 22 on both implementations, so "too
+// long to store" is NOT the same as "unusable" and a fix that conflates them
+// breaks a working command.
+//
+// @param the text, undamaged - STRING_t so nothing is lost before it is judged
+// @param out: the port number, 0 when the answer is false
+// @param out: the text as it should be stored
+// @return true when the text is a port this system can use
+///
+
+dcl-pr SCDEF_port_text like(BOOLEAN_t);
+  text like(STRING_t) const;
+  port like(INTEGER_t);
+  norm like(SCDEF_CRIT_t);
+end-pr;
+
 dcl-pr SCDEF_criterion_usable like(BOOLEAN_t);
   criterion likeds(SCDEF_CRITERION_t) const;
 end-pr;

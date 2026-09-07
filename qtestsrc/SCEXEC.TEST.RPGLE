@@ -25,6 +25,7 @@ ctl-opt bnddir('RMSCPGM':'RMSCDEPS');
 /include 'SCLOG_D.rpgleinc'
 /include 'SCOUT_D.rpgleinc'
 /include 'SCQRY_D.rpgleinc'
+/include 'SCMAIN_D.rpgleinc'
 /include 'include/RMIFS_D.rpgleinc'
 /include 'include/RMTOOLS_D.rpgleinc'
 /include 'include/PSDS_D.rpgleinc'
@@ -67,6 +68,25 @@ dcl-pr load_def like(BOOLEAN_t);
 end-pr;
 
 dcl-pr remove_fixtures end-pr;
+
+// ADHOC PGM- and LONG-ROW blocks - see the two group headers at the end of
+// this suite. Global declarations must precede the first subprocedure, so
+// these live here rather than beside the procedures that use them.
+dcl-pr lg_equal;
+  expected varchar(4096) const;
+  actual   varchar(4096) const;
+  ctx      varchar(64) const;
+end-pr;
+
+dcl-pr tail48 varchar(64);
+  v varchar(4096) const;
+end-pr;
+
+// AD-HOC LONG PORT SPECIFIER block - see the group header at the end of this
+// suite.
+dcl-pr az_spec varchar(512);
+  tail varchar(64) const;
+end-pr;
 
 //==============================================================================
 // Suite set-up and tear-down
@@ -3166,5 +3186,965 @@ dcl-proc test_evaluate_failed_text_length_65_separating export;
           'the suffix material carries the FULL rendering - this is the ' +
           'text that reaches a check row, and a cut criterion there names ' +
           'something that does not exist without anything saying so');
+
+end-proc;
+
+//##############################################################################
+//##                                                                          ##
+//##  AN AD-HOC PORT SPECIFIER THAT IS NOT A PORT NUMBER                      ##
+//##                                                                          ##
+//##############################################################################
+//
+// `scr check port:<value>` builds a definition on the spot rather than reading
+// one, so the value arrives from the COMMAND LINE and has been through no YAML
+// reader and no definition file. SCMAIN_adhoc is where it becomes a criterion,
+// and it is the one place in RMSC that converts such a value without first
+// asking whether it can be converted.
+//
+// MEASURED against sc 1.7.1, same box, same day:
+//
+//   specifier                 upstream sc              RMSC today
+//   port:99999999999999       rc 253, message below    rc 255, CEE9901 MCH1210
+//   port:4294967296           rc 253, message below    rc 255, CEE9901 MCH1210
+//   port:abc                  rc 253, message below    rc 255, CEE9901 RNX0105
+//   port:-1                   rc 0, NOT RUNNING        rc 0, NOT RUNNING
+//   port:65536                rc 0, NOT RUNNING        rc 0, NOT RUNNING
+//
+// and the message, on stderr, is the one SCOUT_invalid_criteria already
+// renders and qtestsrc/SCOUT.TEST.RPGLE already pins byte for byte:
+//
+//   Invalid data for port number or job name criteria for service '<friendly>': PORT:<raw>
+//
+// THE RULE IS THE ONE THE COMPANION FORM ALREADY FOLLOWS - a port value is
+// usable if the trimmed text is an optional sign followed by digits and the
+// number fits the field. There is no second rule for ad-hoc specifiers; there
+// is a second CODE PATH, and it does not implement the rule.
+//
+// THE RIVAL IS A RANGE CHECK ON 1..65535, and it is the obvious thing to write
+// when the symptom is "a bad port number crashes". -1 and 65536 separate it
+// from the truth: both are outside any port range, both are perfectly usable,
+// and upstream simply reports NOT RUNNING for them. A fix that turned those
+// two into errors would pass every case below that names a crash and would be
+// a new parity defect. They are asserted first, and together, for that reason.
+//
+// NOTHING HERE ASSERTS THE AD-HOC NAME. RMSC calls the service 'ad hoc port
+// <value>' and upstream calls it 'Ad hoc service running at port <value>';
+// that divergence is recorded in docs/parity.md and is a separate decision.
+// What is asserted is which values can be used and what happens to the ones
+// that cannot.
+//
+// SCMAIN_adhoc's RETURN VALUE is asserted true even for the values that cannot
+// be used. False means "this specifier is not a port:/job:/PGM- form at all",
+// which sends the caller down the unknown-service path - and the measured
+// message names the ad-hoc service by its FRIENDLY name, so upstream plainly
+// built the definition before rejecting the criterion. Refusing at
+// SCMAIN_adhoc would produce a different message and a different exit status.
+//
+// The three unusable values are in three procedures rather than one. Each
+// abends today, and an abend is an ERROR that ends its procedure - one
+// procedure would report the first value and hide the other two.
+//==============================================================================
+
+//------------------------------------------------------------------------------
+// THE CONTROL, AND THE ONE THAT RULES OUT A RANGE CHECK
+//
+// Both values parse; neither can ever match. MEASURED: rc 0 and NOT RUNNING
+// for each, with nothing on stderr.
+//
+// This passes today and must keep passing. If it goes red alongside a fix,
+// the fix has become a range check.
+//------------------------------------------------------------------------------
+
+dcl-proc test_adhoc_port_outside_any_range_is_still_usable export;
+
+  dcl-ds def likeds(SCDEF_t)       inz(*likeds);
+  dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
+
+  assert(SCMAIN_adhoc('port:-1': def): 'port:-1 is a port: specifier');
+  iEqual(1: def.criteria_count: 'one criterion');
+  aEqualV(SCDEF_CHECK_PORT: def.criteria(1).kind: 'kind is PORT');
+
+  SCEXEC_evaluate(def: ev);
+  iEqual(0: ev.unusable_count:
+         'MEASURED - -1 parses, so it is USABLE. It simply never matches, ' +
+         'and upstream reports NOT RUNNING and exits 0');
+  aEqual('NOT RUNNING': ev.state: 'and it has a status, not an error');
+
+  clear ev;
+  clear def;
+
+  assert(SCMAIN_adhoc('port:65536': def): 'port:65536 is a port: specifier');
+  iEqual(1: def.criteria_count: 'one criterion');
+  aEqualV(SCDEF_CHECK_PORT: def.criteria(1).kind: 'kind is PORT');
+
+  SCEXEC_evaluate(def: ev);
+  iEqual(0: ev.unusable_count:
+         'MEASURED - 65536 is one past the top of the port range and is ' +
+         'still USABLE. The rule is "does it parse", not "is it a port"');
+  aEqual('NOT RUNNING': ev.state: 'and NOT RUNNING, exit 0');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// ONE STEP OVER WHAT THE FIELD CAN HOLD
+//
+// 4294967296 is 2^32 - it parses as digits and does not fit a 32-bit signed
+// integer, which is the boundary the companion form already refuses at
+// (test_port_too_large_for_the_field_is_unusable, one block up).
+//
+// MEASURED: upstream rc 253 with the invalid-criteria line. RMSC today ends
+// the job with MCH1210 converting it, so expect an ERROR rather than a
+// failure until this is fixed.
+//
+// .raw is asserted as well as the count, because the message renders from it:
+// a fix that recognised the value as unusable but did not keep its text would
+// print 'PORT:' with nothing after the colon, and the count alone would not
+// notice.
+//------------------------------------------------------------------------------
+
+dcl-proc test_adhoc_port_over_int_max_is_unusable export;
+
+  dcl-ds def likeds(SCDEF_t)       inz(*likeds);
+  dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
+
+  assert(SCMAIN_adhoc('port:4294967296': def):
+         'still a port: specifier - the value being unusable does not make ' +
+         'the SPECIFIER unrecognised');
+  iEqual(1: def.criteria_count: 'one criterion');
+  aEqualV(SCDEF_CHECK_PORT: def.criteria(1).kind: 'kind is PORT');
+  aEqualV('4294967296': def.criteria(1).raw: 'the text is kept as written');
+
+  SCEXEC_evaluate(def: ev);
+
+  iEqual(1: ev.unusable_count:
+         'too wide for the field: refused, and specifically not truncated ' +
+         'into port 0 and quietly probed');
+  aEqual('PORT:4294967296': ev.unusable_text:
+         'rendered as the message renders it');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// FAR OVER, so no field width could explain it
+//
+// MEASURED: upstream rc 253 with the invalid-criteria line; RMSC MCH1210.
+//------------------------------------------------------------------------------
+
+dcl-proc test_adhoc_port_far_over_int_max_is_unusable export;
+
+  dcl-ds def likeds(SCDEF_t)       inz(*likeds);
+  dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
+
+  assert(SCMAIN_adhoc('port:99999999999999': def): 'a port: specifier');
+  aEqualV(SCDEF_CHECK_PORT: def.criteria(1).kind: 'kind is PORT');
+  aEqualV('99999999999999': def.criteria(1).raw: 'text kept as written');
+
+  SCEXEC_evaluate(def: ev);
+
+  iEqual(1: ev.unusable_count: 'fourteen digits is not a port number');
+  aEqual('PORT:99999999999999': ev.unusable_text:
+         'and the message shows the real value');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// NOT DIGITS AT ALL
+//
+// The same value the companion form already handles correctly
+// (test_port_not_a_number_is_unusable). Here it arrives from the command line
+// instead, and RMSC ends the job with RNX0105 - a different failure code from
+// the two above, which is worth having its own case: they are two conversions,
+// not one, and a fix that guarded only the width would leave this one.
+//
+// MEASURED: upstream rc 253 with the invalid-criteria line.
+//------------------------------------------------------------------------------
+
+dcl-proc test_adhoc_port_not_a_number_is_unusable export;
+
+  dcl-ds def likeds(SCDEF_t)       inz(*likeds);
+  dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
+
+  assert(SCMAIN_adhoc('port:abc': def): 'a port: specifier');
+  aEqualV(SCDEF_CHECK_PORT: def.criteria(1).kind:
+          'kind is PORT - the specifier said so, the value did not');
+  aEqualV('abc': def.criteria(1).raw: 'text kept as written');
+
+  SCEXEC_evaluate(def: ev);
+
+  iEqual(1: ev.unusable_count: 'abc is not a port number');
+  aEqual('PORT:abc': ev.unusable_text: 'rendered for the message');
+
+end-proc;
+
+//##############################################################################
+//##                                                                          ##
+//##  AN AD-HOC PORT SPECIFIER THAT IS A PERFECTLY GOOD PORT                  ##
+//##                                                                          ##
+//##############################################################################
+//
+// The block above this one covers every ad-hoc value that CANNOT be used. It
+// went green, and the change that made it go green also broke every ad-hoc
+// value that CAN be used. Nothing above could see that, because nothing above
+// evaluates a port that is actually listening - and that is the finding worth
+// keeping: a block that covers only the failure case cannot tell a fix from a
+// break.
+//
+// MEASURED on the box, sshd listening on 22, same day:
+//
+//   sc  check port:22   ->  RUNNING      | ad_hoc_port_22 (Ad hoc service ...)
+//   scr check port:22   ->  NOT RUNNING  | port:22 (ad hoc port 22)
+//
+// It is not about 22. SCMAIN_adhoc sets the criterion's raw TEXT and no longer
+// sets its numeric port at all, so every ad-hoc port check probes port 0 -
+// including the ones that are genuinely listening.
+//
+// THE RIVAL THESE CASES MUST RULE OUT IS "THE CRITERION IS USABLE". That is
+// TRUE today, for exactly the value that is broken, and it is why the defect
+// survived a block of five ad-hoc tests: usability is a property of the TEXT
+// and correctness is a property of the NUMBER, and only the text is being set.
+// So .port is asserted directly, as a number, and unusable_count is asserted
+// 0 alongside it - the pair says "usable AND right", which is the thing that
+// is false.
+//
+// Three procedures, not one. A failed assertion ends its test case in
+// iRPGUnit, so a single procedure would report the numeric port and hide the
+// evaluation, or report 22 and hide 8080.
+//
+// THE FIXTURE IS PORT 22 AND sshd. CLAUDE.md names it as the project's
+// always-there fixture - the suite arrived over SSH, so it is listening by
+// construction - and this suite's own test_evaluate_fixture_ports already
+// asserts it rather than skipping on it. tools/gate-listen.py can hold an
+// arbitrary port open and is the better fixture where a test needs a port
+// NOBODY else could be using, but it is an external process: it cannot be
+// started from inside the ILE job iRPGUnit runs in, so a suite depending on
+// it would depend on something it cannot guarantee. Present is not the same
+// as stable, and here the stable one is 22.
+//==============================================================================
+
+//------------------------------------------------------------------------------
+// THE NUMBER REACHES THE CRITERION
+//
+// No system state, no network: this is the whole defect in one assertion. Two
+// values, so the case cannot be read as being about 22.
+//
+// 8080 is the second value because it is the one the rest of this suite uses
+// for a port that is not special in any way. Neither value is evaluated here -
+// what is asserted is what SCMAIN_adhoc BUILT, before anything probes it.
+//------------------------------------------------------------------------------
+
+dcl-proc test_adhoc_port_number_reaches_the_criterion export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+
+  assert(SCMAIN_adhoc('port:22': def): 'port:22 is a port: specifier');
+  iEqual(1: def.criteria_count: 'one criterion');
+  aEqualV(SCDEF_CHECK_PORT: def.criteria(1).kind: 'kind is PORT');
+  aEqualV('22': def.criteria(1).raw: 'the text is kept as written');
+  iEqual(22: def.criteria(1).port:
+         'AND THE NUMBER IS SET. The text alone leaves the probe asking ' +
+         'about port 0, which is what every ad-hoc port check does today');
+
+  clear def;
+
+  assert(SCMAIN_adhoc('port:8080': def): 'port:8080 is a port: specifier');
+  iEqual(1: def.criteria_count: 'one criterion');
+  aEqualV('8080': def.criteria(1).raw: 'the text is kept as written');
+  iEqual(8080: def.criteria(1).port:
+         'not about 22 - no ad-hoc port number is being set');
+
+  clear def;
+
+  // The third value is the one the silent-port control below uses. Its number
+  // is asserted here rather than there so that the control can stay a control:
+  // see the comment in test_adhoc_silent_port_is_not_running.
+  assert(SCMAIN_adhoc('port:' + UNUSED_PORT_TEXT: def): 'a port: specifier');
+  iEqual(59417: def.criteria(1).port:
+         'a listening port and a silent one take the same path, and ' +
+         '59417 is the same value as UNUSED_PORT_TEXT');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// AND IT GETS ALL THE WAY THROUGH
+//
+// The end-to-end half. MEASURED: upstream reports RUNNING for port:22 on this
+// box and RMSC reports NOT RUNNING.
+//
+// unusable_count is asserted 0 in the same case, deliberately. It is 0 today
+// as well, so this assertion passes on both sides of the fix - it is here to
+// say in the failure report that the criterion was never rejected. RMSC does
+// not think port:22 is a bad value; it thinks port 0 is not listening.
+//------------------------------------------------------------------------------
+
+dcl-proc test_adhoc_listening_port_is_running export;
+
+  dcl-ds def likeds(SCDEF_t)       inz(*likeds);
+  dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
+
+  assert(SCMAIN_adhoc('port:' + SSH_PORT_TEXT: def): 'a port: specifier');
+
+  SCEXEC_evaluate(def: ev);
+
+  iEqual(0: ev.unusable_count:
+         'the value is usable - it always was. That is the rival reading ' +
+         'this case exists to rule out: usable is not the same as right');
+  aEqual('RUNNING': ev.state:
+         'MEASURED - sshd is listening on ' + SSH_PORT_TEXT + ' because ' +
+         'this suite arrived over it, and upstream reports RUNNING. RMSC ' +
+         'reports NOT RUNNING because it probed port 0');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// THE OTHER HALF OF THE PAIR - a silent port is NOT RUNNING
+//
+// A CONTROL. It passes today and it passes after the fix, and without it the
+// case above could be satisfied by a fix that reported RUNNING for every
+// ad-hoc port - which is precisely the shape of mistake that produced the
+// defect in the first place, only in the other direction.
+//
+// 59417 is the suite's UNUSED_PORT_TEXT, already relied on by the fixture
+// guard.
+//------------------------------------------------------------------------------
+
+dcl-proc test_adhoc_silent_port_is_not_running export;
+
+  dcl-ds def likeds(SCDEF_t)       inz(*likeds);
+  dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
+
+  assert(SCMAIN_adhoc('port:' + UNUSED_PORT_TEXT: def): 'a port: specifier');
+
+  // NOTHING ABOUT .port IS ASSERTED HERE, deliberately, and it was on the
+  // first run. It is 0 today like every other ad-hoc port, so the case died
+  // on that assertion and never reached the state - which left the control
+  // not controlling anything. A control has to be able to run today. The
+  // numeric port is the case above's job; this one's job is the state, and
+  // it must be green on both sides of the fix.
+  SCEXEC_evaluate(def: ev);
+
+  iEqual(0: ev.unusable_count: 'usable, and simply not there');
+  aEqual('NOT RUNNING': ev.state:
+         'nothing listens on ' + UNUSED_PORT_TEXT + ', so a fix that ' +
+         'hardcoded RUNNING must fail here');
+
+end-proc;
+
+//##############################################################################
+//##                                                                          ##
+//##  AN AD-HOC PORT SPECIFIER LONGER THAN A CRITERION CAN HOLD               ##
+//##                                                                          ##
+//##############################################################################
+//
+// The block above covers ad-hoc values that are SHORT. This one covers a value
+// that is longer than the criterion's raw text can hold, which is where the
+// usability rule and the conversion can be made to disagree: the guard can be
+// applied to one string and the conversion to another, and every short value
+// in this suite goes green either way.
+//
+// MEASURED on this box, 5 September 2026, sshd listening on 22. `Z` below is
+// 128 zero characters.
+//
+//   specifier              upstream sc                     RMSC today
+//   -------------------    ---------------------------     -----------------
+//   port:Z22               RUNNING, rc 0                   RUNNING, rc 0
+//   port:Z4294967296       rc 253, invalid-criteria line   CEE9901 MCH1210
+//                                                          at statement 280
+//
+// (Upstream names the ad-hoc service with the full padded value, RMSC with a
+// cut one. Ad-hoc naming is already a recorded difference in docs/parity.md
+// and nothing here asserts it.)
+//
+// SO LEADING ZEROS ARE NOT SPECIAL AND LENGTH IS NOT SPECIAL. `port:Z22` is
+// port 22, RUNNING, on both implementations - the zeros are stripped and the
+// value parses as decimal 22, which is what Integer.parseInt has always done.
+// It is only the VALUE that decides, and the rule is the one the rest of this
+// suite already pins: an optional sign, digits, and a number that fits.
+//
+// THE RIVAL THIS BLOCK EXISTS TO RULE OUT is "a specifier too long to hold is
+// unusable". That is the obvious fix when the symptom is "a very long port
+// specifier crashes", it makes the crash go away, and it is WRONG: it turns
+// `port:Z22` - RUNNING and rc 0 upstream, and RUNNING in RMSC today - into an
+// error. Which is why the two cases below that use `port:Z22` are here at all.
+// They are green today and must stay green; if a fix makes one of them red,
+// the fix has answered the wrong question, and the difference would have to be
+// argued into docs/parity.md rather than assumed.
+//
+// NOTHING ASSERTS ev.unusable_text IN FULL. The value is 138 characters and a
+// criterion's raw text holds 128, so no implementation can render the whole of
+// it and there is no measured answer for what it renders instead. What IS
+// asserted is that the rendering still starts 'PORT:' and has something after
+// the colon - a fix that recognised the value as unusable but lost its text
+// entirely would print a bare 'PORT:' and no count would notice. What RMSC
+// puts in the message for a value it cannot hold whole is a real question and
+// a separate one; it is raised in the report accompanying these tests, not
+// decided here.
+//
+// One case per procedure, as in the block above: the first abends today, and
+// an abend ends its procedure, so sharing one would hide the two controls.
+//
+// 05/09/2026 - RM - written against the defect, before the fix
+//==============================================================================
+
+//------------------------------------------------------------------------------
+// THE CRASH - a zero-padded value that overflows once the padding is stripped
+//
+// The separating case. 128 zeros then 4294967296: the padding is not the
+// point, the padding is what makes the specifier longer than the criterion's
+// raw text so that a guard reading the raw and a conversion reading the value
+// can be looking at two different strings. Strip the zeros and it is 2^32,
+// exactly the value test_adhoc_port_over_int_max_is_unusable already refuses
+// when it arrives unpadded.
+//
+// MEASURED: upstream rc 253 with the invalid-criteria line. RMSC ends the job
+// with MCH1210, so expect an ERROR rather than a failure until this is fixed.
+//------------------------------------------------------------------------------
+
+dcl-proc test_adhoc_zero_padded_port_over_int_max_is_unusable export;
+
+  dcl-ds def  likeds(SCDEF_t)       inz(*likeds);
+  dcl-ds ev   likeds(SCEXEC_EVAL_t) inz(*likeds);
+  dcl-s  spec varchar(512);
+
+  spec = az_spec('4294967296');
+  iEqual(143: %len(spec):
+         'the measured specifier - port:, 128 zeros, and 4294967296');
+
+  assert(SCMAIN_adhoc(spec: def):
+         'still a port: specifier - the value being unusable does not make ' +
+         'the SPECIFIER unrecognised');
+  iEqual(1: def.criteria_count: 'one criterion');
+  aEqualV(SCDEF_CHECK_PORT: def.criteria(1).kind: 'kind is PORT');
+
+  SCEXEC_evaluate(def: ev);   // today: MCH1210, and the suite ends here
+
+  iEqual(1: ev.unusable_count:
+         'the padded value is 2^32 once the zeros are stripped, so it does ' +
+         'not fit and must be refused - not converted from one string while ' +
+         'a shorter one is what was checked');
+
+  assert((%scan('PORT:': ev.unusable_text) = 1):
+         'and the message still renders as PORT:something');
+  assert((%len(%trimr(ev.unusable_text)) > 5):
+         'with something after the colon - a bare PORT: names nothing, and ' +
+         'the count alone would not notice');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// THE FIRST CONTROL - the same padding, a value that fits
+//
+// GREEN TODAY, on both implementations, and the case that stops the fix being
+// a length check. Nothing about the criterion is evaluated here; what is
+// asserted is the number SCMAIN_adhoc built, before anything probes it.
+//
+// MEASURED: upstream reports RUNNING for this specifier and exits 0, so the
+// number it reached for was 22.
+//------------------------------------------------------------------------------
+
+dcl-proc test_adhoc_zero_padded_port_number_reaches_the_criterion export;
+
+  dcl-ds def  likeds(SCDEF_t) inz(*likeds);
+  dcl-s  spec varchar(512);
+
+  spec = az_spec(SSH_PORT_TEXT);
+  iEqual(135: %len(spec): 'port:, 128 zeros, and 22');
+
+  assert(SCMAIN_adhoc(spec: def): 'a port: specifier');
+  iEqual(1: def.criteria_count: 'one criterion');
+  aEqualV(SCDEF_CHECK_PORT: def.criteria(1).kind: 'kind is PORT');
+
+  iEqual(22: def.criteria(1).port:
+         'MEASURED - 128 leading zeros make no difference to the value, ' +
+         'and upstream probes 22 and reports RUNNING. A specifier too long ' +
+         'to hold is not the same as a value that cannot be used');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// THE SECOND CONTROL - and it gets all the way through
+//
+// GREEN TODAY. The end-to-end half of the case above: RMSC reports RUNNING for
+// this specifier now, and must still report RUNNING afterwards.
+//
+// unusable_count is asserted 0 alongside the state, and it is the assertion
+// that would catch the wrong fix: a length check would leave the state blank
+// and the count 1, and a reader seeing only a state failure could put it down
+// to sshd rather than to the guard.
+//------------------------------------------------------------------------------
+
+dcl-proc test_adhoc_zero_padded_listening_port_is_running export;
+
+  dcl-ds def  likeds(SCDEF_t)       inz(*likeds);
+  dcl-ds ev   likeds(SCEXEC_EVAL_t) inz(*likeds);
+  dcl-s  spec varchar(512);
+
+  spec = az_spec(SSH_PORT_TEXT);
+
+  assert(SCMAIN_adhoc(spec: def): 'a port: specifier');
+
+  SCEXEC_evaluate(def: ev);
+
+  iEqual(0: ev.unusable_count:
+         'the value is usable - it is 22 with padding in front of it, and ' +
+         'a fix that refused it for its LENGTH would fail here');
+  aEqual('RUNNING': ev.state:
+         'MEASURED - upstream reports RUNNING for this specifier and so ' +
+         'does RMSC today, because sshd is listening on ' + SSH_PORT_TEXT);
+
+end-proc;
+
+//##############################################################################
+//##                                                                          ##
+//##  AN AD-HOC PGM- SPECIFIER AND THE SAME PROGRAM NAMED IN A FILE           ##
+//##                                                                          ##
+//##############################################################################
+//
+// A criterion naming a PROGRAM can be reached two ways - `check_alive:
+// PGM-X` in a definition file, and `PGM-X` on the command line - and the two
+// must arrive at the same criterion. They do not.
+//
+// MEASURED on this box, 5 September 2026:
+//
+//   from a file, check_alive: PGM-ZZNOSUCHPGM
+//       sc  info -> Check-alive conditions: JOBNAME:PGM-ZZNOSUCHPGM
+//       scr info -> Check-alive conditions: JOBNAME:PGM-ZZNOSUCHPGM
+//
+//   ad hoc, PGM-ZZNOSUCHPGM on the command line
+//       scr info -> Check-alive conditions: JOBNAME:ZZNOSUCHPGM
+//
+// The ad-hoc path drops the PGM- prefix from the criterion's raw text; the
+// file path keeps it, and the file path is the one that agrees with upstream.
+//
+// THIS IS NOT A PARITY QUESTION. Upstream has no ad-hoc PGM- form at all - it
+// answers "Could not find definition for service 'PGM-ZZNOSUCHPGM'". It is
+// RMSC disagreeing with itself, and that is why the assertion below compares
+// the two RMSC paths to EACH OTHER rather than each to a literal: the two
+// must agree whatever the rendering is, and a case written against a literal
+// would have to be rewritten the day the rendering moved and would then stop
+// saying the thing it exists to say.
+//
+// IT MATTERS BEYOND DISPLAY. The raw text is what conflict detection compares,
+// so an ad-hoc PGM-X today claims the same criterion as a service whose JOB
+// NAME is X. That consequence is NOT asserted here, and could not be: nothing
+// exported puts a definition built by SCMAIN_adhoc into an SCCOLL_t, so
+// SCCOLL_conflicts cannot be reached from an ad-hoc definition from a suite.
+// Writing a conflict case over two FILE definitions instead would have been
+// green today and green after the fix - it would have tested the path that
+// already works. Said here rather than left as a gap somebody rediscovers.
+//
+// THE RIVAL is "the ad-hoc path is fine and only the file path is unusual".
+// test_adhoc_job_renders_as_the_file_form_does rules it out: the same
+// comparison over the JOB form is green today, so the two paths agree in
+// general and disagree on exactly this one specifier.
+//
+// 05/09/2026 - RM - written against the defect, before the fix
+//==============================================================================
+
+//==============================================================================
+// THE SEPARATING CASE - PGM- reaches the same criterion from both directions
+//
+// Red today: the ad-hoc side renders JOBNAME:ZZNOSUCHPGM where the file side
+// renders JOBNAME:PGM-ZZNOSUCHPGM.
+//
+// The program cannot exist. ZZ- names nothing on this box, which is the same
+// convention the rest of this suite's dead fixtures follow, and the criterion
+// is never probed here in any case - what is asserted is what the two paths
+// BUILT.
+//==============================================================================
+
+dcl-proc test_adhoc_pgm_renders_as_the_file_form_does export;
+
+  dcl-ds filed likeds(SCDEF_t) inz(*likeds);
+  dcl-ds adhoc likeds(SCDEF_t) inz(*likeds);
+  dcl-s  f     varchar(512);
+  dcl-s  a     varchar(512);
+
+  // The file path first - it is the one that matches upstream, so it is the
+  // expected value and not merely the other half of a comparison.
+  assert(pt_load_def('adhocpgm.yaml':
+    'name: ZZ adhoc pgm' + LF +
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: PGM-ZZNOSUCHPGM' + LF: filed): 'the file form loads');
+
+  iEqual(1: filed.criteria_count: 'one criterion from the file');
+  f = SCDEF_criterion_text(filed.criteria(1));
+
+  assert(SCMAIN_adhoc('PGM-ZZNOSUCHPGM': adhoc):
+         'PGM-ZZNOSUCHPGM is recognised as an ad-hoc specifier');
+
+  iEqual(1: adhoc.criteria_count: 'one criterion from the command line');
+  a = SCDEF_criterion_text(adhoc.criteria(1));
+
+  aEqual(f: a:
+         'the same program named two ways must be the same criterion - ' +
+         'file gives "' + %trim(f) + '", ad hoc gives "' + %trim(a) + '"');
+
+end-proc;
+
+//==============================================================================
+// THE CONTROL - the ad-hoc JOB form already agrees with the file form
+//
+// Green today and must stay green. Two things rest on it:
+//
+//   - it rules out "the ad-hoc path renders differently in general", which
+//     would make the case above a statement about ad-hoc criteria rather
+//     than about the PGM- prefix;
+//   - it fails a fix that prepends PGM- to every ad-hoc job criterion, or
+//     that repairs the raw text by re-deriving it from the split-out job
+//     name for all of them. Both would make the case above pass.
+//==============================================================================
+
+dcl-proc test_adhoc_job_renders_as_the_file_form_does export;
+
+  dcl-ds filed likeds(SCDEF_t) inz(*likeds);
+  dcl-ds adhoc likeds(SCDEF_t) inz(*likeds);
+  dcl-s  f     varchar(512);
+  dcl-s  a     varchar(512);
+
+  assert(pt_load_def('adhocjob.yaml':
+    'name: ZZ adhoc job' + LF +
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: ZZNOSUCHJOB' + LF: filed): 'the file form loads');
+
+  iEqual(1: filed.criteria_count: 'one criterion from the file');
+  f = SCDEF_criterion_text(filed.criteria(1));
+
+  assert(SCMAIN_adhoc('job:ZZNOSUCHJOB': adhoc):
+         'job:ZZNOSUCHJOB is recognised as an ad-hoc specifier');
+
+  iEqual(1: adhoc.criteria_count: 'one criterion from the command line');
+  a = SCDEF_criterion_text(adhoc.criteria(1));
+
+  aEqual(f: a:
+         'the job form already agrees - file gives "' + %trim(f) +
+         '", ad hoc gives "' + %trim(a) + '"');
+
+end-proc;
+
+//##############################################################################
+//##                                                                          ##
+//##  A CHECK ROW LONG ENOUGH TO BE CUT                                       ##
+//##                                                                          ##
+//##############################################################################
+//
+// THE ARITHMETIC, stated so a reader can check it rather than trust it:
+//
+//   a definition may carry               8 criteria
+//   one criterion's value may be       128 characters
+//   a rendering is 'JOBNAME:' + value  136 characters
+//   joined with ', '                     8 x 136 + 7 x 2 = 1102 characters
+//
+// THAT WORST CASE CANNOT BE WRITTEN IN A FILE, and finding out why is what
+// this block cost. Eight values of 128 need 8 x 128 + 7 commas = 1031
+// characters of check_alive:, and A YAML SCALAR IS CAPPED AT 1024. The
+// original fixture here therefore lost seven characters off its eighth value
+// before SCEXEC ever saw it, and the case went red at the YAML layer while
+// claiming to be about the row. The cap is now a REFUSAL rather than a silent
+// cut - see the SCALAR LENGTH block in SCDEF.TEST - so the same fixture would
+// no longer load at all.
+//
+// SO THE FIXTURE BELOW USES 127, NOT 128:
+//
+//   8 x 127 + 7 commas                   1023 characters of check_alive:
+//   a rendering is 'JOBNAME:' + 127       135 characters
+//   joined with ', '                     8 x 135 + 7 x 2 = 1094 characters
+//
+// 1023 fits the scalar cap with one character to spare, and 1094 is still 70
+// characters past the 1024 the line type held when this was written, so the
+// case still separates exactly what it was written to separate. Nothing here
+// was relaxed to make it pass: the fixture moved to the layer under test and
+// the assertion did not move at all.
+//
+// and a check row is
+//
+//   '  ' + status padded to 18 + ' | ' + name + ' (' + desc + ') '
+//        + '[not running at -->' + that text + ']'
+//
+// so the worst case is comfortably past 1024, which is what the line type
+// holds today. The row is cut, and what is lost is the tail: part of the
+// eighth criterion and the closing bracket. Nothing says so.
+//
+// THIS IS NEW. Before the criterion width was raised to 128 the worst case
+// was around 590 characters and could not overflow, so no existing test
+// reaches the width and none would notice it moving.
+//
+// WHY THE ROW AND NOT ONLY THE TEXT. The consumer screen-scrapes check output
+// and drops any row that does not yield three fields; a row cut mid-criterion
+// still yields three, so the loss is silent at every layer. Both are asserted,
+// in that order, so a failure says WHERE the material was lost - in the
+// evaluation or in the rendering - rather than only that it was.
+//
+// THE INSTRUMENT IS 4096 WIDE ON PURPOSE. This suite's own aEqualV is 512,
+// and a value of a thousand characters handed to it arrives truncated on BOTH
+// sides, so
+// it would compare two cut strings, find them equal, and report the defect it
+// exists to detect as a pass. lg_equal is used instead. Do not narrow it, and
+// do not reach for aEqualV here.
+//
+// EVERY JOB NAME IS DEAD AND UPPER CASE - dead so all eight criteria genuinely
+// fail (128 characters is twelve times what an IBM i job name holds, and
+// test_long_job_name_is_usable measures that upstream accepts a name of any
+// length and reports it not running), upper case so the row is about LENGTH
+// and cannot go red because the folding rule moved.
+//
+// NOT PARTIAL, unlike the length tests above it: all eight fail, the state is
+// NOT RUNNING, and that is the row that carries the longest possible suffix -
+// eight renderings rather than seven.
+//
+// 05/09/2026 - RM - written against the defect, before the fix
+//==============================================================================
+
+//------------------------------------------------------------------------------
+// lg_equal - compare two values that may be longer than 1024 characters
+//
+// Reports lengths and the last 48 characters of each rather than the whole of
+// both: a failure message carrying two 1102-character strings is unreadable in
+// the RUCALLTST output, and the tail is where the interesting difference is.
+//------------------------------------------------------------------------------
+dcl-proc lg_equal;
+  dcl-pi *n;
+    expected varchar(4096) const;
+    actual   varchar(4096) const;
+    ctx      varchar(64) const;
+  end-pi;
+
+  dcl-s etail varchar(64);
+  dcl-s atail varchar(64);
+
+  if %trimr(expected) = %trimr(actual);
+    assert(*on: %trim(ctx));
+    return;
+  endif;
+
+  etail = tail48(expected);
+  atail = tail48(actual);
+
+  assert(*off: %trim(ctx) + ': expected ' + %char(%len(%trimr(expected))) +
+               ' chars ending "' + %trim(etail) + '" but got ' +
+               %char(%len(%trimr(actual))) + ' chars ending "' +
+               %trim(atail) + '"');
+
+end-proc;
+
+dcl-proc tail48;
+  dcl-pi *n varchar(64);
+    v varchar(4096) const;
+  end-pi;
+
+  dcl-s t varchar(4096);
+
+  t = %trimr(v);
+  if %len(t) <= 48;
+    return t;
+  endif;
+
+  return %subst(t: %len(t) - 47: 48);
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// az_spec - an ad-hoc port specifier padded with 128 leading zeros
+//
+// 128 is the width a criterion's raw text holds, so 'port:' + 128 zeros + a
+// value is a specifier whose value cannot be held whole however short the
+// value itself is. That is the whole point of the padding: it separates the
+// string a guard might read from the string a conversion reads. The zeros
+// themselves mean nothing - MEASURED, upstream strips them and parses what is
+// left as decimal.
+//
+// Built in a loop rather than written out, because 128 characters of zeros in
+// a source line is unreadable and miscountable, and every caller asserts the
+// length of what comes back rather than trusting this comment.
+//------------------------------------------------------------------------------
+dcl-proc az_spec;
+  dcl-pi *n varchar(512);
+    tail varchar(64) const;
+  end-pi;
+
+  dcl-s z varchar(256);
+  dcl-s i like(INTEGER_t);
+
+  for i = 1 to 128;
+    z += '0';
+  endfor;
+
+  return 'port:' + z + %trimr(tail);
+
+end-proc;
+
+//==============================================================================
+// THE SEPARATING CASE, EVALUATION SIDE - eight criteria of 135 characters
+//
+// 1094 characters of failed text out of an evaluation, from a check_alive: of
+// 1023 that the YAML layer can hold whole. The row built from the same eight
+// renderings is the case after this one.
+//==============================================================================
+
+dcl-proc test_check_row_eight_long_criteria_is_not_cut export;
+
+  dcl-ds def   likeds(SCDEF_t)       inz(*likeds);
+  dcl-ds ev    likeds(SCEXEC_EVAL_t) inz(*likeds);
+  dcl-s  v     varchar(256) dim(8);
+  dcl-s  ca    varchar(2048);
+  dcl-s  want  varchar(4096);
+  dcl-s  got   varchar(4096);
+  dcl-s  i     like(INTEGER_t);
+
+  for i = 1 to 8;
+    v(i) = lc_jobname('L8' + %char(i): 127);
+    if i = 1;
+      ca   = v(i);
+      want = 'JOBNAME:' + v(i);
+    else;
+      ca   += ',' + v(i);
+      want += ', JOBNAME:' + v(i);
+    endif;
+  endfor;
+
+  // The fixture states its own arithmetic. If either of these fails the
+  // header's numbers are wrong and nothing below means what it says. 1023 is
+  // one under the 1024 a YAML scalar holds, deliberately: a fixture of 1031
+  // is refused by the YAML layer and never reaches the one under test here.
+  iEqual(1023: %len(ca):   'eight 127-character values, comma separated');
+  iEqual(1094: %len(want): 'and eight renderings joined with ", "');
+
+  assert(pt_load_def('lcrow8.yaml':
+    'name: ZZ row8' + LF +
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: ' + ca + LF: def): 'load');
+
+  iEqual(8: def.criteria_count: 'all eight criteria survive the load');
+
+  SCEXEC_evaluate(def: ev);
+
+  aEqual('NOT RUNNING': ev.state: 'none of the eight can be satisfied');
+  iEqual(0: ev.alive:        'none alive');
+  iEqual(8: ev.total:        'of eight');
+  iEqual(8: ev.failed_count: 'and all eight failed');
+
+  // The eighth rendering must be present and whole.
+  got = %trimr(ev.failed_text);
+  assert((%scan('JOBNAME:' + v(8): got) > 0):
+         'the eighth rendering is in failed_text whole - it holds ' +
+         %char(%len(got)) + ' characters of the 1094 it was given');
+  lg_equal(want: got: 'failed_text carries all eight renderings');
+
+  // The ROW is the other half, and it is a SEPARATE case rather than three
+  // more assertions here. A failed assertion ends its procedure, so a row
+  // assertion placed after the one above could not run until the evaluation
+  // side was fixed - it would sit dark today and report nothing about the
+  // layer it is for. See test_check_row_long_suffix_is_not_cut.
+
+end-proc;
+
+//==============================================================================
+// THE SEPARATING CASE, RENDERING SIDE - a 1102-character suffix in a row
+//
+// The same eight renderings, built here rather than taken from an evaluation,
+// so this case is not blocked by the one above: whichever of the two layers
+// is fixed first, the other still reports.
+//
+// A row carrying this suffix is
+//
+//   2 + 18 + 3 + 6 + 2 + 7 + 2 + 19 + 1102 + 1  =  1162 characters
+//
+// MEASURED, first run: 1024. The last 138 characters - the tail of the eighth
+// criterion and the bracket - are gone.
+//
+// so nothing 1024 wide can hold it. What is lost is the tail - part of the
+// eighth criterion and the closing bracket - and the consumer still sees
+// three fields either way, so the loss raises nothing.
+//
+// IT LIVES IN THIS SUITE rather than in SCOUT.TEST because it needs the same
+// eight values and the same 4096-wide instrument the case above needs, and
+// because the length that overflows is a property of what SCEXEC_evaluate
+// hands over. SCOUT.TEST pins the row's FORMAT; this pins that the row is
+// whole at the longest suffix a definition can produce.
+//==============================================================================
+
+dcl-proc test_check_row_long_suffix_is_not_cut export;
+
+  dcl-s v     varchar(256) dim(8);
+  dcl-s want  varchar(4096);
+  dcl-s row   like(SCOUT_LINE_t);
+  dcl-s rtext varchar(4096);
+  dcl-s i     like(INTEGER_t);
+
+  for i = 1 to 8;
+    v(i) = lc_jobname('L8' + %char(i): 128);
+    if i = 1;
+      want = 'JOBNAME:' + v(i);
+    else;
+      want += ', JOBNAME:' + v(i);
+    endif;
+  endfor;
+
+  iEqual(1102: %len(want): 'eight renderings joined with ", "');
+
+  row = SCOUT_check_row('NOT RUNNING': 'lcrow8': 'ZZ row8':
+                        SCOUT_not_running_suffix(want));
+  rtext = %trimr(row);
+
+  assert((%len(rtext) > 0): 'the row is not blank');
+  assert((%scan('JOBNAME:' + v(8): rtext) > 0):
+         'the eighth criterion is in the row whole - the row holds ' +
+         %char(%len(rtext)) + ' characters');
+  assert((%subst(rtext: %len(rtext): 1) = ']'):
+         'and the row ends with its closing bracket, not mid-criterion - ' +
+         'it ends "' + %trim(tail48(rtext)) + '"');
+
+end-proc;
+
+//==============================================================================
+// THE CONTROL - two short criteria, a row that fits
+//
+// Green today and after any fix. It rules out a "fix" that stopped emitting
+// the suffix, or shortened it, or dropped criteria past the first few: every
+// one of those would satisfy the case above by making the row fit, and every
+// one of them fails here.
+//
+// 20-character values, 28 rendered, 58 joined. Nothing near any width.
+//==============================================================================
+
+dcl-proc test_check_row_two_short_criteria_control export;
+
+  dcl-ds def   likeds(SCDEF_t)       inz(*likeds);
+  dcl-ds ev    likeds(SCEXEC_EVAL_t) inz(*likeds);
+  dcl-s  v1    varchar(256);
+  dcl-s  v2    varchar(256);
+  dcl-s  want  varchar(4096);
+  dcl-s  got   varchar(4096);
+  dcl-s  row   like(SCOUT_LINE_t);
+  dcl-s  rtext varchar(4096);
+
+  v1 = lc_jobname('C2A': 20);
+  v2 = lc_jobname('C2B': 20);
+
+  want = 'JOBNAME:' + v1 + ', JOBNAME:' + v2;
+  iEqual(58: %len(want): 'two renderings of 28, joined with ", "');
+
+  assert(pt_load_def('lcrow2.yaml':
+    'name: ZZ row2' + LF +
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: ' + v1 + ',' + v2 + LF: def): 'load');
+
+  iEqual(2: def.criteria_count: 'two criteria');
+
+  SCEXEC_evaluate(def: ev);
+
+  aEqual('NOT RUNNING': ev.state: 'neither job exists');
+  iEqual(2: ev.failed_count: 'both failed');
+
+  got = %trimr(ev.failed_text);
+  lg_equal(want: got: 'failed_text carries both renderings');
+
+  row = SCOUT_check_row(ev.state: def.short_name: def.friendly:
+                        SCOUT_not_running_suffix(got));
+  rtext = %trimr(row);
+
+  assert((%subst(rtext: %len(rtext): 1) = ']'):
+         'the row ends with its closing bracket');
+  assert((%scan('JOBNAME:' + v2: rtext) > 0):
+         'and the second criterion is in the row whole');
 
 end-proc;

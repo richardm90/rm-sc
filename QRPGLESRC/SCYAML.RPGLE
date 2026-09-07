@@ -55,18 +55,32 @@ dcl-pr strip_comment like(STRING_t);
   line like(STRING_t) const;
 end-pr;
 
+// STRING_t in, SCYAML_VALUE_t out: the input is the text as WRITTEN, which is
+// longer than what it stores - quotes, and doubled apostrophes that collapse.
+// Taking SCYAML_VALUE_t here truncated the argument at the call, which removed
+// the closing quote and left unquote with nothing to match.
 dcl-pr unquote like(SCYAML_VALUE_t);
-  value like(SCYAML_VALUE_t) const;
+  value like(STRING_t) const;
+end-pr;
+
+dcl-pr stored_len like(INTEGER_t);
+  text like(STRING_t) const;
+end-pr;
+
+dcl-pr too_long_err like(SCYAML_ERROR_t);
+  key   like(SCYAML_KEY_t) const;
+  line  like(INTEGER_t) const;
+  limit like(INTEGER_t) const;
 end-pr;
 
 dcl-pr is_null_literal like(BOOLEAN_t);
-  value like(SCYAML_VALUE_t) const;
+  value like(STRING_t) const;
 end-pr;
 
 dcl-pr split_flow like(BOOLEAN_t);
   doc       likeds(SCYAML_DOC_t);
   key_index like(INTEGER_t) const;
-  value     like(SCYAML_VALUE_t) const;
+  value     like(STRING_t) const;
   line_no   like(INTEGER_t) const;
 end-pr;
 
@@ -90,6 +104,8 @@ dcl-proc SCYAML_parse export;
   dcl-s work      like(STRING_t);
   dcl-s key_name  like(SCYAML_KEY_t);
   dcl-s value     like(SCYAML_VALUE_t);
+  // The text as WRITTEN, before quotes are removed - wider than what it stores.
+  dcl-s raw_val   like(STRING_t);
   dcl-s item      like(SCYAML_ITEM_t);
   dcl-s colon     like(INTEGER_t);
   dcl-s cur_key   like(INTEGER_t) inz(0);
@@ -144,6 +160,16 @@ dcl-proc SCYAML_parse export;
       if %len(work) = 1;
         item = '';
       else;
+        // Length checked BEFORE the assignment, because the assignment is
+        // where the silence happens - see the key/value path below for the
+        // full reasoning. A sequence item lands in the same width and was
+        // cut the same way.
+        if stored_len(%subst(work: 2)) > SCYAML_ITEM_SIZE;
+          doc.err = too_long_err(doc.keys(cur_key).name: line_no:
+                                 SCYAML_ITEM_SIZE);
+          IFS_fclose(handle);
+          return false;
+        endif;
         item = %trim(unquote(%trim(%subst(work: 2))));
       endif;
 
@@ -170,9 +196,35 @@ dcl-proc SCYAML_parse export;
 
     key_name = %subst(work: 1: colon - 1);
     if colon = %len(work);
-      value = '';
+      raw_val = '';
     else;
-      value = %trim(%subst(work: colon + 1));
+      // A SCALAR TOO LONG TO HOLD INVALIDATES THE DEFINITION, and the check
+      // has to happen HERE - one line before the assignment - because the
+      // assignment is the truncation. Once `value` holds it, the evidence
+      // that anything was lost is gone.
+      //
+      // Silent truncation is the failure being removed. A `start_cmd` longer
+      // than this was cut and then RUN, so RMSC executed a command nobody
+      // wrote. Nothing detected it: the definition loaded, the service
+      // listed, and a truncated command line is often still a valid one.
+      //
+      // It was found by a test fixture tripping over the cap while aiming at
+      // a different one - the fifth in a chain where each was invisible until
+      // the one above it was widened. Upstream is Java and has no limit here,
+      // so this is a divergence either way; refusing is the same rule RMSC
+      // applies to every other value it cannot represent, rather than a new
+      // one invented for this case.
+      if stored_len(%subst(work: colon + 1)) > SCYAML_VALUE_SIZE;
+        doc.err = too_long_err(key_name: line_no: SCYAML_VALUE_SIZE);
+        IFS_fclose(handle);
+        return false;
+      endif;
+      // Kept in a WIDE holder. `value` is exactly the storable width, so
+      // assigning the written text to it first would cut the closing quote
+      // off anything at the limit - and then unquote, finding no matching
+      // pair, would hand back the text with its opening quote still on.
+      // Guarding the length and then truncating it anyway is no guard at all.
+      raw_val = %trim(%subst(work: colon + 1));
     endif;
 
     cur_key = add_key(doc: key_name);
@@ -184,11 +236,14 @@ dcl-proc SCYAML_parse export;
     endif;
 
     // Inline flow sequence, including the empty '[]'
-    if %len(value) >= 2
-       and %subst(value: 1: 1) = '['
-       and %subst(value: %len(value): 1) = ']';
+    // raw_val, not value: `value` is not filled until the unquote below, and
+    // reading it here left every inline sequence undetected - `[a, b]` parsed
+    // as a plain scalar. Caught by SCYAML.TEST the moment it was built.
+    if %len(raw_val) >= 2
+       and %subst(raw_val: 1: 1) = '['
+       and %subst(raw_val: %len(raw_val): 1) = ']';
       doc.keys(cur_key).is_seq = true;
-      if not split_flow(doc: cur_key: value: line_no);
+      if not split_flow(doc: cur_key: raw_val: line_no);
         // split_flow sets doc.err itself at every point it can fail. It used
         // to be the caller's job to supply the item-ceiling message, which
         // meant any future failure inside split_flow that forgot to set err
@@ -201,10 +256,10 @@ dcl-proc SCYAML_parse export;
     endif;
 
     // An unquoted null is an absent value, not the text 'null'
-    if is_null_literal(value);
+    if is_null_literal(raw_val);
       value = '';
     else;
-      value = unquote(value);
+      value = unquote(raw_val);
     endif;
 
     doc.keys(cur_key).value = value;
@@ -419,10 +474,10 @@ end-proc;
 
 dcl-proc unquote;
   dcl-pi *n like(SCYAML_VALUE_t);
-    value like(SCYAML_VALUE_t) const;
+    value like(STRING_t) const;
   end-pi;
 
-  dcl-s work  like(SCYAML_VALUE_t);
+  dcl-s work  like(STRING_t);
   dcl-s first char(1);
   dcl-s last  char(1);
   dcl-s pos   like(INTEGER_t);
@@ -477,10 +532,10 @@ end-proc;
 
 dcl-proc is_null_literal;
   dcl-pi *n like(BOOLEAN_t);
-    value like(SCYAML_VALUE_t) const;
+    value like(STRING_t) const;
   end-pi;
 
-  dcl-s work like(SCYAML_VALUE_t);
+  dcl-s work like(STRING_t);
 
   work = %trim(value);
   if work = '~';
@@ -579,12 +634,16 @@ dcl-proc split_flow;
   dcl-pi *n like(BOOLEAN_t);
     doc       likeds(SCYAML_DOC_t);
     key_index like(INTEGER_t) const;
-    value     like(SCYAML_VALUE_t) const;
+    value     like(STRING_t) const;
     line_no   like(INTEGER_t) const;
   end-pi;
 
-  dcl-s inner like(SCYAML_VALUE_t);
+  dcl-s inner like(STRING_t);
   dcl-s part  like(SCYAML_ITEM_t);
+  // Wide enough to hold the candidate BEFORE it is measured. Measuring `part`
+  // would measure what survived the assignment, which is the truncation this
+  // guards against - the same trap as the key/value path.
+  dcl-s cand  like(STRING_t);
   dcl-s comma like(INTEGER_t);
 
   // Drop the enclosing brackets
@@ -598,10 +657,10 @@ dcl-proc split_flow;
   dow %len(inner) > 0;
     comma = next_comma(inner);
     if comma = 0;
-      part = %trim(inner);
+      cand = %trim(inner);
       inner = '';
     else;
-      part = %trim(%subst(inner: 1: comma - 1));
+      cand = %trim(%subst(inner: 1: comma - 1));
 
       // '[a,]' is valid YAML and abended here: a comma in the last position
       // leaves nothing after it, and %SUBST rejects a start beyond the end.
@@ -617,12 +676,28 @@ dcl-proc split_flow;
     // flow node'. A comma in the LAST position is different - it leaves
     // nothing after it, and that is tolerated. Measured against sc 1.7.1;
     // '[a,]' loads with one item where '[a,,b]' loads not at all.
-    if %len(part) = 0;
+    // An inline item is held in the same width as a block one and had NO
+    // length check of any kind. It looked guarded from a distance because a
+    // very long one is refused - but by the key LINE's scalar rule, since
+    // 'groups: [<1025 chars>]' is a 1027-character value. So the band that
+    // fell through was 513 to about 1022: long enough to be cut, short enough
+    // that nothing else objected. Measured.
+    if stored_len(cand) > SCYAML_ITEM_SIZE;
+      doc.err = too_long_err(doc.keys(key_index).name: line_no:
+                             SCYAML_ITEM_SIZE);
+      return false;
+    endif;
+    // Unquoted BEFORE it lands in an item-width holder, for the same reason
+    // as the scalar above. The block-sequence path already did this, which is
+    // why it was the only one of the three that behaved.
+    part = unquote(cand);
+
+    if %len(cand) = 0;
       doc.err = 'Empty item in flow sequence at line ' + %char(line_no);
       return false;
     endif;
 
-    if not add_item(doc: key_index: unquote(part));
+    if not add_item(doc: key_index: part);
       doc.err = 'More than ' + %char(SCYAML_MAX_ITEMS) +
                 ' sequence items at line ' + %char(line_no);
       return false;
@@ -707,6 +782,104 @@ dcl-proc find_key;
   endfor;
 
   return 0;
+
+end-proc;
+
+//==============================================================================
+// stored_len
+//   How many characters this text will occupy ONCE STORED.
+//
+// The guards must measure what unquote will produce, not what was written.
+// Measuring the raw text refused values that fit: a scalar of 1024 characters
+// inside quotes is 1026 as written, and was rejected although what it stores
+// is exactly 1024. A false rejection hides a VALID service, which is worse
+// than the silent truncation the guards replaced.
+//
+// AND THE CORRECTION IS NOT "ALLOW TWO MORE". A single-quoted scalar escapes
+// an apostrophe by doubling it, and unquote collapses each pair - so the text
+// shrinks by two for the quotes AND by one for every doubled apostrophe.
+// Measured by walking the boundary a character at a time: with one doubled
+// apostrophe the effective limit under a raw measurement was limit MINUS
+// THREE, and under a limit-plus-two rule it would still be wrong, by one for
+// each apostrophe.
+//
+// So this counts rather than guesses, and it deliberately mirrors unquote
+// above - if that changes, this must change with it. It counts without
+// building the string, which matters: materialising it would need a holder,
+// and a holder is the truncation being guarded against.
+//==============================================================================
+
+dcl-proc stored_len;
+  dcl-pi *n like(INTEGER_t);
+    text like(STRING_t) const;
+  end-pi;
+
+  dcl-s work  like(STRING_t);
+  dcl-s first char(1);
+  dcl-s last  char(1);
+  dcl-s n     like(INTEGER_t);
+  dcl-s i     like(INTEGER_t);
+
+  work = %trim(text);
+  if %len(work) < 2;
+    return %len(work);
+  endif;
+
+  first = %subst(work: 1: 1);
+  last  = %subst(work: %len(work): 1);
+
+  if first = '"' and last = '"';
+    return %len(work) - 2;
+  endif;
+
+  if first <> '''' or last <> '''';
+    return %len(work);
+  endif;
+
+  // Single-quoted: the pair goes, and each doubled apostrophe inside becomes
+  // one. Counted left to right so a run of them cannot be double-counted.
+  n = %len(work) - 2;
+  i = 2;
+  dow i < %len(work);
+    if %subst(work: i: 1) = '''' and i + 1 < %len(work)
+       and %subst(work: i + 1: 1) = '''';
+      n -= 1;
+      i += 2;
+    else;
+      i += 1;
+    endif;
+  enddo;
+
+  return n;
+
+end-proc;
+
+//==============================================================================
+// too_long_err
+//   One wording for both paths that can exceed the scalar width.
+//
+// The key and the line number are both named because a definition can carry
+// several long values, and "a value is too long" without saying which one
+// sends the reader looking through a file for something they cannot see - the
+// whole point being that the excess is invisible in the loaded value.
+//==============================================================================
+
+dcl-proc too_long_err;
+  dcl-pi *n like(SCYAML_ERROR_t);
+    key   like(SCYAML_KEY_t) const;
+    line  like(INTEGER_t) const;
+    limit like(INTEGER_t) const;
+  end-pi;
+
+  // The LIMIT IS A PARAMETER because there are two of them and they differ:
+  // a scalar holds SCYAML_VALUE_SIZE, a sequence item holds
+  // SCYAML_ITEM_SIZE, which is half of it. The first version of this hard
+  // coded the scalar size and was called from both paths, so the sequence
+  // guard tested the wrong number - it let 513 to 1024 characters through to
+  // be truncated silently, and would have named the wrong limit if it ever
+  // did fire.
+  return 'Value for ''' + %trim(key) + ''' at line ' + %char(line) +
+         ' is longer than ' + %char(limit) + ' characters';
 
 end-proc;
 

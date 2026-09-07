@@ -128,4 +128,6 @@ STRPGMEXP PGMLVL(*CURRENT) SIGNATURE('RMSC 0.2.0')
   /* Silence, for the bound-call API - see SCOUT_D. Appended, never inserted. */
   EXPORT SYMBOL(SCOUT_set_silent)
   EXPORT SYMBOL(SCOUT_silent)
+  /* Validates, converts and normalises a port from ONE string - see SCDEF. */
+  EXPORT SYMBOL(SCDEF_port_text)
 ENDPGMEXP

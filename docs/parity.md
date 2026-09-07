@@ -114,7 +114,8 @@ matching without the list being updated, so the classification cannot quietly go
 
 ## Differences that are intentional
 
-Both are specified by the plan, in the plan's own words.
+The first two are specified by the plan, in the plan's own words. The third was decided by
+Richard on 5 September 2026 and is the only one here that is not.
 
 **`file` — "Raw YAML passthrough".** The Risks section depends on this behaviour: *"`scr file
 <svc>` prints the raw file so the source of truth stays inspectable"*. Printing the path
@@ -122,6 +123,86 @@ instead, as upstream does, would remove a documented safeguard against YAML drif
 
 **`scrunattrs` — "`SCOMMANDER_*` vars from the running job".** That is what RMSC emits. Upstream
 reports something different under the same verb; the plan chose this meaning deliberately.
+
+**An out-of-range wait time invalidates the definition; upstream silently wraps it.**
+`startup_wait_time` and `stop_wait_time` outside a 32-bit signed integer are refused by RMSC, and
+the service does not load. Upstream parses as a long and casts to int, so the value survives as
+something else entirely. Measured, 5 September 2026:
+
+| value | upstream | RMSC |
+|---|---|---|
+| `2147483647` | 2147483647 | 2147483647 — agree |
+| `2147483648` | **-2147483648** | definition refused |
+| `4294967296` | **0** | definition refused |
+| `99999999999999` | **276447231** | definition refused |
+| `-2147483648` | -2147483648 | -2147483648 — agree |
+| `-2147483649` | **2147483647** (wraps, sign flips) | definition refused |
+| `-99999999999999` | **-276447231** | definition refused |
+| `abc` | definition refused | definition refused — agree |
+| `-5`, `0`, `30` | as written | as written — agree |
+
+Upstream wraps symmetrically at both ends, so the divergence is one rule and not two.
+
+**Richard's decision, and the reasoning, because the reasoning is the part that generalises:**
+
+> A definition that is not valid should not be listed to stdout. That model already exists. It
+> does get reported, via stderr rather than stdout. That is different to `sc` in this case, but
+> `sc` is just wrong here.
+
+So this is **not an exception carved out for one attribute** — it is an instance of a rule RMSC
+already applies. A definition with no `start_cmd`, no `check_alive`, malformed YAML, `cluster:`,
+or too many criteria is refused and reported on stderr today. An unusable wait time joins them.
+Carving out an exception would be the departure, not this.
+
+Nobody writes `4294967296` on purpose, so it is a mistake. Upstream turning it into a
+**zero-second** startup wait is the concrete harm: `start` gives up immediately on a service that
+was coming up fine, and the operator debugs a phantom startup failure instead of reading a
+message that names the attribute.
+
+**What is genuinely different here, stated so nobody has to rediscover it.** For every OTHER
+rejection cause, upstream refuses too — both implementations lose the row together and a consumer
+moving between them sees the same thing. An out-of-range wait time is the ONE input for which
+RMSC drops a service that `sc` keeps. It leaves `check`, `list` and `groups` alike, and the
+warning is on a stream a screen-scraping consumer does not read.
+
+Neighbouring definitions in the same directory are unaffected — measured on both sides.
+
+Two things about it are *not* divergences and should not be "fixed" into one:
+
+- **`abc` is parity.** Upstream refuses it too, with the same exit status per operation — `info`
+  and `check` on the named service exit 253, `list` exits 0 and simply drops it. RMSC matches on
+  all three. RMSC used to substitute the default here, justified in a code comment by a premise
+  nobody had measured.
+- **Negative values inside the range are accepted**, by both. RMSC used to substitute the default
+  for every negative wait time, because its digit scan started at the sign; that was a
+  pre-existing divergence and this change closes it.
+
+**A YAML scalar longer than 1024 characters invalidates the definition; upstream has no limit.**
+Same rule and same reasoning as the wait time above — RMSC refuses what it cannot represent
+rather than quietly using a wrong value. Measured, 5 September 2026, `start_cmd`:
+
+| length | upstream | RMSC |
+|---|---|---|
+| 1023 | loads | loads — agree |
+| 1024 | loads | loads — agree |
+| 1025 | loads | **refused**: `Value for 'start_cmd' at line 3 is longer than 1024 characters` |
+| 1031 | loads | refused |
+
+Upstream is Java and its strings are unbounded, so it has no equivalent limit and never will.
+
+**Why this one is worth more than it looks.** Until today the excess was silently cut, and for
+`start_cmd` that meant RMSC **ran a command nobody wrote**. Nothing detected it: the definition
+loaded, the service listed, the count of criteria was right, and a truncated command line is
+often still a valid one. The only symptom would have been a service doing something subtly
+different from what its file says.
+
+It was found by a test fixture tripping over this cap while aiming at a different one — the
+fifth in a chain where each was invisible until the one above it was widened (`info`'s 10, the
+rendering's 56, the storage's 64, the check row's 1024, and this).
+
+Both paths that can exceed the width are guarded — `key: value` and a block sequence item — and
+the message names the key and the line, because a file may carry several long values and the
+excess is by definition invisible in the loaded value.
 
 ## Differences still undecided
 

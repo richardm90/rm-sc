@@ -61,6 +61,7 @@ end-pr;
 dcl-pr to_integer like(INTEGER_t);
   value   like(SCYAML_VALUE_t) const;
   default like(INTEGER_t) const;
+  ok      like(BOOLEAN_t);
 end-pr;
 
 dcl-pr add_criterion like(BOOLEAN_t);
@@ -106,6 +107,19 @@ dcl-proc SCDEF_load export;
 
   def = SCDEF_BLANK;
 
+  // NAMED BEFORE THE PARSE, so a file that fails to parse is still a file
+  // anyone can find. The name comes from the path, not from the document, so
+  // nothing about it depends on the parse succeeding - but it used to be set
+  // inside SCDEF_from_doc, which never runs when the YAML is rejected. Every
+  // other rejection happens later, after the name is set, which is why only
+  // this one produced an anonymous complaint.
+  //
+  // The visible cost was 'WARNING: : <reason>' - a bad definition reported
+  // with an empty name, leaving the reader to guess which of the files in a
+  // directory it meant. Set here and set again in SCDEF_from_doc, which is
+  // harmless: the same expression, the same value.
+  def.short_name = STRING_lower(PATH_name(stmf));
+
   if not SCYAML_parse(stmf: doc);
     def.err = SCYAML_error(doc);
     return false;
@@ -129,6 +143,7 @@ dcl-proc SCDEF_from_doc export;
   dcl-s i    like(INTEGER_t);
   dcl-s n    like(INTEGER_t);
   dcl-s key  like(SCYAML_KEY_t);
+  dcl-s num_ok like(BOOLEAN_t);
 
   def = SCDEF_BLANK;
 
@@ -177,10 +192,24 @@ dcl-proc SCDEF_from_doc export;
   def.stop_cmd = SCYAML_value(doc: 'stop_cmd');
   def.has_stop_cmd = (%len(%trim(def.stop_cmd)) > 0);
 
+  // A wait time RMSC cannot use invalidates the definition - one rule for both
+  // shapes of bad input. The key is named in the message because that naming
+  // is the whole justification for refusing the file rather than substituting
+  // a value: a report that does not say WHICH attribute is wrong is not much
+  // better than a silent default.
   def.startup_wait = to_integer(SCYAML_value(doc: 'startup_wait_time'):
-                                SCDEF_DFT_STARTUP_WAIT);
+                                SCDEF_DFT_STARTUP_WAIT: num_ok);
+  if not num_ok;
+    def.err = 'Invalid value specified for attribute ''startup_wait_time''';
+    return false;
+  endif;
+
   def.stop_wait    = to_integer(SCYAML_value(doc: 'stop_wait_time'):
-                                SCDEF_DFT_STOP_WAIT);
+                                SCDEF_DFT_STOP_WAIT: num_ok);
+  if not num_ok;
+    def.err = 'Invalid value specified for attribute ''stop_wait_time''';
+    return false;
+  endif;
 
   def.batch_mode   = to_boolean(SCYAML_value(doc: 'batch_mode'): false);
   def.inherit_vars = to_boolean(
@@ -422,7 +451,26 @@ dcl-proc add_criterion;
     return true;
   endif;
 
-  // All digits: a port
+  // All digits AND small enough to be one: a port. Both halves are the rule,
+  // and the second half is not a safety check bolted onto the first.
+  //
+  // Measured against sc 1.7.1, direct form, via `info`:
+  //
+  //     check_alive: 22                ->  PORT:22
+  //     check_alive: 2147483647        ->  PORT:2147483647        (int max)
+  //     check_alive: 4294967296        ->  JOBNAME:4294967296
+  //     check_alive: 99999999999999    ->  JOBNAME:99999999999999
+  //
+  // All four load, report NOT RUNNING, exit 0 and say nothing on stderr. So
+  // upstream does not reject a number too big to be a port - it stops calling
+  // it a number. Integer.parseInt throws, and the value falls through to the
+  // job-name branch like any other text.
+  //
+  // 2147483647 and 4294967296 are the pair that separate this rule from "all
+  // digits means a port": adjacent in magnitude, opposite in kind. A test
+  // using only small numbers cannot tell the two rules apart, which is why
+  // RMSC read "all digits" as sufficient for as long as it did and then
+  // abended converting the result.
   digits = true;
   for i = 1 to %len(work);
     if %subst(work: i: 1) < '0' or %subst(work: i: 1) > '9';
@@ -430,6 +478,9 @@ dcl-proc add_criterion;
       leave;
     endif;
   endfor;
+  if digits and not usable_port(work);
+    digits = false;
+  endif;
 
   if digits;
     def.criteria(def.criteria_count).kind = SCDEF_CHECK_PORT;
@@ -526,31 +577,99 @@ end-proc;
 
 //==============================================================================
 // to_integer
+//   Read an integer attribute, and say whether the text was usable.
+//
+// `ok` is set false ONLY when the text is present and unusable. An absent
+// value leaves it true and returns the default, because absent is not bad -
+// and `startup_wait_time: 0` is a value, not an absence.
+//
+// TWO THINGS CHANGED HERE, and only one of them is parity.
+//
+// (1) A NON-NUMERIC VALUE NOW INVALIDATES THE DEFINITION. It used to fall back
+//     to the default, on the reasoning that "a bad number should not stop a
+//     service being managed". Sound reasoning, unmeasured premise: upstream
+//     rejects the file, exit 253, `Invalid value specified for attribute
+//     'startup_wait_time'`. So this is parity, and the comment it replaces was
+//     a guess that read like a decision.
+//
+// (2) AN OUT-OF-RANGE VALUE IS REJECTED, AND THAT DIVERGES DELIBERATELY.
+//     Upstream parses as a long and casts to int, so it silently WRAPS:
+//     measured, 2147483648 -> -2147483648, 4294967296 -> 0, and
+//     99999999999999 -> 276447231. Richard's decision, 5 September 2026:
+//     nobody writes 4294967296 on purpose, so it is a mistake, and reporting
+//     it beats turning it into a zero-second startup wait. Recorded in
+//     docs/parity.md as a departure rather than left to be found as a bug.
+//
+// SIGNED VALUES ARE ACCEPTED, which is NEW rather than preserved. The old
+// digit loop scanned from position 1, so a leading '-' was simply not a digit
+// and every negative wait time silently became the default - measured, -5 gave
+// 60. Upstream reports -5. So a range guard bolted onto the positive path
+// alone would leave that divergence in place; the sign has to be handled for
+// the rule to mean what it says.
 //==============================================================================
 
 dcl-proc to_integer;
   dcl-pi *n like(INTEGER_t);
     value   like(SCYAML_VALUE_t) const;
     default like(INTEGER_t) const;
+    ok      like(BOOLEAN_t);
   end-pi;
 
-  dcl-s work like(SCYAML_VALUE_t);
-  dcl-s i    like(INTEGER_t);
+  dcl-s work   like(SCYAML_VALUE_t);
+  dcl-s digits like(SCYAML_VALUE_t);
+  dcl-s i      like(INTEGER_t);
+  dcl-s from   like(INTEGER_t) inz(1);
+  dcl-s wide   int(20);
+
+  ok = true;
 
   work = %trim(value);
+  // Absent, which is not the same as bad: the default stands and the
+  // definition is fine. `startup_wait_time: 0` is a VALUE and must not come
+  // through here.
   if %len(work) = 0;
     return default;
   endif;
 
-  // A non-numeric wait time falls back to the default rather than failing the
-  // load: a bad number should not stop a service being managed.
-  for i = 1 to %len(work);
+  if %subst(work: 1: 1) = '-' or %subst(work: 1: 1) = '+';
+    from = 2;
+  endif;
+  if %len(work) < from;
+    ok = false;
+    return default;
+  endif;
+
+  for i = from to %len(work);
     if %subst(work: i: 1) < '0' or %subst(work: i: 1) > '9';
+      ok = false;
       return default;
     endif;
   endfor;
 
-  return %int(work);
+  digits = %subst(work: from);
+  dow %len(digits) > 1 and %subst(digits: 1: 1) = '0';
+    digits = %subst(digits: 2);
+  enddo;
+
+  // More than ten significant digits cannot be an INTEGER_t whatever they
+  // say, and stopping here also keeps `wide` from overflowing while the range
+  // test below is made.
+  if %len(digits) > 10;
+    ok = false;
+    return default;
+  endif;
+
+  wide = %int(digits);
+  if %subst(work: 1: 1) = '-';
+    wide = -wide;
+  endif;
+
+  if wide < -2147483648 or wide > 2147483647;
+    ok = false;
+    return default;
+  endif;
+
+  return %int(wide);
 
 end-proc;
 
@@ -810,12 +929,31 @@ end-proc;
 // is the wording of a parse failure, and sc is Java, so the rule is what
 // Integer.parseInt accepts: optionally signed digits, nothing else.
 //
-// Deliberately NOT a range check. 0, -1 and 65536 all parse, so upstream
-// accepts them and reports the service NOT RUNNING; refusing them here would
-// be a worse parity defect than the crash this replaces. The only departure
-// is a value too wide for the field, which is refused rather than truncated -
-// silently turning 4294967296 into something else is a wrong answer with no
-// error, which is the fault being fixed.
+// NOT a PORT-range check. 0, -1 and 65536 all parse, so upstream accepts them
+// and reports the service NOT RUNNING; refusing those would be a worse parity
+// defect than the crash this replaces. Measured on both sides: -1 and 65536
+// give NOT RUNNING and rc 0.
+//
+// It IS an int(10) range check, and that is the same rule rather than a second
+// one: Integer.parseInt accepts exactly what fits a 32-bit signed integer, and
+// `port` here is int(10). Measured - upstream takes 2147483647 and refuses
+// 4294967296 with 'Invalid data for port number or job name criteria'.
+//
+// WHAT THIS REPLACED, because the shape of the mistake is worth keeping. The
+// guard used to be a `> 10` width test plus a MONITOR around `%int(work)`,
+// and the monitor could never fire: %int yields a wide temporary, so parsing
+// 4294967296 succeeds and only the ASSIGNMENT into int(10) fails. The guard
+// was testing that the text could be parsed when the question was whether the
+// result would fit, so every 10-digit value above int max walked straight past
+// it into an MCH1210 at the caller.
+//
+// The width test also refused values it should have accepted: '00000000022'
+// is 11 characters and worth 22, which Integer.parseInt takes. Counting
+// SIGNIFICANT digits rather than characters fixes that with the same change.
+//
+// It survived because the only test aimed at it used a 20-digit value, which
+// the width test refused before any conversion was attempted - so the test
+// passed, and could not tell a working guard from one that never ran.
 //==============================================================================
 
 dcl-proc usable_port;
@@ -823,9 +961,13 @@ dcl-proc usable_port;
     value like(SCDEF_CRIT_t) const;
   end-pi;
 
-  dcl-s work like(SCDEF_CRIT_t);
-  dcl-s i    like(INTEGER_t);
-  dcl-s from like(INTEGER_t) inz(1);
+  dcl-s work   like(SCDEF_CRIT_t);
+  dcl-s digits like(SCDEF_CRIT_t);
+  dcl-s i      like(INTEGER_t);
+  dcl-s from   like(INTEGER_t) inz(1);
+  // Wide enough to hold any value that passes the digit count above, so the
+  // range test can be made without overflowing the thing making it.
+  dcl-s wide   int(20);
 
   work = %trim(value);
   if %len(work) = 0;
@@ -845,18 +987,104 @@ dcl-proc usable_port;
     endif;
   endfor;
 
-  // Wider than the field can hold. %int would wrap rather than refuse.
-  if %len(work) - (from - 1) > 10;
+  // Leading zeros are not significant, and Integer.parseInt ignores them.
+  digits = %subst(work: from);
+  dow %len(digits) > 1 and %subst(digits: 1: 1) = '0';
+    digits = %subst(digits: 2);
+  enddo;
+
+  // More than ten significant digits cannot be an int(10) whatever they say,
+  // so this both answers the question and keeps `wide` from overflowing while
+  // the range test below is made.
+  //
+  // It was 19, on the premise that int(20) holds 19 digits. It holds up to
+  // 9223372036854775807, so 9223372036854775808 walked past the guard and
+  // abended on the conversion - the very MCH1210 the guard exists to remove.
+  // Ten is the number that has no boundary to get wrong: anything longer is
+  // out of range by inspection, and anything shorter fits the temporary with
+  // nine digits to spare.
+  if %len(digits) > 10;
     return false;
   endif;
 
-  monitor;
-    if %int(work) = 0;
-    endif;
-  on-error;
-    return false;
-  endmon;
+  wide = %int(digits);
+  if %subst(work: 1: 1) = '-';
+    wide = -wide;
+  endif;
 
+  // The whole of the rule. INTEGER_t is int(10), so this is both what the
+  // destination can hold and what Integer.parseInt accepts.
+  return (wide >= -2147483648 and wide <= 2147483647);
+
+end-proc;
+
+//==============================================================================
+// SCDEF_port_text
+//   Is this text a usable port, what number is it, and how should it be kept?
+//
+// ONE PROCEDURE BECAUSE THE THREE ANSWERS MUST COME FROM ONE STRING. The
+// ad-hoc path used to check a criterion's stored `raw` - already truncated to
+// SCDEF_CRIT_t - and then convert the caller's untruncated text. Validating
+// one string and converting another, which abended:
+//
+//     scr check port:<128 zeros>4294967296
+//     CEE9901 MCH1210 at SCMAIN:280
+//
+// The 128 zeros survived truncation and stripped to '0', so the guard passed;
+// the conversion then read the whole 138 characters and overflowed int(10).
+//
+// `norm` is the text with leading zeros removed, and it exists because
+// `port:<128 zeros>22` IS PORT 22 - measured, on both implementations, rc 0
+// and RUNNING. So a fix reading "too long to store means unusable" is wrong:
+// it would turn a working command into an error. Normalising instead keeps
+// the value representable AND keeps the answer right.
+//
+// The text is STRING_t so nothing is lost before it is judged. That is the
+// whole point.
+//==============================================================================
+
+dcl-proc SCDEF_port_text export;
+  dcl-pi *n like(BOOLEAN_t);
+    text like(STRING_t) const;
+    port like(INTEGER_t);
+    norm like(SCDEF_CRIT_t);
+  end-pi;
+
+  dcl-s work like(STRING_t);
+  dcl-s from like(INTEGER_t) inz(1);
+  dcl-s body like(STRING_t);
+
+  port = 0;
+  norm = '';
+
+  work = %trim(text);
+  if %len(work) = 0;
+    return false;
+  endif;
+
+  if %subst(work: 1: 1) = '-' or %subst(work: 1: 1) = '+';
+    from = 2;
+  endif;
+  if %len(work) < from;
+    return false;
+  endif;
+
+  body = %subst(work: from);
+  dow %len(body) > 1 and %subst(body: 1: 1) = '0';
+    body = %subst(body: 2);
+  enddo;
+
+  if %subst(work: 1: 1) = '-';
+    norm = '-' + body;
+  else;
+    norm = body;
+  endif;
+
+  if not usable_port(norm);
+    return false;
+  endif;
+
+  port = %int(norm);
   return true;
 
 end-proc;
