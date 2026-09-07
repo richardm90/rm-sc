@@ -63,6 +63,48 @@ Prefer fixtures the suite can rely on rather than ones that happen to be there: 
 `sshd` are present because the suite arrived over SSH, and `SCLIFE.TEST` creates and removes the
 service it exercises.
 
+### The tests are written by someone who cannot see the code. This is not optional.
+
+**Tests are commissioned from a separate test author, and that author must not read
+`QRPGLESRC/` or `QPROTOSRC/`** — not with a search, not through another agent, not on the box.
+It is given a measured specification and the existing suites, and nothing else.
+
+The obvious reason is the weaker one: a test written against the implementation agrees with the
+implementation. The real reason is that **the gap is almost never in the code — it is in what the
+implementer thought to ask for.** Whoever writes the fix has already decided which cases matter,
+and those are exactly the cases that cannot catch them being wrong.
+
+Measured, on 5 September 2026, all three in one afternoon and all three on freshly written work
+rather than anything inherited:
+
+- An ad-hoc port fix removed a conversion instead of guarding it, so **every** `port:N` check
+  probed port 0 and `port:22` reported NOT RUNNING against a listening sshd. The full suite
+  passed. Every case aimed at that line used `port:-1`, `port:65536` or `port:abc` — values that
+  report NOT RUNNING whether the code is right or wrong.
+- Widening the criterion type to 128 left two 64-wide holders standing, one of them silencing
+  conflict detection entirely past 64 characters. Every fixture in every suite used a short name,
+  so no test could tell the two widths apart.
+- A guard was tested with a 20-digit value, which its width test refused before any conversion
+  was attempted. The test passed, and could not distinguish a working guard from one that never
+  ran.
+
+So the rule that follows, and it is the one to apply when writing any case:
+
+> **A fix and the break it could have been must disagree about at least one case in the suite.**
+> Cover the working case, not only the failing one. If every case in front of you gives the same
+> answer either way, you have not tested the change — you have watched it not crash.
+
+What a separate author is *for* is finding what the brief left out, so its objections are worth
+more than its tests. Ours has, in one day: refused to write a case for something unreachable from
+a suite rather than write one that passes today; found that a test helper shared the defect under
+test, so all four cases would have gone green and proved nothing; noticed a control that asserted
+so much it died before reaching the thing it was controlling; and reported that a case it was
+asked for could not separate anything, then measured why rather than quietly deleting it.
+
+**Give it the measurement, never the mechanism.** Tell it what upstream does and which rival
+reading each case has to rule out. If it asks for an interface it cannot read, paste the
+prototype — never the body.
+
 ## Build and test
 
 Both run over SSH from the deploy directory. Neither needs `SBMJOB`.
