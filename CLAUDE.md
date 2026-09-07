@@ -17,10 +17,27 @@ from a screen rather than raising an error. The contract is
 must stay off when stdout is not a terminal, for the same reason. Verify by diff against the
 captured baselines, never by eye.
 
-**`RMSC.BND` pins `SIGNATURE('RMSC 0.1.0')`, so the *order* of the export list is the
-contract.** Add exports at the end. Inserting one in the middle shifts every export after it,
-and already-compiled callers reach the wrong procedure — the binder has nothing to complain
-about, and seven suites fail with `RNX0115` on code that did not change.
+**`RMSC.BND` pins a `SIGNATURE`, and it guards less than it looks like it guards.** It is
+`'RMSC 0.2.0'` today.
+
+*Export order is the part it does cover.* Add exports at the end. Inserting one in the middle
+shifts every export after it, and already-compiled callers reach the wrong procedure — the
+binder has nothing to complain about, and seven suites fail with `RNX0115` on code that did not
+change.
+
+*Shapes are the part it does not.* A structure that crosses the service-program boundary, or an
+exported procedure's return type, can change size with the signature untouched — and then a
+caller built against the old copybooks binds happily and reads fields at the wrong offsets, or
+receives a 160-byte varchar into a 64-byte field. No error, at bind time or at run time.
+
+That is not hypothetical: on 5 September 2026 `SCDEF_t` gained a field, `SCEXEC_EVAL_t` widened
+twice, and `SCDEF_criterion_text`'s return went 64 → 160, all under `0.1.0`. Nothing broke,
+because everything that binds RMSC lives in this repository and gets rebuilt together — which is
+luck, not design.
+
+**So: change a shape that crosses the boundary, bump the signature.** It converts a silent
+memory overwrite into a bind-time failure, at the price of forcing a deliberate rebuild. That
+price is the point.
 
 **No new phase of work begins without an explicit go-ahead**, and core decisions that are
 not already settled are asked rather than assumed. Finishing a phase early, or finding one

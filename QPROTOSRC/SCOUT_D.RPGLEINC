@@ -42,7 +42,24 @@ dcl-c SCOUT_STATUS_WIDTH const(18);
 dcl-c SCOUT_BAR_COLUMN   const(22);
 dcl-c SCOUT_NAME_COLUMN  const(24);
 
-dcl-s SCOUT_LINE_t   varchar(1024) template;
+// 2048, not 1024, and the number has to survive an argument. A check row is
+// '  ' + status(18) + ' | ' + name + ' (' + desc + ') ' + the not-running
+// suffix, and that suffix is up to 8 criteria x 136 characters plus their
+// separators - 1102 on its own, 1162 for the whole row.
+//
+// At 1024 both were cut, and measured rather than reasoned: failed_text held
+// 1024 of 1102, the row held 1024 of 1162. What is lost is the TAIL - part of
+// the last criterion and the closing bracket - on the byte-exact path a
+// consumer parses by column, silently.
+//
+// The two overflow INDEPENDENTLY: widening one and not the other still cuts
+// the row. They share this type, so one number fixes both, which is the only
+// reason a single change is enough.
+//
+// This became reachable when SCDEF_CRIT_t went to 128. At 64 the worst case
+// was about 590 and could not overflow - so this is the fourth cap in one
+// chain, found the same way as the other three: by widening the one above it.
+dcl-s SCOUT_LINE_t   varchar(2048) template;
 dcl-s SCOUT_STATUS_t varchar(20)   template;
 
 ///

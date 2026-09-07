@@ -244,6 +244,15 @@ shifts every export after it by one position, and already-compiled callers then 
 wrong procedure. The order of that list is the contract. The exports now go at the end, and
 the file says so — nothing else made it visible until it bit.
 
+**The signature is `'RMSC 0.2.0'` as of 5 September 2026**, and the account above is left in
+its original terms because it describes what happened under `0.1.0`. The bump was for a
+different reason, and it is the one this passage does not cover: the signature pins export
+*order* and says nothing about *shapes*. `SCDEF_t` gained a field, `SCEXEC_EVAL_t` widened
+twice, and `SCDEF_criterion_text`'s return went 64 → 160, all without it noticing. A caller
+built against the older copybooks would have bound cleanly and then read fields at the wrong
+offsets. See `CLAUDE.md`, which carries the rule; this file carries only the story of the
+export-order half.
+
 ---
 
 ## 7. The bound-call API
