@@ -90,12 +90,21 @@ echo "START $(date '+%Y-%m-%d %H:%M:%S')   deploy=$DEPLOY"
 # harness that fell over and one that passed produce the same result, and the
 # only evidence either way is whatever happened to land in its last few lines.
 #
-# THE FIXTURE PACK IS ADVISORY, and deliberately so. It exits 1 on ANY
-# difference, and six differences are currently expected and recorded - so
-# treating its status as pass/fail would make every run red and the signal
-# worthless. It becomes a pass/fail stage when it gains a list of expected
-# differences to classify against, which is the outstanding Phase C item. Until
-# then its result is printed and called out, and it does not decide the run.
+# THE FIXTURE PACK IS A PASS/FAIL STAGE as of 6 September. It used to be
+# advisory because it exited 1 on ANY difference, and six are expected - so its
+# status was permanently red and therefore worthless.
+#
+# It now classifies each difference the way the operation gate does, and exits
+# on `unexpected` rather than on `differ`: a difference that is not on its list
+# is a REGRESSION, and a listed difference that has stopped happening is a
+# RECLASSIFY. Both fail. So a green pack now means something specific - every
+# difference is one we know about, and every difference we know about is still
+# there - and that is worth deciding the run on.
+# NO STAGE IS ADVISORY TODAY. The mechanism below is kept because the case it
+# exists for recurs - a stage meaningful to run but not yet able to decide a
+# run, usually because it is blocked on something outside this repository -
+# and because rediscovering it costs more than the ten lines. The fixture
+# pack was the last user and stopped being one when it learned to classify.
 failed_stages=""
 advisory_note=""
 note_failure() { failed_stages="$failed_stages $1"; }
@@ -178,7 +187,10 @@ harness error-delivery  tools/error-delivery-test.sh 3
 harness load-warning    tools/load-warning-test.sh   4
 harness colour          tools/colour-test.sh         3
 harness gate            tools/fidelity-gate.sh       4
-harness fixture-pack    tools/gate-fixtures-run.sh   6  advisory
+# 12, not 6. The pack's ordering note is a nine-line heredoc that prints only
+# when order_only > 0, and it pushed the summary counts out of a six-line tail -
+# so the stage that now decides the run could have its numbers truncated away.
+harness fixture-pack    tools/gate-fixtures-run.sh   12
 
 TOTAL=$(( $(date +%s) - RUN_START ))
 echo "END   $(date '+%Y-%m-%d %H:%M:%S')"

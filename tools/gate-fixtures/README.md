@@ -318,10 +318,30 @@ Every header names its basis, in the vocabulary `tools/error-delivery-test.sh` a
 
 Some fixtures are expected to **differ**, and a sudden match is a failure too — the same rule
 `tools/fidelity-gate.sh` already applies, which "fails when something regresses **and** when
-something is fixed without the list being updated". `rmscgate_type_port`, `no-name/`,
-`dependency-cycle/`, `malformed/` and the `info` group all carry recorded differences. If one of
-them starts matching, `docs/parity.md` and the plan's key table need updating in the same change
-— not a green tick.
+something is fixed without the list being updated".
+
+**As of 6 September that rule is enforced rather than described.** `tools/gate-fixtures-run.sh`
+carries `PACK_INTENTIONAL` and `PACK_UNDECIDED`, and the run fails both when an unlisted
+comparison differs (`NEW`) and when a listed one stops differing (`RECLASSIFY`). **Those lists are
+the record; this section is the explanation.** If the two disagree, the lists are right — they are
+the ones that fail.
+
+**This paragraph used to name the differing fixtures, and it had gone stale — which is the whole
+argument for the lists.** It claimed `rmscgate_type_port`, `no-name/`, `dependency-cycle/`,
+`malformed/` and the `info` group. Measured on 6 September, the pack differs on six comparisons
+only: `isolation:cluster` and `isolation:malformed` and `isolation:no-name`, each on `check` and
+`list`.
+
+- `rmscgate_type_port` **was** a difference and was fixed by the criterion work. Nothing said so.
+  Under the new lists that is precisely a `RECLASSIFY` failure.
+- `dependency-cycle` never differed on a read-only operation — neither implementation detects a
+  cycle during `check` or `list`, as its own fixture header predicted.
+- the `info` group is not compared by this runner at all; `info` is `undecided` in the operation
+  gate instead.
+
+So a prose list of expectations decays silently and an enforced one cannot. Keep the reasoning
+here, keep the expectations in the runner, and when one of the six is settled, move or remove its
+entry **and** update `docs/parity.md` in the same change — not a green tick.
 
 ## Deliberately not covered
 

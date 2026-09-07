@@ -47,9 +47,66 @@ for stale in $(ps -ef 2>/dev/null | grep '[g]ate-listen.py' | awk '{print $2}');
   kill "$stale" 2>/dev/null && echo "  cleared a listener left by an earlier run (pid $stale)"
 done
 
+# PREFLIGHT, for the same reason tools/fidelity-gate.sh checks BASELINE and
+# exits 2 rather than guessing. Without this, a missing or broken `sc` makes
+# sc_ return 127 with empty output, EVERY comparison differs with klass=none,
+# and the run ends "VERDICT FAILED: fixture-pack" with numbers that read as a
+# mass RMSC regression. An environment fault must not be reportable as a
+# product defect.
+for bin in "$SC" "$SCR"; do
+  [ -x "$bin" ] || { echo "PACK CANNOT RUN: $bin is missing or not executable" >&2
+                     echo "  This is an environment fault, not a difference." >&2
+                     exit 2; }
+done
+
 mkdir -p "$WORK/services" || exit 2
 
+# CLASSIFICATION, the same discipline tools/fidelity-gate.sh applies to the
+# operations. Until now this harness only COUNTED - "pass=48 differ=6" - and
+# whether those were the same six as yesterday was a person reading output.
+#
+# That is precisely how the conflict-block flap hid: the count moved between 7
+# and 8 on identical code for weeks, and nobody could tell because nothing here
+# knew what it expected.
+#
+# So a difference must be on a list, and the check FAILS IN BOTH DIRECTIONS:
+#
+#     differs + listed      by design / undecided    fine
+#     differs + not listed  REGRESSION               fail
+#     matches + listed      RECLASSIFY               fail - fix the list
+#     matches + not listed  pass                     fine
+#
+# The second failure is the one that keeps the list honest. Without it a
+# difference that gets FIXED leaves a stale entry behind, and the next real
+# difference in that case is silently sanctioned by it.
+#
+# INTENTIONAL is settled by a decision and will not change. UNDECIDED is a
+# difference nobody has ruled on yet - it is not sanctioned, it is merely
+# known, and the day it is decided its entry moves or goes.
+PACK_MIN_COMPARISONS=54
+
+PACK_INTENTIONAL='|isolation:cluster check|isolation:cluster list|'
+
+# Cluster mode is out of scope - Richard, 2 September. Upstream expands a
+# cluster: definition into one indented row per backend; RMSC refuses the
+# definition and says so on stderr. See docs/parity.md.
+
+PACK_UNDECIDED='|isolation:malformed check|isolation:malformed list|isolation:no-name check|isolation:no-name list|'
+
+# malformed  - both refuse the file; the stderr WORDING differs. Upstream
+#              prints the YAML parser's own complaint, RMSC its own. D2.
+# no-name    - upstream discards a definition with no `name:` entirely; RMSC
+#              keeps it and defaults the description to the short name. A
+#              difference in WHICH SERVICES EXIST, not in formatting.
+
+klass_of() {
+  case "$PACK_INTENTIONAL" in *"|$1|"*) echo intentional; return ;; esac
+  case "$PACK_UNDECIDED"    in *"|$1|"*) echo undecided;   return ;; esac
+  echo none
+}
+
 pass=0; differ=0; setup=0; order_only=0
+bydesign=0; undecided_n=0; unexpected=0; unexpected_list=
 
 # Differences already recorded in docs/parity.md, filtered from BOTH sides so
 # they are not reported thirty times over and do not bury what is new. They are
@@ -163,11 +220,29 @@ compare() {
     so="$raw/$srt"
     [ "$srt" = 0 ] && order_only=$((order_only+1))
   fi
+  klass=$(klass_of "$desc")
+
   if [ "$so$se$sr" = "samesamesame" ]; then
-    pass=$((pass+1))
+    if [ "$klass" = none ]; then
+      pass=$((pass+1))
+    else
+      # It used to differ and now does not. The entry is stale, and a stale
+      # entry sanctions the NEXT difference in this case without anyone
+      # deciding to.
+      printf '  %-34s RECLASSIFY  now matches - remove it from the %s list\n' \
+             "$desc" "$klass"
+      unexpected=$((unexpected+1)); unexpected_list+=("RECLASSIFY  $desc")
+    fi
   else
     differ=$((differ+1))
-    printf '  DIFF %-34s stdout=%-5s stderr=%-5s rc=%s\n' "$desc" "$so" "$se" "$sr"
+    case "$klass" in
+      intentional) bydesign=$((bydesign+1)) ;;
+      undecided)   undecided_n=$((undecided_n+1)) ;;
+      none)        unexpected=$((unexpected+1)); unexpected_list+=("NEW         $desc") ;;
+    esac
+    printf '  %-4s %-34s stdout=%-5s stderr=%-5s rc=%s\n' \
+           "$(case $klass in intentional) echo 'by-d';; undecided) echo 'undc';; *) echo 'NEW!';; esac)" \
+           "$desc" "$so" "$se" "$sr"
     if [ "$so" != same ] && [ "${so#*/}" != 0 ]; then
       diff "$WORK/j.s" "$WORK/r.s" | grep '^[<>]' | head -4 | sed 's/^/         /'
     fi
@@ -242,7 +317,20 @@ for case_dir in "$PACK"/isolation/*/; do
 done
 
 echo
-echo "pass=$pass  differ=$differ  (of which ordering-only=$order_only)  known-difference lines filtered=$known_hits  conflict blocks set-compared=$conflict_blocks"
+# The subject list comes from `scr list`, so a definition that stops loading
+# takes its comparison away rather than failing one. Nothing else notices - the
+# counts simply get smaller - and this stage now makes an affirmative claim, so
+# a shrinking subject list must contradict it.
+total=$((pass + differ))
+if [ "$total" -lt "$PACK_MIN_COMPARISONS" ]; then
+  echo "PACK FAILED: only $total comparisons ran, expected at least $PACK_MIN_COMPARISONS."
+  echo "             A fixture stopped loading, so its comparison vanished rather"
+  echo "             than failing. That is a defect wearing a smaller number."
+  unexpected=$((unexpected+1))
+fi
+
+echo "pass=$pass  by design=$bydesign  undecided=$undecided_n  unexpected=$unexpected"
+echo "differ=$differ  (of which ordering-only=$order_only)  known-difference lines filtered=$known_hits  conflict blocks set-compared=$conflict_blocks"
 [ "$conflict_blocks" -eq 0 ] && echo "NOTE: no conflict block was seen at all - either the fixtures stopped colliding or the warning's wording moved. The set comparison guarded nothing this run."
 [ "$order_only" -gt 0 ] && cat <<'NOTE'
 
@@ -254,4 +342,34 @@ one defect, counted once per comparison it spoils, and it will keep spoiling
 them until it is fixed.
 NOTE
 echo "artefacts: $WORK (removed on exit; set WORK= to keep them)"
-[ "$differ" -eq 0 ] || exit 1
+
+# EXIT ON `unexpected`, NOT ON `differ`. Six differences are recorded and
+# expected; failing on their existence made this harness permanently red, which
+# is why verify.sh had to carry it as advisory and why nobody could use its
+# status for anything.
+#
+# Now a green run means "every COMPARISON that differs is one we know about,
+# and every one we know about still differs" - the statement the operation gate
+# has made all along.
+#
+# NOTE THE GRANULARITY, because the obvious reading is stronger than the truth.
+# Classification is per comparison, and an isolation case compares the whole
+# base collection alongside its own fixture. So once a case is listed, a
+# difference arising in it for some OTHER reason is folded into the sanctioned
+# one and reported green - a defect visible only when a load warning is
+# present, say, would hide inside `isolation:malformed check`.
+#
+# Closing that needs the expected DIFF pinned per listed case, not just the
+# case name. Worth doing; not done here, and written down so the claim above is
+# not read as more than it is.
+if [ "$unexpected" -ne 0 ]; then
+  echo "PACK FAILED: $unexpected difference(s) neither sanctioned nor recorded,"
+  echo "             or recorded and no longer happening. Both need the list changing."
+  # NAMED HERE, not only beside the comparison hundreds of lines above. This
+  # stage now decides the run, and verify.sh shows its last few lines - so a
+  # failure that does not say WHICH case moved costs a 40-minute re-run to find
+  # out. A red result has to be actionable from the log.
+  for u in "${unexpected_list[@]}"; do echo "             $u"; done
+  exit 1
+fi
+echo "PACK OK: $bydesign by design, $undecided_n undecided, nothing unexpected"
