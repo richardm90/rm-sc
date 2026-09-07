@@ -729,7 +729,22 @@ dcl-proc SCEXEC_info export;
 
   SCOUT_writeln('');
   SCOUT_writeln('---------------------------------------------------------------------');
-  SCOUT_writeln(%trim(def.short_name) + ' (' + %trim(def.friendly) + ')');
+  // Through SCOUT_list_row rather than built here, and the point is that this
+  // IS a list row - the same two fields in the same shape. Upstream colours it
+  // cyan 36, the identical colour it gives a `list` row, measured through a
+  // pseudo-terminal.
+  //
+  // Building it by hand meant the same construct was coloured in `list` and
+  // plain in `info` from the moment `list` gained colour, and it meant a
+  // byte-sensitive format string written out twice - which is how the two
+  // come to disagree without anyone editing either on purpose.
+  //
+  // The rest of `info`'s colour is deliberately NOT done here: upstream also
+  // colours its field labels cyan and its rule lines white 37, and `info`
+  // still carries eight measured non-colour differences, two of them shape
+  // rather than spelling. Colouring the body before its content matches would
+  // mean doing it twice.
+  SCOUT_writeln(SCOUT_list_row(def.short_name: def.friendly));
   SCOUT_writeln('');
   SCOUT_writeln('Defined in: ' + %trim(def.defined_at));
   SCOUT_writeln('');

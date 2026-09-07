@@ -401,18 +401,47 @@ inconsistent.** Measured escape bytes, upstream against RMSC: `info` 20 against 
 against 0, `jobinfo` 2 against 0; `loginfo` and the usage block are 0 on both sides. Upstream
 colours `info`'s field labels cyan and its rule lines white `37`.
 
-The one that matters is `info`'s header, `short_name (Friendly)`, which upstream colours **cyan
-`36` — exactly as it colours a `list` row**. RMSC builds that header by hand at
-`QRPGLESRC/SCEXEC.RPGLE:732` rather than through `SCOUT_list_row`, so the identical construct is
-now coloured in `list` and plain in `info`. The divergence pre-dates this work; what is new is
-that it is an inconsistency *within* RMSC rather than a gap against upstream. `info`, `jobinfo`
-and `perfinfo` are all `undecided` in the gate already, and this belongs with them.
+The one that mattered is `info`'s header, `short_name (Friendly)`, which upstream colours **cyan
+`36` — exactly as it colours a `list` row**. **Fixed:** `SCEXEC_info` now calls `SCOUT_list_row`
+instead of building the same two fields by hand, so the identical construct is coloured
+identically, and a byte-sensitive format string is written once rather than twice.
 
-**RMSC's gate is in the shell, not in RPG.** `scripts/scr` adds `--colors` when `[ -t 1 ]`;
-`SCOUT_is_tty` is a stub returning false, so RMSC never detects a terminal itself. That division
-is defensible — the test is one token in shell and awkward in ILE — but it was never written down
-as a decision, and it means RMSC's rule and upstream's rule are differently shaped: RMSC colours
-on any terminal, upstream only on an ssh one.
+The **rest** of `info`'s colour is deliberately still open — upstream colours its field labels
+cyan and its rule lines white `37` — and so are `jobinfo`'s 2 escape bytes and `perfinfo`'s 54.
+All three operations remain `undecided` in the gate, and their colour belongs with their content:
+`info` alone carries eight measured non-colour differences, two of them shape rather than
+spelling, so colouring the body before the content matches would mean doing it twice.
+
+**RMSC's gate is in the shell, not in RPG, and RMSC's rule is deliberately not upstream's.**
+`scripts/scr` adds `--colors` when `[ -t 1 ]`; `SCOUT_is_tty` is a stub returning false, so RMSC
+never detects a terminal itself. That division is defensible — the test is one token in shell and
+awkward in ILE.
+
+The rules are differently shaped, and **this is now a decided departure rather than an unexamined
+gap** (5 September 2026). Measured through `tools/colour-test.sh`'s pseudo-terminal:
+
+| | upstream | RMSC |
+|---|---|---|
+| PTY, `SSH_TTY` set | 12 escape bytes | 6 — agree |
+| PTY, `SSH_TTY` unset | **0 — monochrome** | **6 — still coloured** |
+| pipe | 0 | 0 — agree |
+
+The disagreement is exactly one case: a terminal that is not an ssh session — a local PASE shell,
+a `su` that drops `SSH_TTY`, a harness allocating its own PTY.
+
+**Why RMSC keeps its own rule.** Upstream's gate is `System.console() != null` **and** `SSH_TTY`
+non-empty **and** not `-Djcmdutils.disablecolors`. The first test already answers "is this
+interactive"; the second only removes cases, and reads as a proxy written by someone who ran it
+solely over ssh. Matching it would mean RMSC deliberately going monochrome on a working console.
+
+**It cannot touch the byte-exact contract.** Both implementations go monochrome on a pipe, and the
+consumer redirects, so nothing that screen-scrapes `check` can see this. What is at stake is only
+what a person at a non-ssh terminal sees.
+
+`tools/colour-test.sh` stage 0 asserts it in **both** directions — upstream must still go
+monochrome without `SSH_TTY`, RMSC must still colour — so a change on either side is reported
+rather than silently absorbed. The upstream half doubles as proof the variable was really removed:
+if it were not, upstream would colour and the case would fail rather than quietly pass.
 
 **Four differences were measured through a PTY, and all four are CLOSED.** RMSC now matches
 upstream byte for byte on `check`, `list` and `groups`, on a terminal and through a pipe:

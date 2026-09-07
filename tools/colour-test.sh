@@ -63,12 +63,21 @@
 # harness that allocates a PTY of its own - upstream goes monochrome and RMSC
 # does not.
 #
-# It is left unasserted because it is not obvious which behaviour is wanted:
-# matching upstream means RMSC deliberately losing colour on a working terminal,
-# and that is a decision about what RMSC should DO rather than a defect in what
-# it does. Recorded here so the measurement is not lost, and so that nobody
-# re-derives it from a confusing red. If it is decided, the case belongs in this
-# stage 0 and is two runs of `check` with SSH_TTY set and unset.
+# DECIDED 5 September 2026: RMSC KEEPS ITS OWN GATE, and the divergence is
+# asserted below rather than merely noted. Upstream's SSH_TTY test reads as a
+# proxy for "is this interactive" written by someone who only ever ran it over
+# ssh - System.console() already answers that question, and the second test only
+# removes cases. Matching it would mean RMSC deliberately going monochrome on a
+# working console, which is a worse outcome than the divergence.
+#
+# It cannot touch the byte-exact contract: both implementations go monochrome on
+# a pipe, and the consumer redirects. What is at stake is only what a person at a
+# non-ssh terminal sees.
+#
+# So this is now a CHOICE the harness pins, not a gap it tolerates. The case
+# below fails if RMSC ever stops colouring without SSH_TTY - which would mean
+# someone had "fixed" it towards upstream - and equally if upstream starts.
+# docs/parity.md carries it under the deliberate departures.
 #
 # Set COLOUR_DRY=1 to see the staged definitions without running anything.
 
@@ -375,6 +384,21 @@ pty_run() {
     /QOpenSys/pkgs/bin/bash -c "$* 2> $WORK/$tag.err" >/dev/null 2>&1
 }
 
+# pty_run_nossh TAG -- shell-command   a real PTY with SSH_TTY ABSENT.
+#
+# The two gates disagree here and only here, so this is the instrument for the
+# decision recorded in the header: upstream needs SSH_TTY as well as a console
+# and goes monochrome without it, RMSC asks `[ -t 1 ]` and colours anyway.
+# `env -u` rather than SSH_TTY='' because upstream tests emptiness, so the two
+# would be indistinguishable and the case would pass either way.
+pty_run_nossh() {
+  local tag="$1"; shift
+  [ "$1" = "--" ] && shift
+  env -u SSH_TTY TERM=xterm-256color \
+    "$PY" "$WORK/ptycap.py" "$WORK/$tag.out" -- \
+    /QOpenSys/pkgs/bin/bash -c "$* 2> $WORK/$tag.err" >/dev/null 2>&1
+}
+
 # pipe_run TAG -- shell-command   the same command with stdout on a PIPE (a
 # plain file redirection), which is the case colour must NOT appear in.
 pipe_run() {
@@ -458,6 +482,26 @@ n=$(n_esc "$WORK/scr.check.out")
   "reason, and would keep passing after the fix"
 report PASS pty-colours-rmsc "(fixture) RMSC emits $n escape bytes on a terminal"
 pass=$((pass+1))
+
+# (d) THE TWO GATES DIVERGE, AND RMSC'S BEHAVIOUR IS THE DECIDED ONE.
+#
+# Decided 5 September 2026 - see the header. This is not a defect being
+# tolerated, it is a choice being pinned, so it is asserted in BOTH directions:
+# upstream must still go monochrome without SSH_TTY, and RMSC must still
+# colour. Either half changing is worth knowing about, and the upstream half
+# doubles as the check that `env -u` really removed the variable - if it did
+# not, upstream would colour and this would fail rather than quietly passing.
+pty_run_nossh sc.nossh  -- "$SC_ENV \"$SC\" check group:$GROUP"
+pty_run_nossh scr.nossh -- "$SCR_ENV \"$SCR\" check group:$GROUP"
+nj=$(n_esc "$WORK/sc.nossh.out")
+nr=$(n_esc "$WORK/scr.nossh.out")
+
+probs=()
+[ "$nj" -eq 0 ] || probs+=("upstream emitted $nj escape bytes with SSH_TTY unset; it gates on SSH_TTY being non-empty and should emit none - if this changed, the decision below is being made against a gate that no longer exists")
+[ "$nr" -gt 0 ] || probs+=("RMSC emitted no escape bytes with SSH_TTY unset; scripts/scr gates on [ -t 1 ] alone, so it should still colour - someone has moved RMSC towards upstream's gate, which is the opposite of what was decided")
+check_named gates-diverge-as-decided measured \
+  "on a terminal that is not ssh: upstream monochrome ($nj), RMSC coloured ($nr) - RMSC's own gate, kept deliberately" \
+  "${probs[@]}"
 
 echo
 # ---------------------------------------------------------------------------
@@ -816,6 +860,148 @@ n=$(n_esc "$WORK/scr.groups.out")
 [ "$n" -eq 0 ] || probs+=("RMSC put $n escape byte(s) into \`groups\` on a terminal; upstream puts none")
 check_named groups-stays-uncoloured measured \
   "\`groups\` carries no colour on a terminal, from either implementation" "${probs[@]}"
+
+# (7) `info`'S HEADER IS THE SAME CONSTRUCT AS A `list` ROW, AND IS COLOURED
+#     THE SAME WAY.
+#
+# WHY THIS CASE IS HERE AND NOT IN qtestsrc/SCOUT.TEST.RPGLE. What bytes
+# SCOUT_list_row produces is already pinned there, coloured and uncoloured,
+# down to the position of every escape. What is NOT pinned anywhere is whether
+# `info` USES it. SCEXEC_info builds its header line by hand and returns
+# nothing - it prints - and an RPGUnit suite cannot capture its own stdout
+# (qtestsrc/SCAPIDRV.PGM.RPGLE says so at length and exists because of it). So
+# "does info go through the shared row builder" is an end-to-end question by
+# nature, and this file is the only instrument here that can ask it.
+#
+# MEASURED: `info` prints a header line `<short> (<friendly>)` - the same
+# construct `list` prints one row per service - and upstream colours it the
+# same cyan, through the same PTY, in the same run. RMSC builds it by hand and
+# leaves it plain, so since colour was added to `list` rows the identical
+# construct is coloured in one place and not the other.
+#
+# ASSERTED AGAINST THE `list` ROW'S OWN BYTES, NOT AGAINST $C_LIST. The rule is
+# "these two are the same construct and must render the same", so the case is
+# written as a byte comparison between one implementation's `info` header and
+# THAT SAME IMPLEMENTATION'S `list` row for the same service in the same run.
+# If the list colour is ever changed, this case keeps meaning what it says
+# instead of going red for naming a code that moved.
+#
+# THE HEADER LINE IS LOCATED BY ITS VISIBLE TEXT AND COMPARED BY ITS RAW BYTES,
+# and the two halves are deliberately different. Locating it by the escape-
+# stripped text finds it whether it is coloured or not - which is the whole
+# point, since today it is not - so the search cannot presuppose the answer.
+# It also avoids the trap stage 2 records: `info` prints the short name again
+# on its `Defined in:` line, so "the first line containing zzc_up" is not
+# reliably the header.
+#
+# `info` IS NOT ADDED TO STAGE 3's WHOLE-OUTPUT DIFF. docs/messages.md records
+# eight differences in `info`'s shape - blank lines, an invented Working
+# Directory line, a block that is never closed - so that diff would fail for
+# six reasons that have nothing to do with colour and would bury this one.
+
+pty_run  sc.info   -- "$SC_ENV \"$SC\" info $UP"
+pty_run  scr.info  -- "$SCR_ENV \"$SCR\" info $UP"
+pipe_run sc.infop  -- "$SC_ENV \"$SC\" info $UP"
+pipe_run scr.infop -- "$SCR_ENV \"$SCR\" info $UP"
+
+HDR="$UP ($UP_F)"
+
+# find_line FILE OUTFILE VISIBLE - write the RAW bytes of the line whose
+# escape-stripped text is exactly VISIBLE. Non-zero when there is no such line,
+# which is a finding rather than a silent pass.
+find_line() {
+  "$PY" -c '
+import re, sys
+src, dst, want = sys.argv[1], sys.argv[2], sys.argv[3]
+data = open(src, "rb").read().decode("utf-8", "replace")
+for line in data.split("\n"):
+    line = line.rstrip("\r")
+    if re.sub(r"\x1b\[[0-9;]*m", "", line) == want:
+        open(dst, "wb").write(line.encode("utf-8"))
+        sys.exit(0)
+sys.exit(1)
+' "$1" "$2" "$3"
+}
+shq() { printf '%q' "$(cat "$1" 2>/dev/null)"; }
+
+# --- the reference, re-measured rather than trusted -------------------------
+#
+# Stage 2's discipline, applied to this rule: read upstream's own two lines and
+# say whether they still agree with each other BEFORE failing RMSC for
+# disagreeing. A REFDRIFT here means upstream changed, not that RMSC is wrong.
+probs=()
+find_line "$WORK/sc.info.out" "$WORK/sc.info.hdr" "$HDR" \
+  || probs+=("upstream's \`info\` has no line whose visible text is '$HDR'")
+find_line "$WORK/sc.list.out" "$WORK/sc.list.hdr" "$HDR" \
+  || probs+=("upstream's \`list\` has no row whose visible text is '$HDR'")
+if [ ${#probs[@]} -eq 0 ] && ! cmp -s "$WORK/sc.info.hdr" "$WORK/sc.list.hdr"; then
+  probs+=("upstream's info header and list row are no longer the same bytes:" \
+          "info: $(shq "$WORK/sc.info.hdr")" \
+          "list: $(shq "$WORK/sc.list.hdr")")
+fi
+if [ ${#probs[@]} -eq 0 ]; then
+  report PASS ref-info-header-is-a-list-row \
+    "(reference) upstream renders info's header exactly as a list row"
+  pass=$((pass+1))
+else
+  drift_case ref-info-header-is-a-list-row "${probs[@]}"
+fi
+
+# --- COLOUR ON: the separating half ----------------------------------------
+#
+# SEPARATING VALUE: the escapes. Both lines carry the same visible text by
+# construction - that is how the header was found - so the ONLY thing this
+# comparison can be about is which escape sequences are present and where they
+# sit. An assertion that the two lines "say the same thing", or that info
+# printed a header at all, would pass today and prove nothing.
+probs=()
+find_line "$WORK/scr.info.out" "$WORK/scr.info.hdr" "$HDR" \
+  || probs+=("RMSC's \`info\` has no line whose visible text is '$HDR' on a terminal")
+find_line "$WORK/scr.list.out" "$WORK/scr.list.hdr" "$HDR" \
+  || probs+=("RMSC's \`list\` has no row whose visible text is '$HDR' on a terminal")
+if [ ${#probs[@]} -eq 0 ] && ! cmp -s "$WORK/scr.info.hdr" "$WORK/scr.list.hdr"; then
+  probs+=("RMSC's info header and its own list row are the same construct and" \
+          "do not carry the same escapes:" \
+          "info: $(shq "$WORK/scr.info.hdr")" \
+          "list: $(shq "$WORK/scr.list.hdr")" \
+          "the list row goes through SCOUT_list_row; the info header is built" \
+          "by hand in SCEXEC_info and never asks for colour")
+fi
+if [ ${#probs[@]} -eq 0 ] && ! cmp -s "$WORK/scr.info.hdr" "$WORK/sc.info.hdr"; then
+  probs+=("RMSC's info header does not match upstream's byte for byte:" \
+          "RMSC:     $(shq "$WORK/scr.info.hdr")" \
+          "upstream: $(shq "$WORK/sc.info.hdr")")
+fi
+check_named info-header-is-coloured measured \
+  "info's header carries the same escapes as a list row for the same service" \
+  "${probs[@]}"
+
+# --- COLOUR OFF: the control ------------------------------------------------
+#
+# On a pipe neither line may carry an escape, and the two must be byte
+# identical for the plainest possible reason - they are the same text. This
+# passes today and is the guard on the fix: the header is on `info`'s output,
+# which is read by people rather than parsed by column, but colour leaking into
+# a piped stream is the failure mode CLAUDE.md opens with and the cheapest
+# place for a new call to SCOUT_list_row to introduce it.
+probs=()
+find_line "$WORK/scr.infop.out" "$WORK/scr.infop.hdr" "$HDR" \
+  || probs+=("RMSC's piped \`info\` has no line whose visible text is '$HDR'")
+find_line "$WORK/scr.pipe.list.out" "$WORK/scr.pipe.list.hdr" "$HDR" \
+  || probs+=("RMSC's piped \`list\` has no row whose visible text is '$HDR'")
+if [ ${#probs[@]} -eq 0 ]; then
+  cmp -s "$WORK/scr.infop.hdr" "$WORK/scr.pipe.list.hdr" \
+    || probs+=("piped, the info header and the list row are not identical:" \
+               "info: $(shq "$WORK/scr.infop.hdr")" \
+               "list: $(shq "$WORK/scr.pipe.list.hdr")")
+  n=$(n_esc "$WORK/scr.infop.out")
+  [ "$n" -eq 0 ] || probs+=("RMSC put $n escape byte(s) into a PIPED \`info\`")
+fi
+n=$(n_esc "$WORK/sc.infop.out")
+[ "$n" -eq 0 ] || probs+=("upstream put $n escape byte(s) into a piped \`info\` - the reference has changed")
+check_named info-header-plain-on-a-pipe measured \
+  "piped, info's header and the list row are identical and carry no escapes" \
+  "${probs[@]}"
 
 echo
 echo "pass=$pass   failed=$failed   refdrift=$refdrift"
