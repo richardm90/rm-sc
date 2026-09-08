@@ -215,6 +215,26 @@ s = socket.socket()
 s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 s.bind(("", int(sys.argv[1])))
 s.listen(5)
+
+# READY GOES TO A FILE NAMED BY THE CALLER, NOT TO STDOUT, and that is not
+# fastidiousness - it is the whole difference between a fix and a defect.
+#
+# THIS SCRIPT HAS TWO ROLES. It is the harness's own listener for the half-up
+# fixture, AND it is the start_cmd of several staged services. `sc` captures a
+# service's output into its log, and `For details, see log file at:` is printed
+# exactly when that log HAS CONTENT - see docs/messages.md.
+#
+# So the first version of this printed READY to stdout, six bytes landed in
+# every service's log, and upstream started emitting a line the expectations do
+# not have. Six REFDRIFTs, every one of them real, from a one-line change made
+# to fix something else. The harness was right and I was wrong.
+#
+# AFTER the bind, never before: the caller waits for this word, so announcing
+# it any earlier would restore the guess it replaces.
+if len(sys.argv) > 2:
+    with open(sys.argv[2], "w") as f:
+        f.write("READY\n")
+        f.flush()
 time.sleep(600)
 PEOF
 
@@ -500,9 +520,57 @@ fi
 # be PARTIAL without anything having started it and without its own start
 # command ever binding anything, so the satisfied half of its criterion is held
 # by a process of this script's. It is killed by kill_listeners with the rest.
-"$PY" "$WORK/listen.py" "$PORT_HALFOK" >/dev/null 2>&1 &
+# WAITED FOR, NOT SLEPT THROUGH. This was `sleep 2`, which is an estimate of
+# how long Python takes to start and bind rather than a check that it has.
+#
+# It cost a day. On 7 September, under a loaded box - narration took 17:29
+# against a normal 10:00 - two seconds was not enough, the listener had not
+# bound when rmscn_half was checked, the service read NOT RUNNING instead of
+# PARTIAL, and `half-log-detail` failed on its precondition with `sc:sc-half`
+# skipped behind it. On a quiet box the same code passes 65/0/0, so it looked
+# like a defect in the day's work rather than a race that had been sitting here
+# since the harness was written.
+#
+# That is the same class as the flaky suites fixed the day before: a fixture
+# whose precondition is timing-dependent, green when the machine is idle and
+# red when it is not. The cure is the same too - stop asserting the stability
+# of something you have not confirmed.
+# The second argument is the readiness file. The staged services call this same
+# script WITHOUT it, so they stay silent and their logs stay empty.
+rm -f "$WORK/half.ready" "$WORK/half.log"
+"$PY" "$WORK/listen.py" "$PORT_HALFOK" "$WORK/half.ready" > "$WORK/half.log" 2>&1 &
 HALF_LISTENER=$!
-sleep 2
+
+half_ready=false
+for _ in $(seq 1 200); do
+  if grep -q '^READY' "$WORK/half.ready" 2>/dev/null; then half_ready=true; break; fi
+  # NO EARLY EXIT ON A DEAD LISTENER, deliberately. The obvious check is
+  # `kill -0`, and it does not work here: a background child that has exited
+  # stays a zombie until it is reaped, and kill -0 succeeds on a zombie. So a
+  # listener dying on bind() in 50ms would still run this loop to its end.
+  #
+  # `wait -n "$HALF_LISTENER"` reaps properly, but BLOCKS until the process
+  # exits - which for a healthy listener is ten minutes, so it would hang the
+  # very loop it was meant to shorten. That was written here and removed.
+  #
+  # The loop is bounded at twenty seconds and the diagnostic below carries the
+  # listener's own output either way, so a dead listener costs twenty seconds
+  # on a path that is already failing. That is cheaper than a reliable
+  # zombie test, and it cannot be subtly wrong.
+  sleep 0.1
+done
+
+if [ "$half_ready" != true ]; then
+  setup_fail \
+    "the listener holding port $PORT_HALFOK never reported READY." \
+    "" \
+    "$HALF ($HALF_F) is checked on that port AND on a job that cannot exist, so" \
+    "it is PARTIAL only while this listener is up. Without it the service reads" \
+    "NOT RUNNING, its case fails on the precondition, and the case behind it is" \
+    "skipped - which is a believable red pointing at the wrong thing entirely." \
+    "" \
+    "what the listener said: $(tr '\n' ' ' < "$WORK/half.log" 2>/dev/null)"
+fi
 
 pass=0; failed=0; refdrift=0; skipped=0
 
