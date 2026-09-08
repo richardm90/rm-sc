@@ -62,14 +62,22 @@ dcl-c SCDEF_CHECK_PGM       const('PGM');
 // covers both with nothing able to exceed it. Sized to the source, not to a
 // number that felt roomy - which is what the previous five caps each were.
 //
-// NOT FULLY EFFECTIVE FOR short_name YET, and deliberately committed anyway:
-// rmtools' PATH_BASENAME_t is varchar(128), and PATH_name truncates a longer
-// filename, loses the '.yaml' off the end, fails to find the dot, and returns
-// an EMPTY name through a MONITOR. So today this fixes names of 65 to 127
-// characters; 128 to 251 needs rmtools widened to 255 and its pos=0 case
-// repaired. Richard is doing that separately. The suites carry
-// `..._blocked_on_rmtools` markers that assert today's behaviour and FAIL the
-// moment it lands, so nobody has to remember.
+// FULLY EFFECTIVE AS OF rmtools 2.0.7, 7 September 2026. It was not when this
+// was written: PATH_BASENAME_t was varchar(128), so PATH_name truncated a
+// longer filename, lost the '.yaml' off the end, failed to find the dot, and
+// returned an EMPTY name through a MONITOR - names of 65 to 127 characters
+// worked and 128 to 251 did not.
+//
+// rmtools 2.0.7 widened that type to 255 and replaced the MONITOR with an
+// explicit `pos > 0` guard. RMSC binds rmtools BY COPY, so a rebuild is all
+// this side needed.
+//
+// **THIS PROJECT NOW REQUIRES rmtools >= 2.0.7.** Built against 2.0.6 the
+// suites go red in about ten places across SCDEF, SCCOLL and SCLAUNCH with
+// nothing naming the cause - the `..._blocked_on_rmtools` markers that used to
+// say it out loud were flipped to real assertions when it landed, so the
+// signal that named the dependency is gone. That is what this paragraph is
+// for.
 dcl-s SCDEF_NAME_t     varchar(512)  template;
 
 // The same number as a constant, because a guard elsewhere has to REFUSE what

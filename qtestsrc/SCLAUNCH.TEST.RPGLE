@@ -27,7 +27,7 @@ dcl-s g_dir like(STMF_t);
 dcl-pr aEqualV;
   expected  varchar(512) const;
   actual    varchar(512) const;
-  fieldName varchar(64) const;
+  fieldName varchar(500) const;
 end-pr;
 
 dcl-pr load_def like(BOOLEAN_t);
@@ -95,11 +95,34 @@ end-proc;
 // Helpers
 //==============================================================================
 
+//------------------------------------------------------------------------------
+// A MESSAGE PARAMETER IS A HOLDER TOO, and this one was 64 wide until
+// 7 September 2026 - the same defect as the subject of the width block below,
+// in the text that reports it.
+//
+// MEASURED on this box the same day, with a throwaway suite: a 120-character
+// value passed to a `varchar(64) const` parameter arrives 64 long, silently,
+// and `opdesc` on the prototype does not change that; passed to a
+// `varchar(200) const` it arrives whole. So every message longer than the
+// parameter had its reasoning cut mid-word, and the cases where that hurt most
+// were the ones whose failure text is meant to explain itself.
+//
+// 500 IS SIZED TO WHAT CAN REACH IT: the longest message written in these
+// suites today is 271 characters, and iRPGUnit's own `assert` takes
+// `msgIfFalse varchar(16384)`, so nothing downstream cuts what this carries.
+//
+// BUT iEqual, nEqual AND aEqual CANNOT BE FIXED HERE. Their third parameter is
+// declared `fieldName varchar(64)` in iRPGUnit's own TESTCASE copybook, with
+// no *varsize, so a longer message is cut at 64 at the call site and no width
+// chosen in this repository can change it. Where one of those carries the
+// reasoning, THE POINT MUST FIT IN THE FIRST 64 CHARACTERS. Where it will not
+// fit, use assert() or one of the helpers here instead.
+//------------------------------------------------------------------------------
 dcl-proc aEqualV;
   dcl-pi *n;
     expected varchar(512) const;
     actual   varchar(512) const;
-    fieldName varchar(64) const;
+    fieldName varchar(500) const;
   end-pi;
 
   assert((%trimr(expected) = %trimr(actual)):
@@ -440,30 +463,39 @@ end-proc;
 // THE TWO ARE NOT BOTH CONTROLS, and it is worth saying which is which because
 // the second was WRITTEN as a control and measurement said otherwise:
 //
-//   100 characters   GREEN today. The short name is cut at 64, but the first
-//                    ten characters survive that, so the derived job name is
-//                    the same either way. This is the control - it must stay
+//   100 characters   GREEN throughout. The short name was cut at 64 while
+//                    RMSC's own holder was 64 wide, but the first ten
+//                    characters survive that, so the derived job name is the
+//                    same either way. This is the control - it must stay
 //                    green, and it is what a refusal applied to the derived
 //                    path as well as the given one would break.
 //
-//   250 characters   Measured in SCDEF.TEST the same day: past 127 characters
-//                    the short name does not arrive short, it arrives EMPTY.
-//                    So there is no name to derive from, and SCLAUNCH falls
-//                    back to a constant - the job name that comes out is
-//                    'SCSERVICE'. Every service with a file name of 128
-//                    characters or more would submit under that one shared
-//                    name, and stop and check would look for it.
+//   250 characters   Measured in SCDEF.TEST on 5 September 2026: past 127
+//                    characters the short name did not arrive short, it
+//                    arrived EMPTY, because PATH_BASENAME_t in rmtools was
+//                    varchar(128) and the '.yaml' did not survive its cut. So
+//                    there was no name to derive from, SCLAUNCH fell back to a
+//                    constant, and the job name that came out was 'SCSERVICE'.
+//                    Every service with a file name of 128 characters or more
+//                    would have submitted under that one shared name, and stop
+//                    and check would have gone looking for it.
 //
-// THE SECOND IS BLOCKED ON rmtools AND IS WRITTEN AS A MARKER. The empty short
-// name comes from PATH_BASENAME_t being varchar(128) in rmtools, not from
-// anything in this repository, and it is to be fixed separately. So the case
-// asserts the constant that really comes out today, using the idiom
-// tools/error-delivery-test.sh calls `pinned`, and it goes red the day rmtools
-// lands - which is when the real expectation, RMSCJNA250, becomes reachable.
+// THE SECOND WAS BLOCKED ON rmtools AND WAS WRITTEN AS A MARKER: it asserted
+// the constant that really came out, in the idiom
+// tools/error-delivery-test.sh calls `pinned`, so that tools/verify.sh was not
+// left reporting FAILED every run until another repository shipped, and so
+// that it would go red the day the fix arrived and say in its own text what to
+// change it to.
 //
-// It is the only thing in this repository that observes what an empty short
-// name does to the job that actually gets SUBMITTED, which is why it is kept
-// as a marker rather than deleted until rmtools ships.
+// It did. rmtools 2.0.7, released 7 September 2026, widened PATH_BASENAME_t to
+// varchar(255) and replaced the MONITOR with a `pos > 0` guard, the short name
+// arrives whole, and the case below is the real expectation it was standing in
+// for - RMSCJNA250, derived from the name the file actually has.
+//
+// IT IS STILL THE ONLY THING IN THIS REPOSITORY that observes what the short
+// name does to the job that actually gets SUBMITTED rather than to what is
+// stored, which is why it is worth keeping now that it asserts something
+// rather than nothing.
 //
 // THE DERIVATION RULE ITSELF IS NOT CHANGING - confirmed by the project owner:
 // the first ten alphanumeric characters of the upper-cased name. Every fixture
@@ -520,7 +552,7 @@ dcl-proc test_job_name_derived_from_a_long_name export;
 
 end-proc;
 
-dcl-proc test_job_name_past_the_rmtools_limit_blocked_on_rmtools export;
+dcl-proc test_job_name_derived_from_the_longest_name export;
 
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
   dcl-s  nm  varchar(2048);
@@ -531,17 +563,15 @@ dcl-proc test_job_name_past_the_rmtools_limit_blocked_on_rmtools export;
   assert(load_def(nm + '.yaml':
     'start_cmd: /usr/bin/rmscjn' + LF +
     'check_alive: 8080' + LF: def):
-    'the longest service name the IFS will hold still loads - it is the ' +
-    'NAME that is lost, not the definition');
+    'the longest service name the IFS will hold still loads - it was the ' +
+    'NAME that used to be lost, not the definition');
 
-  aEqualV('SCSERVICE': SCLAUNCH_job_name(def):
-          'BLOCKED ON rmtools, NOT A DEFECT IN THIS REPOSITORY. Past 127 ' +
-          'characters PATH_BASENAME_t leaves the short name empty, so there ' +
-          'is nothing to derive from and this service submits under a ' +
-          'CONSTANT - as would every other service that long, all of them ' +
-          'sharing one job name that stop and check would then look for. ' +
-          'IF THIS FAILS, rmtools HAS LANDED - expect RMSCJNA250 and rename ' +
-          'this to test_job_name_derived_from_the_longest_name');
+  aEqualV('RMSCJNA250': SCLAUNCH_job_name(def):
+          'the derived name comes from the REAL short name, cut to ten. ' +
+          'While PATH_BASENAME_t was varchar(128) this service and every ' +
+          'other one named past 127 characters submitted under the ' +
+          'constant SCSERVICE, all of them sharing one job name that stop ' +
+          'and check would then look for');
 
 end-proc;
 

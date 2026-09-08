@@ -34,7 +34,7 @@ dcl-s g_dir like(STMF_t);
 dcl-pr aEqualV;
   expected  varchar(512) const;
   actual    varchar(512) const;
-  fieldName varchar(64) const;
+  fieldName varchar(500) const;
 end-pr;
 
 dcl-pr remove_fixtures end-pr;
@@ -58,7 +58,7 @@ end-pr;
 dcl-pr sl_equal;
   expected varchar(2048) const;
   actual   varchar(2048) const;
-  ctx      varchar(64) const;
+  ctx      varchar(500) const;
 end-pr;
 
 dcl-pr sl_tail varchar(64);
@@ -96,6 +96,11 @@ dcl-pr ut_lc varchar(2048);
 end-pr;
 
 dcl-pr ut_entry_len like(INTEGER_t);
+  prefix varchar(512) const;
+end-pr;
+
+dcl-pr ut_drop like(BOOLEAN_t);
+  name   like(STMF_t) const;
   prefix varchar(512) const;
 end-pr;
 
@@ -181,11 +186,34 @@ end-proc;
 // it so a failure still reports both values.
 //==============================================================================
 
+//------------------------------------------------------------------------------
+// A MESSAGE PARAMETER IS A HOLDER TOO, and this one was 64 wide until
+// 7 September 2026 - the same defect as the subject of the width block below,
+// in the text that reports it.
+//
+// MEASURED on this box the same day, with a throwaway suite: a 120-character
+// value passed to a `varchar(64) const` parameter arrives 64 long, silently,
+// and `opdesc` on the prototype does not change that; passed to a
+// `varchar(200) const` it arrives whole. So every message longer than the
+// parameter had its reasoning cut mid-word, and the cases where that hurt most
+// were the ones whose failure text is meant to explain itself.
+//
+// 500 IS SIZED TO WHAT CAN REACH IT: the longest message written in these
+// suites today is 271 characters, and iRPGUnit's own `assert` takes
+// `msgIfFalse varchar(16384)`, so nothing downstream cuts what this carries.
+//
+// BUT iEqual, nEqual AND aEqual CANNOT BE FIXED HERE. Their third parameter is
+// declared `fieldName varchar(64)` in iRPGUnit's own TESTCASE copybook, with
+// no *varsize, so a longer message is cut at 64 at the call site and no width
+// chosen in this repository can change it. Where one of those carries the
+// reasoning, THE POINT MUST FIT IN THE FIRST 64 CHARACTERS. Where it will not
+// fit, use assert() or one of the helpers here instead.
+//------------------------------------------------------------------------------
 dcl-proc aEqualV;
   dcl-pi *n;
     expected varchar(512) const;
     actual   varchar(512) const;
-    fieldName varchar(64) const;
+    fieldName varchar(500) const;
   end-pi;
 
   assert((%trimr(expected) = %trimr(actual)):
@@ -2389,7 +2417,7 @@ dcl-proc sl_equal;
   dcl-pi *n;
     expected varchar(2048) const;
     actual   varchar(2048) const;
-    ctx      varchar(64) const;
+    ctx      varchar(500) const;
   end-pi;
 
   if %trimr(expected) = %trimr(actual);
@@ -3738,75 +3766,88 @@ dcl-proc ut_entry_len;
 
 end-proc;
 
+//------------------------------------------------------------------------------
+// ut_drop - remove one fixture and say whether it really went
+//
+// FOR THE ONE FIXTURE THIS SUITE'S TEAR-DOWN CANNOT REMOVE. remove_fixtures
+// deletes '.yaml' files and nothing else, so the dotless entry below has to
+// clear up after itself or IFS_dltdir fails and tearDownSuite reports a second
+// failure that says nothing about the case that caused it.
+//
+// IT MEASURES THE OUTCOME RATHER THAN THE RETURN CODE. Reading the directory
+// back answers the question that matters - is the entry gone - and answers it
+// the same way whatever IFS_remove_file reports.
+//------------------------------------------------------------------------------
+dcl-proc ut_drop;
+  dcl-pi *n like(BOOLEAN_t);
+    name   like(STMF_t) const;
+    prefix varchar(512) const;
+  end-pi;
+
+  IFS_remove_file(%trim(g_dir) + '/' + %trim(name));
+
+  return (ut_entry_len(prefix) = 0);
+
+end-proc;
+
 //==============================================================================
-// SHORT NAME - the base name of the file, at 64, 65 and 250
+// SHORT NAME - the base name of the file, at 64, 65, 127, 128 and 250
 //
 // `name:` is written SHORT in every one of these, and deliberately. The
 // friendly name falls back to the short name when the key is absent, so a long
 // file name with no `name:` would exercise two fields at once and a red result
 // could not say which of them cut the value. Here only short_name is long.
 //
-// 250 IS THE LARGEST A '.yaml' FILE CAN CARRY. Measured on this box the same
-// day: the IFS accepts a file name of 255 characters and refuses 256, so
-// 250 + '.yaml' is exactly at the limit. (A '.yml' file can carry 251, which
-// SCCOLL.TEST covers on real directory entries - see the note there.)
+// 250 IS THE LARGEST A '.yaml' FILE CAN CARRY. Measured on this box, and
+// measured again on 7 September 2026: the IFS accepts a file name of 255
+// characters and refuses 256, so 250 + '.yaml' is exactly at the limit. (A
+// '.yml' file can carry 251, which SCCOLL.TEST covers on real directory
+// entries - see the note there. This suite cannot: its tear-down removes
+// '.yaml' files only, so a '.yml' fixture would be left behind and the
+// directory would not go.)
 //
-// THERE ARE TWO DEFECTS HERE, NOT ONE, THEY LIVE IN DIFFERENT REPOSITORIES,
-// AND ONLY THE FIRST CAN BE FIXED BY THIS WORK. Measured by loading one
-// definition per base-name length, 113 to 130 and then in steps to 250, and
-// reading back %len(def.short_name):
+// THERE WERE TWO DEFECTS HERE, NOT ONE, THEY LIVED IN DIFFERENT REPOSITORIES,
+// AND BOTH ARE NOW FIXED. Measured by loading one definition per base-name
+// length, 113 to 130 and then in steps to 250, and reading back
+// %len(def.short_name):
 //
-//     base name   short name that arrives
-//     ---------   -----------------------
-//        64 - 127   64        truncated   <- RMSC's own holder. OURS.
-//       128 - 250    0        GONE        <- rmtools. NOT OURS.
+//     base name   short name, before       short name, now
+//     ---------   ----------------------   ---------------
+//        64 - 127   64       truncated     whole   <- RMSC's own holder
+//       128 - 250    0       GONE          whole   <- rmtools
 //
-// ROOT CAUSE OF THE SECOND, confirmed by the project owner against rmtools:
-// PATH_BASENAME_t is varchar(128). A file name of 133 characters truncates to
-// 128, which drops the '.yaml' off the end; the scanr for the dot then returns
-// 0, %subst(basename: 1: pos - 1) becomes %subst(x: 1: -1) and raises, and a
-// MONITOR swallows it into ''. So the name does not shorten, it disappears.
-// The dot has to survive the cut, which is why the boundary is a base name of
-// 127 and not 128, and why it is 127 for '.yml' as well as for '.yaml'.
+// THE SECOND ONE IN FULL, because the shape of it is worth keeping.
+// PATH_BASENAME_t was varchar(128). A file name of 133 characters truncated to
+// 128, which dropped the '.yaml' off the end; the scanr for the dot then
+// returned 0, %subst(basename: 1: pos - 1) became %subst(x: 1: -1) and raised,
+// and a MONITOR swallowed it into ''. So the name did not shorten, it
+// disappeared - which is why the old boundary was a base name of 127 and not
+// 128, and why it was 127 for '.yml' as well as for '.yaml'.
 //
-// PATH_BASENAME_t IS IN rmtools, NOT IN THIS REPOSITORY. It is to be widened
-// to 255 with the pos = 0 guard repaired, separately and not soon. Until then
-// no width RMSC chooses can help: PATH_name cannot return more than 128
-// characters however wide our own field is.
+// rmtools 2.0.7, released 7 September 2026, widened PATH_BASENAME_t to
+// varchar(255) and replaced the MONITOR with a `pos > 0` guard, so a name with
+// no dot in it now returns the base name rather than an empty string. RMSC's
+// own holder is 512, so every base name the IFS can hold arrives whole.
 //
-// SO THE CASES SPLIT, and the split is marked in their NAMES:
+// UNTIL THAT LANDED THE CASES PAST 127 WERE MARKERS, not expectations. They
+// were named ..._blocked_on_rmtools and they asserted the EMPTY name that
+// really came back, in the idiom tools/error-delivery-test.sh calls `pinned`.
+// Two reasons, and both still apply to the next thing that has to be written
+// this way: tools/verify.sh reports one verdict, and a suite red for months
+// waiting on another repository trains everyone to wave through the next red;
+// and a marker written this way goes RED the day the fix arrives and says in
+// its own failure text what to change it to. These did, on 7 September 2026,
+// and this is what they were changed to. Nobody had to remember.
 //
-//   ..._is_whole                 65 to 127. A real expectation. RED when
-//                                written, GREEN since this work landed.
-//   ..._blocked_on_rmtools       128 and up. Asserts what happens TODAY, and
-//                                says so in its own failure text.
+// EVERY CASE PROVES ITS FIXTURE FIRST. A case that passed because its file was
+// never written would be the worst of both worlds - it reports success and
+// measures nothing - so ut_entry_len establishes the name really is on disk at
+// its full length before anything is concluded from what came back.
 //
-// WHY THE BLOCKED ONES ASSERT THE DEFECT RATHER THAN THE FIX. tools/verify.sh
-// runs every suite and reports one verdict. A case that cannot pass until
-// another repository ships would make that verdict FAILED on every run for
-// months, and this project has already written down what that does: a suite
-// red for a known reason trains everyone to wave through the next red. The
-// idiom is the one tools/error-delivery-test.sh calls `pinned` - assert the
-// behaviour that is really there, so that a later change to it is VISIBLE
-// rather than silent.
-//
-// AND EACH ONE FAILS THE MOMENT rmtools LANDS. That is the point of writing it
-// this way rather than deleting the case: nobody has to remember. The day
-// PATH_BASENAME_t widens, these go red, and whoever sees it flips the
-// assertion to the real expectation - the whole name - and renames it
-// ..._is_whole like its neighbours. A failure here is not a defect arriving;
-// it is the fix arriving.
-//
-// EVERY BLOCKED CASE STILL PROVES ITS FIXTURE FIRST. A marker that passed
-// because its file was never written would be the worst of both worlds - it
-// reports success and measures nothing - so ut_entry_len establishes the name
-// really is on disk at its full length before anything is concluded from an
-// empty short name.
-//
-// 127 IS THE CASE THAT GUARDS THE BAND WE OWN. It is the largest name our own
-// widening has to handle, and without it a fix that went from 64 to 100 would
-// turn 65 green and leave nothing to catch it - every other real case here is
-// at or below 65.
+// 127 IS STILL THE CASE THAT GUARDS THE BAND RMSC OWNS. It is the largest name
+// our own widening had to handle, and without it a fix that went from 64 to
+// 100 would turn 65 green and leave nothing to catch it - every other real
+// case here is at or below 65.
 //==============================================================================
 
 dcl-proc test_short_name_at_64_is_whole export;
@@ -3826,8 +3867,8 @@ dcl-proc test_short_name_at_64_is_whole export;
 
   got = def.short_name;
   sl_equal(nm: got:
-           'the short name is whole at 64 - the width it has today, so this ' +
-           'is the half a fix that moves the boundary the wrong way fails');
+           'the short name is whole at 64 - the OLD width, so this is the ' +
+           'half a fix that moves the boundary the wrong way fails');
 
 end-proc;
 
@@ -3853,8 +3894,8 @@ dcl-proc test_short_name_at_65_is_whole export;
 
   got = def.short_name;
   sl_equal(nm: got:
-           'the short name is whole at 65 - today it arrives 64 characters ' +
-           'long and nothing says so');
+           'the short name is whole at 65 - the first length RMSC''s own ' +
+           '64-wide holder used to cut, and it cut it silently');
 
 end-proc;
 
@@ -3866,8 +3907,8 @@ dcl-proc test_short_name_at_127_is_whole export;
 
   nm = ut_lc('sn127': 127);
   iEqual(127: %len(nm):
-         'the largest base name RMSC can be handed whole - one more and the ' +
-         'dot no longer survives rmtools'' 128-character cut');
+         'the largest base name the OLD rmtools could hand back whole - one ' +
+         'more and the dot did not survive its 128-character cut');
 
   assert(load_fixture(nm + '.yaml':
     'name: probe' + LF +
@@ -3881,48 +3922,43 @@ dcl-proc test_short_name_at_127_is_whole export;
 
   got = def.short_name;
   sl_equal(nm: got:
-           'the short name is whole at 127 - today it arrives cut at 64. ' +
-           'This is the TOP of the band this work owns, and the case a ' +
-           'widening that went to 100 rather than 255 would fail while ' +
-           'every other real case here went green');
+           'the short name is whole at 127 - the TOP of the band RMSC ' +
+           'owns, and the case a widening that went to 100 rather than 255 ' +
+           'would fail while every other real case here went green');
 
 end-proc;
 
-dcl-proc test_short_name_at_128_blocked_on_rmtools export;
+dcl-proc test_short_name_at_128_is_whole export;
 
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
   dcl-s  nm  varchar(2048);
   dcl-s  got varchar(2048);
 
   nm = ut_lc('sn128': 128);
-  iEqual(128: %len(nm): 'one character past the last name rmtools can hand ' +
-                        'back with its dot intact');
+  iEqual(128: %len(nm):
+         'one character past the last name the old PATH_BASENAME_t could ' +
+         'hand back with its dot intact');
 
   assert(load_fixture(nm + '.yaml':
     'name: probe' + LF +
     'start_cmd: /usr/bin/rmscut' + LF +
     'check_alive: 8080' + LF: def):
-    'the definition still loads, and that is the trouble - it loads with no ' +
-    'name and says nothing');
+    'a 128-character file name loads - it always did, and that was the ' +
+    'trouble: it loaded with no name and said nothing');
 
   iEqual(133: ut_entry_len('rmscutsn128'):
          'the fixture really did land on disk as 128 characters of base ' +
-         'name and five of extension - a marker that passed because its ' +
+         'name and five of extension - a case that passed because its ' +
          'file was never written would measure nothing');
 
   got = def.short_name;
-  iEqual(0: %len(%trimr(got)):
-         'BLOCKED ON rmtools, NOT A DEFECT IN THIS REPOSITORY. At 128 the ' +
-         'short name comes back EMPTY because PATH_BASENAME_t is ' +
-         'varchar(128): the file name is cut to 128, the dot goes with it, ' +
-         'and the basename extraction raises into an empty string. No width ' +
-         'RMSC chooses can change that. This asserts what happens TODAY. ' +
-         'IF THIS FAILS, rmtools HAS LANDED - assert the whole 128-character ' +
-         'name instead and rename this to test_short_name_at_128_is_whole');
+  sl_equal(nm: got:
+           'whole at 128 - the first length that came back EMPTY until ' +
+           'rmtools 2.0.7 widened PATH_BASENAME_t');
 
 end-proc;
 
-dcl-proc test_short_name_at_250_blocked_on_rmtools export;
+dcl-proc test_short_name_at_250_is_whole export;
 
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
   dcl-s  nm  varchar(2048);
@@ -3942,14 +3978,11 @@ dcl-proc test_short_name_at_250_blocked_on_rmtools export;
          'base name and five of extension');
 
   got = def.short_name;
-  iEqual(0: %len(%trimr(got)):
-         'BLOCKED ON rmtools, as the 128 case above and for the same ' +
-         'reason - everything from 128 upwards arrives with no name at all. ' +
-         'Kept as well as the 128 one because 128 is the boundary and 250 ' +
-         'is the longest name a .yaml file can carry, and a partial rmtools ' +
-         'fix could move one without the other. IF THIS FAILS, rmtools HAS ' +
-         'LANDED - assert the whole 250-character name and rename this to ' +
-         'test_short_name_at_250_is_whole');
+  sl_equal(nm: got:
+           'whole at 250 - kept alongside 128 because 128 was the old ' +
+           'boundary and 250 is the ceiling, and a partial fix could have ' +
+           'moved one without the other. The 251 a .yml file can carry is ' +
+           'in SCCOLL.TEST, on a real directory entry');
 
 end-proc;
 
@@ -3970,6 +4003,116 @@ dcl-proc test_short_name_ordinary_is_whole export;
            'that broke the lower-casing or the extension strip would fail');
 
 end-proc;
+
+//==============================================================================
+// AND ONE ENTRY LONGER THAN ANY DEFINITION FILE CAN BE - 255, WITH NO DOT
+//
+// THE QUESTION THIS ANSWERS IS "IS ANYTHING ABOVE 251 REACHABLE?", asked when
+// rmtools 2.0.7 landed. Measured on this box, 7 September 2026, by creating
+// files of 250, 251, 252, 255 and 256 characters: the IFS accepts 255 and
+// refuses 256 with ENAMETOOLONG. A definition file must end '.yaml' or '.yml',
+// which is five characters or four, so the longest base name a definition file
+// can have is 250 or 251 and there is no way to make it 252. Those two cases
+// are covered above and in SCCOLL.TEST.
+//
+// A 255-character entry with NO extension is the one thing above 251 that can
+// be built, and SCDEF_load is the only door it can come through - a directory
+// walk selects by extension, so SCCOLL cannot see it. It is written because
+// the same rmtools change that widened the holder also replaced the MONITOR
+// with a `pos > 0` guard, and the dotless name is precisely the input that
+// guard exists for: no dot, so nothing to strip, and before the fix that path
+// raised into an empty string.
+//
+// IF SCDEF_load IS EVER GIVEN AN EXTENSION RULE OF ITS OWN, this case should
+// be changed to assert the REFUSAL rather than deleted. That it accepts a
+// dotless file today is measured, not assumed - the nEqual below is what
+// measures it - but it is a decision nobody in this repository has taken
+// deliberately, and the length is the only thing here that could not be
+// re-covered somewhere else.
+//
+// IT REMOVES ITS OWN FIXTURE ON EVERY PATH, INCLUDING THE ONE WHERE THE LOAD
+// RAISES. This suite's tear-down deletes '.yaml' files and nothing else, so a
+// dotless file left in the directory makes IFS_dltdir fail and turns
+// tearDownSuite red - a second failure, in another place, saying nothing about
+// this one.
+//
+// AN UNCONDITIONAL REMOVAL AFTER THE CALL IS NOT ENOUGH, and that is the whole
+// reason for the MONITOR. A dotless name is exactly the input that raised
+// before rmtools 2.0.7 - no dot, so the old code took %subst(x: 1: -1) - and
+// if SCDEF_load escapes rather than returning, a removal written after it
+// never runs. The case that exists to survive an older rmtools would then take
+// the tear-down down with it. So the load sits in a MONITOR, the removal is in
+// the on-error as well as on the normal path, and everything is asserted
+// afterwards from variables.
+//
+// THE REMOVAL IS CHECKED BY READING THE DIRECTORY BACK, not by trusting a
+// return code - see ut_drop. An assertion that the fixture went is cheap, and
+// without it the only report of a failed removal is the misleading one in
+// tearDownSuite.
+//==============================================================================
+
+dcl-proc test_short_name_dotless_at_255_is_whole export;
+
+  dcl-ds def    likeds(SCDEF_t) inz(*likeds);
+  dcl-s  nm     varchar(2048);
+  dcl-s  got    varchar(2048);
+  dcl-s  loaded like(BOOLEAN_t) inz(*off);
+  dcl-s  raised like(BOOLEAN_t) inz(*off);
+  dcl-s  gone   like(BOOLEAN_t) inz(*off);
+  dcl-s  ondisk like(INTEGER_t) inz(0);
+
+  nm = ut_lc('dot255': 255);
+
+  monitor;
+    loaded = load_fixture(nm:
+      'name: probe' + LF +
+      'start_cmd: /usr/bin/rmscut' + LF +
+      'check_alive: 8080' + LF: def);
+    got = def.short_name;
+  on-error;
+    raised = *on;
+  endmon;
+
+  ondisk = ut_entry_len('rmscutdot255');
+  gone   = ut_drop(nm: 'rmscutdot255');
+
+  iEqual(255: %len(nm):
+         'the longest entry the IFS will hold, and four characters longer ' +
+         'than any name a .yml definition file can have');
+
+  iEqual(255: ondisk:
+         'the fixture really did land on disk at 255 characters - without ' +
+         'this a short answer below could be a short file name');
+
+  assert(gone:
+         'the 255-character fixture is off disk again. This suite''s ' +
+         'tear-down removes ''.yaml'' files only, so a leftover would fail ' +
+         'IFS_dltdir and report a second failure in tearDownSuite that says ' +
+         'nothing about this case');
+
+  assert((not raised):
+         'SCDEF_load RETURNED rather than raising on a name with no dot in ' +
+         'it. That is what the pos > 0 guard added in rmtools 2.0.7 is for: ' +
+         'before it, the basename extraction did %subst(x: 1: -1) on a ' +
+         'dotless name and escaped once the MONITOR that swallowed it came ' +
+         'out. If this is red, the build is against an rmtools older than ' +
+         '2.0.7 - and the fixture has still been removed');
+
+  // assert, not nEqual: iRPGUnit cuts nEqual's message at 64 and the point of
+  // this one is past that. See the note above aEqualV.
+  assert(loaded:
+         'a file with no extension is still a definition when it is handed ' +
+         'to SCDEF_load by name - the extension rule belongs to the ' +
+         'directory walk, not to this. If this is red, SCDEF_load has ' +
+         'gained an extension rule of its own and this case should assert ' +
+         'the REFUSAL rather than be deleted');
+
+  sl_equal(nm: got:
+           'and its short name is the whole 255 - no dot to strip, which is ' +
+           'the input the new pos > 0 guard exists for');
+
+end-proc;
+
 
 //==============================================================================
 // FRIENDLY NAME - `name:`, at 128, 129 and 1000

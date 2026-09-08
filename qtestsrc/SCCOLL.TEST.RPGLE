@@ -31,7 +31,7 @@ dcl-s g_sub like(STMF_t);
 dcl-pr aEqualV;
   expected  varchar(512) const;
   actual    varchar(512) const;
-  fieldName varchar(64) const;
+  fieldName varchar(500) const;
 end-pr;
 
 dcl-pr write_file;
@@ -459,11 +459,34 @@ end-proc;
 // it so a failure still reports both values.
 //==============================================================================
 
+//------------------------------------------------------------------------------
+// A MESSAGE PARAMETER IS A HOLDER TOO, and this one was 64 wide until
+// 7 September 2026 - the same defect as the subject of the width block below,
+// in the text that reports it.
+//
+// MEASURED on this box the same day, with a throwaway suite: a 120-character
+// value passed to a `varchar(64) const` parameter arrives 64 long, silently,
+// and `opdesc` on the prototype does not change that; passed to a
+// `varchar(200) const` it arrives whole. So every message longer than the
+// parameter had its reasoning cut mid-word, and the cases where that hurt most
+// were the ones whose failure text is meant to explain itself.
+//
+// 500 IS SIZED TO WHAT CAN REACH IT: the longest message written in these
+// suites today is 271 characters, and iRPGUnit's own `assert` takes
+// `msgIfFalse varchar(16384)`, so nothing downstream cuts what this carries.
+//
+// BUT iEqual, nEqual AND aEqual CANNOT BE FIXED HERE. Their third parameter is
+// declared `fieldName varchar(64)` in iRPGUnit's own TESTCASE copybook, with
+// no *varsize, so a longer message is cut at 64 at the call site and no width
+// chosen in this repository can change it. Where one of those carries the
+// reasoning, THE POINT MUST FIT IN THE FIRST 64 CHARACTERS. Where it will not
+// fit, use assert() or one of the helpers here instead.
+//------------------------------------------------------------------------------
 dcl-proc aEqualV;
   dcl-pi *n;
     expected varchar(512) const;
     actual   varchar(512) const;
-    fieldName varchar(64) const;
+    fieldName varchar(500) const;
   end-pi;
 
   assert((%trimr(expected) = %trimr(actual)):
@@ -4923,71 +4946,74 @@ end-proc;
 // formed. Nothing is malformed. There is simply one fewer service than there
 // are files.
 //
-// AND THERE IS A SECOND, WIDER WAY TO LOSE ONE - IN ANOTHER REPOSITORY.
+// AND THERE WAS A SECOND, WIDER WAY TO LOSE ONE - IN ANOTHER REPOSITORY.
 // Measured the same day in SCDEF.TEST by loading one definition per base-name
 // length:
 //
-//     base name   short name that arrives
-//     ---------   -----------------------
-//        64 - 127   64        truncated   <- RMSC's own holder. OURS.
-//       128 - 250    0        GONE        <- rmtools. NOT OURS.
+//     base name   short name, before       short name, now
+//     ---------   ----------------------   ---------------
+//        64 - 127   64       truncated     whole   <- RMSC's own holder
+//       128 - 251    0       GONE          whole   <- rmtools
 //
-// Past 127 the name is not shortened, it is absent. So ANY two definitions
-// whose file names are 128 characters or longer collide - not because they
-// resemble each other, but because neither has a name. They need share no
-// prefix at all.
+// Past 127 the name was not shortened, it was ABSENT. So ANY two definitions
+// whose file names were 128 characters or longer collided - not because they
+// resembled one another, but because neither had a name at all. They needed
+// share no prefix.
 //
 // ROOT CAUSE, confirmed by the project owner against rmtools: PATH_BASENAME_t
-// is varchar(128). A 133-character file name is cut to 128, the '.yaml' goes
-// with the cut, the scanr for the dot returns 0, and the basename extraction
-// raises into an empty string behind a MONITOR. The dot has to survive the
-// cut, which is why the boundary is a base name of 127 and is 127 for '.yml'
-// as well as for '.yaml'. It is to be fixed separately and not soon.
+// was varchar(128). A 133-character file name was cut to 128, the '.yaml' went
+// with the cut, the scanr for the dot returned 0, and the basename extraction
+// raised into an empty string behind a MONITOR. The dot had to survive the
+// cut, which is why the old boundary was a base name of 127, and why it was
+// 127 for '.yml' as well as for '.yaml'.
 //
-// SO THE CASES SPLIT, and the split is in their NAMES:
+// rmtools 2.0.7, released 7 September 2026, widened PATH_BASENAME_t to
+// varchar(255) and replaced the MONITOR with a `pos > 0` guard. RMSC's own
+// short-name holder is 512, so every base name a definition file can carry -
+// 250 with '.yaml', 251 with '.yml' - now arrives whole, and the whole band is
+// a real expectation again.
 //
-//   ..._is_whole / ..._are_two_services    65 to 127. Real expectations. RED
-//                                          today, GREEN when this work lands.
-//   ..._blocked_on_rmtools                 128 and up. Assert what happens
-//                                          TODAY and say so in their own text.
+// UNTIL THAT LANDED, THE CASES PAST 127 WERE MARKERS. Their names ended
+// blocked_on_rmtools and they asserted the collapse that really happened, in
+// the idiom tools/error-delivery-test.sh calls `pinned`. Two reasons, and both
+// still apply to the next thing that has to be written this way: tools/
+// verify.sh reports one verdict, and a suite red for months waiting on another
+// repository trains everyone to wave through the next red; and a marker
+// written this way goes RED the day the fix arrives and says in its own
+// failure text what to change it to. These did, on 7 September 2026, and this
+// is what they were changed to. Nobody had to remember.
 //
-// The blocked ones use the idiom tools/error-delivery-test.sh calls `pinned`:
-// assert the behaviour that is really there, so a later change to it is
-// VISIBLE rather than silent, and so tools/verify.sh is not left reporting
-// FAILED every run until another repository ships. Each of them fails THE
-// MOMENT rmtools lands, which is the point of writing them rather than
-// deleting them - nobody has to remember. A failure there is the fix
-// arriving, not a defect.
-//
-// THE HEADLINE CASE IS BELOW THE BOUNDARY AND STAYS A REAL ONE. Its two names
-// are 100 characters, so 105 on disk - well inside the 128 rmtools can carry -
-// and they collide purely on RMSC's own 64-wide key. That is the case this
-// work exists to fix, and it is unaffected by any of the above.
+// THE HEADLINE CASE IS BELOW THE BOUNDARY AND WAS ALWAYS A REAL ONE. Its two
+// names are 100 characters, so 105 on disk - well inside the 128 even the old
+// rmtools could carry - and they collided purely on RMSC's own 64-wide key.
+// That is the case this work existed to fix, and none of the above ever
+// touched it.
 //
 // A COUNT IS NOT ENOUGH ON ITS OWN, and both halves are asserted throughout:
 //
 //   the count alone   would still pass if some future change kept both files
 //                     but recorded them under ONE name, or under a name
 //                     neither file has.
-//   the names alone   would still pass, today, against SCCOLL_find - see next.
+//   the names alone   would have passed, before the fix, against SCCOLL_find
+//                     - see next.
 //
 // SCCOLL_find IS NOT TRUSTED AS THE ONLY WITNESS, and this is the trap worth
-// naming. Its name parameter is very likely the same type being widened. If it
-// is, then today a look-up with a whole 100-character name passes only 64
-// characters, matches the 64 that were stored, and SUCCEEDS - reporting the
-// defect as a pass. The instrument would share the fault it is measuring. So
-// wholeness is established by walking the collection with SCCOLL_get and
-// comparing def.short_name in a varchar(2048) of this suite's own, and
-// SCCOLL_find is asserted IN ADDITION to that, never instead of it.
+// naming. Its name parameter was very likely the same type being widened. If
+// it was, then before the fix a look-up with a whole 100-character name passed
+// only 64 characters, matched the 64 that were stored, and SUCCEEDED -
+// reporting the defect as a pass. The instrument would have shared the fault it
+// was measuring. So wholeness is established by walking the collection with
+// SCCOLL_get and comparing def.short_name in a varchar(2048) of this suite's
+// own, and SCCOLL_find is asserted IN ADDITION to that, never instead of it.
 //
 // ONE DIRECTORY PER LENGTH, which is the discipline the cfl_ block above
 // already sets out and it is load-bearing here. A first attempt put all five
 // lengths in one directory and asserted a count of five in every case. Two of
 // those cases are CONTROLS - 64 and an ordinary name - and both went red,
-// because the 250 and 251 fixtures share the empty name described above and
-// collapse into one entry. A control that dies on someone else's defect before
-// it reaches the thing it controls is not a control. So each length now has a
-// directory holding one file, and the aggregate count has a procedure of its
+// because the 250 and 251 fixtures then shared the empty name described above
+// and collapsed into one entry. A control that dies on someone else's defect
+// before it reaches the thing it controls is not a control. So each length has
+// a directory holding one file, and the aggregate count has a procedure of its
 // own where it is the subject rather than a preamble.
 //
 // GROUPS REACH A SECOND HOLDER, and the brief for this work does not mention
@@ -5090,7 +5116,7 @@ end-proc;
 // On failure it reports the length and tail of every short name the collection
 // DOES hold, because "not found" on its own cannot tell a missing service from
 // a truncated one from a nameless one, and those are three different defects -
-// two of which are live in this code today.
+// two of which were live in this code when it was written.
 //------------------------------------------------------------------------------
 dcl-proc tr_stored;
   dcl-pi *n;
@@ -5126,12 +5152,13 @@ dcl-proc tr_stored;
 end-proc;
 
 //------------------------------------------------------------------------------
-// tr_short_at - the short name stored at RRN, for the blocked markers
+// tr_short_at - the short name stored at RRN
 //
-// tr_stored asserts that a name IS present, which is the wrong shape for a
-// case whose whole subject is a name that is ABSENT. This returns what is
-// actually there so the marker can assert its length is zero, and go red the
-// day it stops being zero.
+// tr_stored asserts that a name IS present somewhere in the collection, which
+// is the wrong shape for a case about WHICH entry holds what, or about a name
+// that is absent. This returns what is actually there. It was written for the
+// blocked_on_rmtools markers, which asserted an empty name and went red the
+// day it stopped being empty; the ordering cases below still use it.
 //------------------------------------------------------------------------------
 dcl-proc tr_short_at;
   dcl-pi *n varchar(2048);
@@ -5216,8 +5243,8 @@ dcl-proc tr_setup;
   write_file(%trim(g_tr) + '/prefix/' + %trim(g_trb) + '.yaml': y);
 
   // TWO NAMES OF 130 THAT SHARE NOTHING. Different from character one, so no
-  // prefix rule of any width can explain a collision between them. Today both
-  // arrive with NO name and collide on that.
+  // prefix rule of any width can explain a collision between them. Before
+  // rmtools 2.0.7 both arrived with NO name and collided on that.
   //
   // The two characters in front are not decoration. tr_name puts a common
   // 'rmsctr' on everything it builds, so two names from it alone agree for
@@ -5253,12 +5280,14 @@ dcl-proc tr_setup;
   write_file(%trim(g_tr) + '/l251/' + %trim(g_tr251) + '.yml':  y);
   write_file(%trim(g_tr) + '/lord/rmsctr_ordinary.yaml': y);
 
-  // THE AGGREGATE IS SPLIT AT THE BOUNDARY, because one directory spanning
-  // both bands could only ever assert a number that mixed a defect this work
-  // fixes with one it cannot reach.
+  // THE AGGREGATE IS SPLIT AT THE OLD BOUNDARY, because one directory
+  // spanning both bands could only ever have asserted a number that mixed a
+  // defect this repository fixed with one it could not reach. Both are real
+  // expectations now, and the split is kept because the two still measure
+  // different widenings.
   //
-  //   all/    everything at or below 127 - a real expectation
-  //   past/   everything at or above 128 - a blocked marker
+  //   all/    everything at or below 127 - the widening RMSC made
+  //   past/   everything at or above 128 - the widening rmtools made
   write_file(%trim(g_tr) + '/all/'  + %trim(g_tr64)  + '.yaml': y);
   write_file(%trim(g_tr) + '/all/'  + %trim(g_tr65)  + '.yaml': y);
   write_file(%trim(g_tr) + '/all/'  + %trim(g_tr127) + '.yaml': y);
@@ -5327,14 +5356,14 @@ end-proc;
 // THE ONE THAT MATTERS - two names sharing a 64-character prefix are two
 // services, and one of them must not vanish
 //
-// Two files on disk, both valid, both loadable on their own. Today the
-// collection holds ONE of them and says nothing: no error, no warning, no
-// bad-definition entry. A service is simply not there.
+// Two files on disk, both valid, both loadable on their own. Before the fix
+// the collection held ONE of them and said nothing: no error, no warning, no
+// bad-definition entry. A service was simply not there.
 //
 // THE FIXTURE IS ESTABLISHED FIRST. Both names are 100 characters and agree
 // for 64, so if either had failed to reach disk intact the directory would
 // hold one file and the count would be 1 - which is exactly what the defect
-// produces. A red result has to mean the defect and not a fixture that never
+// produced. A red result has to mean the defect and not a fixture that never
 // landed.
 //==============================================================================
 
@@ -5353,9 +5382,10 @@ dcl-proc test_two_names_sharing_a_64_prefix_are_two_services export;
   tr_load('prefix': coll);
 
   iEqual(2: SCCOLL_count(coll):
-         'TWO files, TWO services. Today the second replaces the first and ' +
-         'one service is silently gone - and a row that disappears from ' +
-         'check is the failure this project guards against hardest');
+         'TWO files, TWO services. While the key was 64 wide the second ' +
+         'replaced the first and one service was silently gone - and a row ' +
+         'that disappears from check is the failure this project guards ' +
+         'against hardest');
 
   tr_stored(coll: g_tra:
             'the first name is stored whole - walked with SCCOLL_get, not ' +
@@ -5364,10 +5394,10 @@ dcl-proc test_two_names_sharing_a_64_prefix_are_two_services export;
   tr_stored(coll: g_trb: 'and so is the second');
 
   // ADDITIONAL to the two above, never instead of them. If SCCOLL_find takes
-  // the same narrow type then today it passes 64 characters, matches the 64
-  // that were stored, and succeeds - so on its own it would report the defect
-  // as a pass. It is asserted because after the fix a look-up by the whole
-  // name is what a user actually does.
+  // the same narrow type then before the fix it passed 64 characters, matched
+  // the 64 that were stored, and succeeded - so on its own it would have
+  // reported the defect as a pass. It is asserted because after the fix a
+  // look-up by the whole name is what a user actually does.
   nEqual(true: SCCOLL_find(coll: g_tra: def):
          'the first is findable by its whole name');
   nEqual(true: SCCOLL_find(coll: g_trb: def):
@@ -5376,29 +5406,28 @@ dcl-proc test_two_names_sharing_a_64_prefix_are_two_services export;
 end-proc;
 
 //==============================================================================
-// AND TWO NAMES THAT SHARE NOTHING AT ALL ARE LOST TOO - BLOCKED ON rmtools
+// AND TWO NAMES THAT SHARE NOTHING AT ALL WERE LOST TOO - FIXED IN rmtools
 //
 // 130 characters each, differing from character one. No prefix rule of any
-// width can bring these together. They collide today because past 127 a name
-// is not truncated but ABSENT, so both definitions arrive under the empty name
-// and the second overwrites the first on it.
+// width could ever have brought these two together. They collided because past
+// 127 a name was not truncated but ABSENT, so both definitions arrived under
+// the empty name and the second overwrote the first on it.
 //
 // This is the broader of the two vanishing paths - it cannot be reasoned about
-// from the file names at all - and it is the one this repository cannot close.
-// PATH_BASENAME_t is varchar(128) in rmtools, so no width RMSC chooses gives
-// these two definitions distinct names.
+// from the file names at all - and it was the one this repository could not
+// close. PATH_BASENAME_t was varchar(128) in rmtools, so no width RMSC chose
+// gave these two definitions distinct names.
 //
-// SO IT IS A MARKER, not a failing expectation. It asserts the collapse that
-// really happens today. The day rmtools widens PATH_BASENAME_t both names
-// arrive whole, the count becomes 2, and THIS GOES RED - at which point flip
-// it to the real expectation below the assertion and rename it
-// test_two_names_with_nothing_in_common_are_two_services.
+// SO IT WAS A MARKER rather than a failing expectation, asserting the collapse
+// that really happened. It went RED on 7 September 2026 when rmtools 2.0.7
+// widened PATH_BASENAME_t to 255, which is what it was written to do, and this
+// is the expectation it was standing in for: two files, two services, both
+// names whole.
 //==============================================================================
 
-dcl-proc test_two_nameless_definitions_collide_blocked_on_rmtools export;
+dcl-proc test_two_names_with_nothing_in_common_are_two_services export;
 
   dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
-  dcl-s  got  varchar(2048);
 
   iEqual(130: %len(g_trc): 'the first name is 130 characters');
   iEqual(130: %len(g_trd): 'and so is the second');
@@ -5410,48 +5439,52 @@ dcl-proc test_two_nameless_definitions_collide_blocked_on_rmtools export;
 
   tr_load('nameless': coll);
 
-  iEqual(1: SCCOLL_count(coll):
-         'BLOCKED ON rmtools, NOT A DEFECT IN THIS REPOSITORY. Two files ' +
-         'that have nothing whatever in common become ONE service, because ' +
-         'past 127 characters PATH_BASENAME_t leaves both with no name and ' +
-         'they collide on that. RMSC cannot widen its way out of this. ' +
-         'IF THIS FAILS, rmtools HAS LANDED - expect 2 here, assert both ' +
-         'names whole with tr_stored, and rename this to ' +
-         'test_two_names_with_nothing_in_common_are_two_services');
+  iEqual(2: SCCOLL_count(coll):
+         'TWO files that have nothing whatever in common are TWO services. ' +
+         'While PATH_BASENAME_t was varchar(128) both arrived with no name ' +
+         'at all, collided on that, and one of them was gone with nothing ' +
+         'anywhere reporting it');
 
-  got = tr_short_at(coll: 1);
-  iEqual(0: %len(%trimr(got)):
-         'and the one that survived has no name at all - which is what makes ' +
-         'this a collision rather than a file that failed to load');
+  tr_stored(coll: g_trc:
+            'the first 130-character name is stored whole - walked with ' +
+            'SCCOLL_get, not looked up, so the answer does not depend on ' +
+            'the width of a parameter that could carry the same fault');
+  tr_stored(coll: g_trd: 'and so is the second');
 
 end-proc;
 
 //==============================================================================
-// FOUR NAMES, ALL INSIDE THE BAND THIS WORK OWNS, ALL PRESENT AND ALL WHOLE
+// FOUR NAMES AT OR BELOW 127, ALL PRESENT AND ALL WHOLE
 //
-// The aggregate, split at 127 so that it states something this work can
-// actually deliver. The per-length cases below each hold ONE file, so none can
-// be brought down by another length's defect; this is where they are asked
-// about together, and it is the only place a fixed-size array's stride could
-// show - four long names stored side by side rather than one at a time.
+// The aggregate for the band RMSC's own widening owns. The per-length cases
+// below each hold ONE file, so none can be brought down by another length's
+// defect; this is where they are asked about together, and it is the only
+// place a fixed-size array's stride could show - four long names stored side
+// by side rather than one at a time.
 //
-// THE COUNT IS GREEN TODAY AND THE WHOLENESS IS NOT. All four names differ
-// within their first dozen characters, so truncating them to 64 leaves them
-// distinct and the count comes out right either way. That is exactly why the
-// count is not the assertion here: it agrees with the defect. The four
+// THE SPLIT AT 127 IS KEPT although both bands are now real expectations. It
+// was made because one directory spanning both could only assert a number that
+// mixed a defect this repository fixed with one it could not reach, and it is
+// kept because the two directories still measure different things: this one is
+// the widening RMSC made, `past` below is the widening rmtools made.
+//
+// THE COUNT WAS GREEN BEFORE THE FIX AND THE WHOLENESS WAS NOT. All four names
+// differ within their first dozen characters, so cutting them to 64 left them
+// distinct and the count came out right either way. That is exactly why the
+// count is not the assertion here: it agreed with the defect. The four
 // tr_stored calls are what separate.
 //==============================================================================
 
-dcl-proc test_names_below_the_rmtools_limit_are_all_present export;
+dcl-proc test_names_below_the_old_rmtools_limit_are_all_present export;
 
   dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
 
   tr_load('all': coll);
 
   iEqual(4: SCCOLL_count(coll):
-         'four files, four services - true today as well, because the four ' +
-         'names stay distinct even cut at 64. The wholeness below is what ' +
-         'this case is for');
+         'four files, four services - true before the fix as well, because ' +
+         'the four names stayed distinct even cut at 64. The wholeness ' +
+         'below is what this case is for');
 
   tr_stored(coll: g_tr64:  'the 64-character name is whole');
   tr_stored(coll: g_tr65:  'and the 65-character one');
@@ -5462,31 +5495,35 @@ dcl-proc test_names_below_the_rmtools_limit_are_all_present export;
 end-proc;
 
 //==============================================================================
-// AND THREE NAMES PAST IT COLLAPSE INTO ONE - BLOCKED ON rmtools
+// AND THREE NAMES PAST IT ARE THREE SERVICES
 //
-// 128, 250 and 251. Three files, three quite different names, one service.
-// Same cause as everywhere else in this band: none of them has a name, so they
-// all collide on the empty one.
+// 128, 250 and 251. Three files, three quite different names, three services.
+// Until rmtools 2.0.7 not one of them had a name, so all three collided on the
+// empty one and the directory came back holding a single service. This case
+// was the marker that asserted that collapse; it went red the day the fix
+// landed and this is what it was standing in for.
 //
-// IF THIS FAILS, rmtools HAS LANDED - expect 3 and assert all three whole.
+// 251 IS THE LENGTH TO WATCH - see the per-length case below for why it is the
+// only one that can tell a 255-wide holder from a 250-wide one.
 //==============================================================================
 
-dcl-proc test_names_past_the_rmtools_limit_collapse_blocked_on_rmtools export;
+dcl-proc test_names_past_the_old_rmtools_limit_are_all_present export;
 
   dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
-  dcl-s  got  varchar(2048);
 
   tr_load('past': coll);
 
-  iEqual(1: SCCOLL_count(coll):
-         'BLOCKED ON rmtools. Three files of 128, 250 and 251 characters ' +
-         'become ONE service, all of them nameless. IF THIS FAILS, rmtools ' +
-         'HAS LANDED - expect 3 and assert g_tr128, g_tr250 and g_tr251 ' +
-         'whole with tr_stored');
+  iEqual(3: SCCOLL_count(coll):
+         'three files of 128, 250 and 251 characters are three services - ' +
+         'they were ONE for as long as PATH_BASENAME_t left every one of ' +
+         'them nameless, and nothing reported the two that vanished');
 
-  got = tr_short_at(coll: 1);
-  iEqual(0: %len(%trimr(got)):
-         'and the survivor has no name');
+  tr_stored(coll: g_tr128: 'the 128-character name is whole');
+  tr_stored(coll: g_tr250: 'and the 250-character one');
+  tr_stored(coll: g_tr251:
+            'and the 251-character one - the longest a .yml file can carry ' +
+            'and the only length that separates a 255-wide holder from a ' +
+            '250-wide one');
 
 end-proc;
 
@@ -5509,9 +5546,9 @@ dcl-proc test_coll_short_name_at_64_is_whole export;
   iEqual(1: SCCOLL_count(coll): 'one file, one service');
 
   tr_stored(coll: g_tr64:
-            'THE CONTROL AT THE OLD WIDTH - a 64-character name is stored ' +
-            'whole today, and a fix that moved the boundary the wrong way ' +
-            'would fail here and nowhere else');
+            'THE CONTROL AT THE OLD WIDTH - a 64-character name was stored ' +
+            'whole before either widening, and a fix that moved the ' +
+            'boundary the wrong way would fail here and nowhere else');
 
 end-proc;
 
@@ -5525,8 +5562,8 @@ dcl-proc test_coll_short_name_at_65_is_whole export;
   iEqual(1: SCCOLL_count(coll): 'one file, one service');
 
   tr_stored(coll: g_tr65:
-            'a 65-character name is stored whole - today it arrives cut at ' +
-            '64, which is what lets two names collide');
+            'a 65-character name is stored whole - one past the width ' +
+            'that used to cut it, which is what let two names collide');
 
 end-proc;
 
@@ -5535,74 +5572,73 @@ dcl-proc test_coll_short_name_at_127_is_whole export;
   dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
 
   iEqual(127: %len(g_tr127):
-         'the longest name rmtools can hand back with its dot intact, and ' +
-         'so the longest this work has to carry');
+         'the longest name the OLD rmtools could hand back with its dot ' +
+         'intact, and so the longest RMSC''s own widening had to carry');
 
   tr_load('l127': coll);
   iEqual(1: SCCOLL_count(coll): 'one file, one service');
 
   tr_stored(coll: g_tr127:
-            'a 127-character name is stored whole - today it arrives cut at ' +
-            '64. This is the TOP of the band this work owns, and the case a ' +
-            'widening to 100 rather than 255 would fail while every other ' +
-            'real case here went green');
+            'a 127-character name is stored whole - the TOP of the band ' +
+            'RMSC owns, and the case a widening to 100 rather than 255 ' +
+            'would fail while every other real case here went green');
 
 end-proc;
 
-dcl-proc test_coll_short_name_at_128_blocked_on_rmtools export;
+dcl-proc test_coll_short_name_at_128_is_whole export;
 
   dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
-  dcl-s  got  varchar(2048);
 
   iEqual(128: %len(g_tr128):
-         'one character past the last name rmtools can hand back whole');
+         'one character past the last name the old PATH_BASENAME_t could ' +
+         'hand back whole');
 
   tr_load('l128': coll);
   iEqual(1: SCCOLL_count(coll):
-         'one file, one service - the definition does load, which is why ' +
-         'nothing reports this');
+         'one file, one service - the definition always loaded, which is ' +
+         'why nothing ever reported the name it lost');
 
-  got = tr_short_at(coll: 1);
-  iEqual(0: %len(%trimr(got)):
-         'BLOCKED ON rmtools, NOT A DEFECT IN THIS REPOSITORY. At 128 the ' +
-         'stored short name is EMPTY, because PATH_BASENAME_t is ' +
-         'varchar(128) and the dot does not survive the cut. IF THIS ' +
-         'FAILS, rmtools HAS LANDED - use tr_stored(coll: g_tr128: ...) ' +
-         'and rename this to test_coll_short_name_at_128_is_whole');
+  tr_stored(coll: g_tr128:
+            'a 128-character name is stored whole - the first length that ' +
+            'used to arrive EMPTY rather than short, because the dot did ' +
+            'not survive a cut at 128');
 
 end-proc;
 
-dcl-proc test_coll_short_name_at_250_blocked_on_rmtools export;
+dcl-proc test_coll_short_name_at_250_is_whole export;
 
   dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
-  dcl-s  got  varchar(2048);
 
   iEqual(250: %len(g_tr250): 'the longest base name a .yaml file can carry');
 
   tr_load('l250': coll);
   iEqual(1: SCCOLL_count(coll): 'one file, one service');
 
-  got = tr_short_at(coll: 1);
-  iEqual(0: %len(%trimr(got)):
-         'BLOCKED ON rmtools, as at 128 and for the same reason. IF THIS ' +
-         'FAILS, rmtools HAS LANDED - use tr_stored(coll: g_tr250: ...) ' +
-         'and rename this to test_coll_short_name_at_250_is_whole');
+  tr_stored(coll: g_tr250:
+            'a 250-character name is stored whole - 250 and not 251 only ' +
+            'because .yaml is five characters where .yml is four');
 
 end-proc;
 
-dcl-proc test_coll_short_name_at_251_yml_blocked_on_rmtools export;
+dcl-proc test_coll_short_name_at_251_yml_is_whole export;
 
   dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
-  dcl-s  got  varchar(2048);
 
-  // THE 251 IS STILL THE POINT OF THIS CASE, and it outlives the block. The
-  // measured bound is 251 and not 250: the IFS accepts a file name of 255
-  // characters and refuses 256, and '.yml' is four characters where '.yaml'
-  // is five. So a holder of 250 would be one character short of what the file
-  // system can hand it. That is confirmed and is being acted on; it simply
-  // cannot be OBSERVED from here until PATH_BASENAME_t widens, because 251 is
-  // in the blocked band. The assertion below is what is true today; the
-  // sentence above is what has to be true when it goes red.
+  // 251 IS THE POINT OF THIS CASE, and it outlived the block it was written
+  // under. The measured bound is 251 and not 250: the IFS accepts a file name
+  // of 255 characters and refuses 256 - measured on this box on 5 September
+  // 2026 and measured again on 7 September - and '.yml' is four characters
+  // where '.yaml' is five. So a holder of 250 would be one character short of
+  // what the file system can hand it, and THIS IS THE ONLY CASE IN EITHER
+  // SUITE THAT CAN SAY SO: every other length passes against a 250-wide holder
+  // and a 255-wide one alike. Do not remove it, and do not shorten it to 250
+  // to match its neighbour.
+  //
+  // Nothing above 251 is reachable through a directory: a definition file must
+  // end '.yml' or '.yaml' and the IFS refuses an entry of 256. The one entry
+  // longer than this that can be built at all is a 255-character name with no
+  // extension, which no directory walk selects; SCDEF.TEST hands one straight
+  // to SCDEF_load.
   iEqual(251: %len(g_tr251):
          'the longest base name a .yml file can carry - measured, not ' +
          'assumed');
@@ -5610,13 +5646,9 @@ dcl-proc test_coll_short_name_at_251_yml_blocked_on_rmtools export;
   tr_load('l251': coll);
   iEqual(1: SCCOLL_count(coll): 'one file, one service');
 
-  got = tr_short_at(coll: 1);
-  iEqual(0: %len(%trimr(got)):
-         'BLOCKED ON rmtools, as at 128 and 250. IF THIS FAILS, rmtools HAS ' +
-         'LANDED - use tr_stored(coll: g_tr251: ...), rename this to ' +
-         'test_coll_short_name_at_251_yml_is_whole, and check that RMSC''s ' +
-         'own holder is 255 and not 250: 251 is the case that tells those ' +
-         'two apart, and it is the only one that can');
+  tr_stored(coll: g_tr251:
+            'a 251-character name is stored whole - the case that tells a ' +
+            '255-wide holder from a 250-wide one, and the only one');
 
 end-proc;
 

@@ -105,13 +105,23 @@ service is unaffected — that is a normal service definition, not cluster mode.
 
 ## Dependencies
 
-Requires **`rmtools`**, a general-purpose RPGLE helper library (service program `RMBASE`),
-consumed two ways with different lifetimes:
+Requires **`rmtools` 2.0.7 or later**, a general-purpose RPGLE helper library (service
+program `RMBASE`), consumed two ways with different lifetimes:
 
 - **Copybooks** — needed at **compile time only**, via `INCDIR`.
 - **Modules** — bound **by copy**, so `RMSC` carries no runtime dependency on the `RMTOOLS`
   library and no job calling it needs `RMTOOLS` on its library list. See
   [`docs/tobi-binding.md`](docs/tobi-binding.md).
+
+**Why 2.0.7 specifically.** Before it, `PATH_BASENAME_t` was `varchar(128)`, so a service
+whose file name exceeded 127 characters lost its name entirely — `PATH_name` truncated the
+name, lost the extension off the end, failed to find the dot and returned an empty string
+through a `MONITOR`. Two such services then collided, and one vanished from `check`.
+
+Built against 2.0.6 the suites go red in about ten places across `SCDEF`, `SCCOLL` and
+`SCLAUNCH`, and **nothing in the failure text names rmtools as the cause** — the markers that
+used to say so were flipped to ordinary assertions when 2.0.7 landed. If you see that
+cluster, check the version first.
 
 **`rmtools` is not currently publicly available**, so this repository cannot be built by
 third parties as it stands. Publishing it is intended but not yet straightforward.

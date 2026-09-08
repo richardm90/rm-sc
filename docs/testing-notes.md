@@ -220,3 +220,35 @@ opcode table.** `list`, `result`, `rows` are safe; `out`, `other`, `in`, `eval`,
 
 Found while fixing the flaky query suites, by bisecting probe sources — not by
 reading the compile listing, which CLAUDE.md now forbids outright.
+
+## iRPGUnit truncates your failure message at 64 characters
+
+`iEqual`, `nEqual` and `aEqual` declare `fieldName varchar(64)` with **no
+`*varsize`**, in iRPGUnit's own `QINCLUDE,TESTCASE`. So the message you pass is
+silently cut at 64, and **no width chosen in this repository can change it**.
+
+Measured on the box, 8 September 2026: a 120-character value passed to a
+`varchar(64) const` parameter arrives 64 long with no diagnostic; `opdesc` on
+the prototype does not change that; the same value passed to `varchar(200)`
+arrives whole.
+
+Surveyed at the time - 72 call sites across SCDEF, SCCOLL and SCLAUNCH carry
+messages longer than 64, the longest 243 characters. Every one of them has been
+losing its reasoning at the point it was needed.
+
+**THE RULE THAT FOLLOWS.** When the reasoning rides on `iEqual` or `nEqual`,
+the point must fit in the **first 64 characters** - front-load it, and put the
+elaboration after. When it cannot, use `assert()`, whose `msgIfFalse` is
+`varchar(16384)`, or a local helper this repository owns.
+
+Local helpers CAN be widened and have been: `sl_equal` and `aEqualV` are now
+`varchar(500)`, sized to the longest message that reaches them today (271) with
+the framework's own 16384 as the ceiling downstream. `tr_stored`, `tr_equal`
+and `sk_assert_order` are 200 and nothing exceeds it.
+
+**Why this matters more than it looks.** A truncated assertion still passes and
+still fails correctly - only the explanation is lost, and only at the moment
+someone is reading it to find out what broke. It is the same defect as every
+other silent truncation in this project, in the one place designed to explain
+the others. It was found while widening a helper's message parameter in the
+suites that exist to prove nothing is truncated at 64.
