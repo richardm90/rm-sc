@@ -135,6 +135,9 @@ dcl-proc SCCOLL_load_dir export;
   end-pi;
 
   dcl-s handle   pointer;
+  // NOT `handle` - that is the directory pointer above, and this is a file
+  // descriptor. Two different kinds of handle in one procedure.
+  dcl-s exec_handle like(INTEGER_t);
   dcl-s filename like(IFS_DIR_FILENAME_t);
   dcl-s path     like(STMF_t);
   dcl-s prefix   like(STMF_t);
@@ -266,10 +269,26 @@ dcl-proc SCCOLL_load_dir export;
     // only_if_executable lets a definition describe software that may not be
     // installed. Upstream skips it silently; so do we, or every system would
     // report services it does not have.
+    //
+    // Written out rather than folded into one condition, because the folded
+    // form LEAKED A DESCRIPTOR. `... and IFS_open_file(...) < 0` discards the
+    // handle, and it discards it precisely when the open SUCCEEDS - so the
+    // leak happened on the common path, once per such definition per load,
+    // and not at all on the path that looks like the failure. Found by review
+    // of the same defect in SCEXEC_loginfo.
+    //
+    // The semantics are unchanged: skip when the value is set, is not a
+    // directory, and cannot be opened. Nothing in any suite covers this key;
+    // the fixture pack does, in both directions - rmscgate_exec_yes and
+    // rmscgate_exec_no - and those are what would catch a change here.
     if %len(%trim(def.only_if_executable)) > 0
-       and not IFS_isa_directory(def.only_if_executable)
-       and IFS_open_file(def.only_if_executable: IFS_OPEN_TYPE_READ) < 0;
-      iter;
+       and not IFS_isa_directory(def.only_if_executable);
+      exec_handle = IFS_open_file(def.only_if_executable: IFS_OPEN_TYPE_READ);
+      if exec_handle >= 0;
+        IFS_close_file(exec_handle);
+      else;
+        iter;
+      endif;
     endif;
 
     // Directories are merged in search-path order, and a definition read

@@ -58,7 +58,25 @@ kill_listeners() {
   done
 }
 cleanup() { kill_listeners "$WORK"; rm -rf "$WORK"; }
-trap cleanup EXIT INT TERM
+# INTERRUPT HANDLING. `trap cleanup EXIT INT TERM` looks right and is not.
+# Bash runs the handler on the signal and then RESUMES the script, so the
+# remaining cases run against fixtures cleanup has just removed, cleanup fires
+# a second time on EXIT, and the script finishes with STATUS 0 - an
+# interrupted harness reporting SUCCESS to verify.sh, for stages that never
+# ran. Measured 9 September 2026, both shapes side by side:
+#
+#   trap cleanup EXIT INT TERM   -> cleanup, case 2, cleanup, exit 0
+#   the shape below              -> cleanup, exit 130
+#
+# Disarming EXIT inside the handler is what stops the second cleanup; exiting
+# is what stops the resumed run. docs/testing-notes.md carries the account.
+on_signal() {
+  trap - EXIT
+  cleanup
+  exit 130
+}
+trap cleanup EXIT
+trap on_signal INT TERM
 
 # BEFORE $WORK IS CREATED, and skipping $WORK by name even so.
 #

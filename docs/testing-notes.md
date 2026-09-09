@@ -330,16 +330,31 @@ That is the failure this project cares about more than any other: a suite that
 reports success it has not earned. It is also invisible, because the thing you
 interrupted is the thing that would have told you.
 
-`tools/loginfo-test.sh` diverges from the convention deliberately: its handler
-disarms the EXIT trap, tears down once, and exits 130.
+The shape that works, now in every script here that had the old one:
 
-    trap 'on_signal' INT TERM
+    on_signal() {
+      trap - EXIT
+      cleanup
+      exit 130
+    }
+    trap cleanup EXIT
+    trap on_signal INT TERM
 
-**Five sibling harnesses still carry the old shape** — `narration`,
-`api-silence`, `error-delivery`, `colour` and `sampletime`. For most of them an
-interrupt costs a work directory in /tmp and a false green; for any harness
-whose teardown deletes files in a SHARED directory it costs more. None has been
-changed, because changing five harnesses that are currently green is its own
-piece of work with its own verification, and folding it into an unrelated
-change is how a green run stops meaning anything.
+Disarming EXIT inside the handler is what stops the second cleanup; exiting is
+what stops the resumed run. Measured side by side on 9 September 2026:
+
+    trap cleanup EXIT INT TERM   ->  cleanup, case 2, cleanup, exit 0
+    the shape above              ->  cleanup, exit 130
+
+**A note on measuring this, because the first attempt showed nothing.** Sending
+SIGINT to a script started as a background job from a non-interactive shell
+proves nothing: such a job has SIGINT set to IGNORE, so the signal never
+arrives and both shapes look identical and correct. Use SIGTERM, which the same
+traps cover and which is not ignored. An hour could be lost concluding the
+defect does not exist.
+
+Fixed in `api-silence`, `colour`, `narration`, `load-warning`, `sampletime` and
+`d2-probe`; `loginfo` was written with it. `gate-fixtures-run.sh` traps EXIT
+only, which is already correct — with no INT trap the signal kills the script,
+the EXIT trap still runs, and the status is non-zero.
 
