@@ -76,9 +76,17 @@ dcl-proc SCMAIN_parse export;
   dcl-s eq        like(INTEGER_t);
   dcl-s refused   like(BOOLEAN_t) inz(false);
 
+  // CLEAR sets a structure to zeros and blanks, NOT to its inz() values, so
+  // every default has to be restated here. SCMAIN_OPTS_t.sample_secs carries
+  // inz(1) and that is not what survives this line - the default window went
+  // to zero the moment the conversion moved into the parse loop, and no value
+  // anybody types could show it, because every explicit value still parsed
+  // correctly. Only the absent-option path was wrong. It is the same reason
+  // SCDEF_clear exists rather than a CLEAR on SCDEF_t.
   clear opts;
   opts.ignore_groups = SCMAIN_DFT_IGNORE;
   opts.sampletime = '1';
+  opts.sample_secs = 1;
 
   rest = %trim(args);
 
@@ -156,16 +164,34 @@ dcl-proc SCMAIN_parse export;
         else;
           opts.ignore_groups = %subst(word: 17);
         endif;
-      when %len(word) > 13 and %subst(word: 1: 13) = '--sampletime=';
-        // The same guard. Left at `> 13` rather than `>= 13` deliberately:
-        // an empty --sampletime= has no measured meaning upstream, so this
-        // change does not invent one for it.
+      when %len(word) >= 13 and %subst(word: 1: 13) = '--sampletime=';
+        // `>= 13`, so an EMPTY --sampletime= reaches the value parse. It was
+        // `> 13` on the stated grounds that the empty form had no measured
+        // meaning upstream. It has one, measured 8 September 2026: upstream
+        // warns that the value is not valid, falls back to one second and
+        // exits 0. At `> 13` RMSC answered `Unknown option --sampletime=`
+        // with status 255 - a different class of answer entirely.
         if %len(word) - 13 > SCDEF_NAME_MAX;
           opts.err = 'Value for --sampletime is longer than ' +
                      %char(SCDEF_NAME_MAX) + ' characters';
           return SCMAIN_EXIT_USAGE;
         endif;
-        opts.sampletime = %subst(word: 14);
+        // The same %SUBST guard as --ignore-groups above, and it has to move
+        // in step with the threshold: relaxing `> 13` to `>= 13` is exactly
+        // what makes an empty value reach this line, and %SUBST rejects a
+        // start position past the end rather than returning an empty string.
+        // Changed the threshold without copying the guard three lines up, and
+        // it abended with RNX0100 on `--sampletime=`.
+        if %len(word) = 13;
+          opts.sampletime = '';
+        else;
+          opts.sampletime = %subst(word: 14);
+        endif;
+        // Converted HERE, not where perfinfo uses it, and the warning goes
+        // out from here too. That is what makes `-q --sampletime=abc` silent
+        // and `--sampletime=abc -q` not: the quiet flag is whatever the parse
+        // has seen so far. Measured against upstream, both orders.
+        opts.sample_secs = sample_seconds(opts.sampletime: opts.quiet);
 
       when %len(word) > 1 and %subst(word: 1: 1) = '-';
         opts.err = 'Unknown option ' + %trim(word);
@@ -720,6 +746,152 @@ end-proc;
 // run_reporting
 //==============================================================================
 
+// --sampletime arrives as text and reaches perfinfo as a number of seconds.
+//
+// Measured against upstream 1.7.1 on 8 September 2026, because every part of
+// this is somebody's expectation:
+//
+//   --sampletime=2.5    honoured; a 2.55s window per job
+//   --sampletime=0.25   honoured; sub-second windows work
+//   --sampletime=0      accepted, and means do not wait
+//   (absent)            1 second
+//   --sampletime=abc    WARNING on stderr naming the whole argument, then 1
+//   --sampletime=       the same warning, then 1
+//   -q                  suppresses that warning entirely
+//
+// So a whole number will not do, which is what this returned before: the
+// documented form of the option is `x.x` and RMSC was discarding it in
+// silence and sampling for one second instead.
+//
+// The one departure is a NEGATIVE value. Upstream takes it as a number and
+// then fails to gather anything, printing "Unable to retrieve performance
+// data for job ..." per job - its own sampling code breaking on a negative
+// sleep. RMSC accepts it without a warning, as upstream does, and clamps the
+// window to zero, so a report still comes out. Recorded in docs/parity.md;
+// reproducing a crash faithfully is not parity worth having.
+dcl-proc sample_seconds;
+  dcl-pi *n like(SCQRY_SECS_t);
+    text  like(SCDEF_NAME_t) const;
+    quiet like(BOOLEAN_t) const;
+  end-pi;
+
+  dcl-c SAMPLE_DEFAULT 1;
+  dcl-s work   varchar(32);
+  dcl-s i      like(INTEGER_t);
+  dcl-s c      char(1);
+  dcl-s dots   like(INTEGER_t) inz(0);
+  dcl-s dot_at like(INTEGER_t) inz(0);
+  dcl-s from   like(INTEGER_t) inz(1);
+  dcl-s digits like(INTEGER_t) inz(0);
+  dcl-s sign   varchar(1) inz('');
+  dcl-s whole  varchar(32);
+  dcl-s frac   varchar(32);
+
+  work = %trim(text);
+
+  if %len(work) = 0;
+    return invalid_sample(text: quiet: SAMPLE_DEFAULT);
+  endif;
+
+  if %subst(work: 1: 1) = '-' or %subst(work: 1: 1) = '+';
+    sign = %subst(work: 1: 1);
+    from = 2;
+  endif;
+
+  for i = from to %len(work);
+    c = %subst(work: i: 1);
+    if c = '.';
+      dots += 1;
+      dot_at = i;
+    elseif c >= '0' and c <= '9';
+      digits += 1;
+    else;
+      return invalid_sample(text: quiet: SAMPLE_DEFAULT);
+    endif;
+  endfor;
+
+  // '.', '..', '1.2.3' and a bare sign are all not numbers.
+  if dots > 1 or digits = 0;
+    return invalid_sample(text: quiet: SAMPLE_DEFAULT);
+  endif;
+
+  // %SUBST past the end of a string is an ABEND, not an empty result, and
+  // both ends of a decimal point can be past it. This is the FOURTH time that
+  // trap has been sprung in this one procedure in a single afternoon - after
+  // an empty --sampletime=, and twice more in guards written to prevent it.
+  // `.5` has an empty integer part and `2.` an empty fraction; upstream reads
+  // the first as 0.5 and the second as 2.0, so both are numbers and neither
+  // may crash.
+  if dots = 0;
+    whole = %subst(work: from);
+    frac  = '';
+  else;
+    if dot_at > from;
+      whole = %subst(work: from: dot_at - from);
+    else;
+      whole = '0';
+    endif;
+    if dot_at < %len(work);
+      frac = %subst(work: dot_at + 1);
+    else;
+      frac = '';
+    endif;
+  endif;
+
+  // Leading zeros are not significant, so 00000001.5 is one integer digit and
+  // not eight.
+  dow %len(whole) > 1 and %subst(whole: 1: 1) = '0';
+    whole = %subst(whole: 2);
+  enddo;
+  if %len(whole) = 0;
+    whole = '0';
+  endif;
+
+  // COUNT WHAT THE RECEIVER HOLDS, not characters. SCQRY_SECS_t is
+  // packed(10:3): seven digits before the point and three after. An earlier
+  // version guarded on the length of the whole string at eleven, which admits
+  // `9999999999` - ten integer digits - and abends on the conversion with
+  // RNX0103. That is the THIRD time this project has written a width guard
+  // against the wrong width, after usable_port at nineteen digits and this
+  // same procedure at ten. The lesson each time is identical: a guard has to
+  // be expressed in the units of the thing it protects.
+  if %len(whole) > 7;
+    return invalid_sample(text: quiet: SAMPLE_DEFAULT);
+  endif;
+
+  // More precision than the field carries is TRUNCATED, not refused. Upstream
+  // accepts such a value, and refusing one it accepts would be a divergence
+  // invented by a guard rather than measured.
+  if %len(frac) > 3;
+    frac = %subst(frac: 1: 3);
+  endif;
+
+  if %len(frac) = 0;
+    return %dec(sign + whole: 10: 3);
+  endif;
+
+  return %dec(sign + whole + '.' + frac: 10: 3);
+
+end-proc;
+
+// Upstream's wording, captured verbatim, and it names the WHOLE argument
+// rather than just the value. -q suppresses it, measured.
+dcl-proc invalid_sample;
+  dcl-pi *n like(SCQRY_SECS_t);
+    text     like(SCDEF_NAME_t) const;
+    quiet    like(BOOLEAN_t) const;
+    fallback like(SCQRY_SECS_t) const;
+  end-pi;
+
+  if not quiet;
+    SCOUT_warnln('WARNING: Value specified for sample time argument is ' +
+                 'not valid: --sampletime=' + %trimr(text));
+  endif;
+
+  return fallback;
+
+end-proc;
+
 dcl-proc run_reporting;
   dcl-pi *n;
     opts likeds(SCMAIN_OPTS_t) const;
@@ -736,7 +908,7 @@ dcl-proc run_reporting;
     when opts.operation = 'loginfo';
       SCEXEC_loginfo(def);
     when opts.operation = 'perfinfo';
-      SCEXEC_perfinfo(def);
+      SCEXEC_perfinfo(def: opts.sample_secs);
     when opts.operation = 'scrunattrs';
       SCEXEC_scrunattrs(def);
   endsl;

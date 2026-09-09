@@ -30,7 +30,7 @@
 #     tools/verify.sh suites gate          a quick pass while iterating
 #
 # Stage names are the lower-case words below: suites, narration, api-silence,
-# error-delivery, load-warning, colour, gate, fixture-pack.
+# error-delivery, load-warning, sampletime, colour, gate, fixture-pack.
 #
 # A PARTIAL RUN IS NOT A VERIFICATION. The stage list exists for the edit-run
 # loop, not for deciding something is finished. Before a commit, run the lot.
@@ -71,7 +71,7 @@ want() {
 
 # Reject a stage name that matches nothing, rather than running a subset the
 # caller did not ask for and reporting it as a pass.
-ALL="suites narration api-silence error-delivery load-warning colour gate fixture-pack"
+ALL="suites narration api-silence error-delivery load-warning sampletime colour gate fixture-pack"
 for w in $WANTED; do
   case " $ALL " in
     *" $w "*) ;;
@@ -185,6 +185,11 @@ harness narration       tools/narration-test.sh      3
 harness api-silence     tools/api-silence-test.sh    6
 harness error-delivery  tools/error-delivery-test.sh 3
 harness load-warning    tools/load-warning-test.sh   4
+# NEEDS A RUNNING SERVICE, and fails loudly rather than skipping when there is
+# none - see the fixture stage in the harness for why that is the right way
+# round. It is also the slowest non-pack stage at about 4m on a two-job
+# service, because each case spends (jobs x sampletime) seconds sampling.
+harness sampletime      tools/sampletime-test.sh     6
 harness colour          tools/colour-test.sh         3
 harness gate            tools/fidelity-gate.sh       4
 # 12, not 6. The pack's ordering note is a nine-line heredoc that prints only

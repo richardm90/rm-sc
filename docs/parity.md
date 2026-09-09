@@ -65,7 +65,7 @@ that step asks for.
 | `info` | live differential | **undecided** | omits the environment-variables block and the closing separator, adds a `Group:` line, and shows a resolved working directory rather than the raw one |
 | `jobinfo` | live differential | **undecided** | upstream prints a header then indented jobs; RMSC prints one `name: job` line each |
 | `loginfo` | live differential | **undecided** | one trailing blank line, nothing else |
-| `perfinfo` | live differential | **undecided** | substantially narrower — 12 lines against upstream's 66 |
+| `perfinfo` | live differential | **undecided** | two differences: three affinity lines per job, which is settled and deliberate; and the order of the job blocks, which is not — see below |
 | `start` | not gated | — | state-changing; `SCLIFE.TEST` covers the lifecycle against a service it creates and removes |
 | `stop` | not gated | — | as above |
 | `kill` | not gated | — | as above |
@@ -268,13 +268,136 @@ the list where RMSC repeats a `Depends on:` label per dependency, and upstream o
 also omits the environment block and the closing separator, prints a `Group:` line upstream does
 not, and differs in blank-line counts at three places.
 
-**`perfinfo`** — the only one where the plan looks like it settles the matter and does not. It
-calls the operation *"Improved — drops upstream's optional Python 3 + `ibm_db` dependency, since
-embedded SQL reads the `ACTIVE_JOB_INFO` performance columns directly"*. That is a decision about
-**dependencies**, not about output. Dropping the dependency never required printing less:
-`QSYS2.JVM_INFO` and `QSYS2.ACTIVE_JOB_INFO` are both reachable from embedded SQL, and Phase 2
-of the plan asked for *"every `QueryUtils` query as embedded SQL"*. Nothing explains twelve lines
-where upstream prints sixty-six, so the narrower output is undocumented rather than designed.
+**`perfinfo`** — the plan looked like it settled this and did not. It calls the operation
+*"Improved — drops upstream's optional Python 3 + `ibm_db` dependency, since embedded SQL reads
+the `ACTIVE_JOB_INFO` performance columns directly"*. That is a decision about **dependencies**,
+not about output, and dropping the dependency never required printing less. Nothing explained
+twelve lines where upstream prints sixty-six.
+
+What explains it is that **upstream does not query these attributes at all — it scrapes
+`DSPJOB`.** Measured from `sc.jar` on 8 September 2026:
+`OperationExecutor$PerfInfoFetcher` calls `QueryUtils.getJobDspJobDotted(job, "*RUNA", logger)`,
+which runs `DSPJOB OPTION(*RUNA)` and matches every printed line against one regex —
+
+    ^\s{0,3}([\p{L} 0-9]*[\p{L}0-9])\s*(\. )*:\s+([a-z]+)?\s{0,16}([^\s]+)??$
+
+— then prints each match as `description (keyword): value`. There is no field list anywhere in
+upstream; the block is a transcription of whatever that display command happens to print, in its
+order. That is also where its oddities come from: `Thread resources affinity (THDRSCAFN): ` has a
+trailing space and no value because DSPJOB prints that line with a keyword and no value and the
+regex's final group is reluctant, and the `Group:` / `Level:` lines beneath it render without
+parentheses and at a deeper indent because they are separate DSPJOB lines carrying no keyword.
+
+### RMSC will not scrape a display command. Richard's decision, 8 September 2026
+
+RMSC reads the attributes from `QUSRJOBI` instead. The output format of `DSPJOB` is IBM's to
+change without notice, and a scrape that quietly stops matching is indistinguishable from a job
+with no attributes — the exact failure shape this project keeps finding and refusing.
+
+**The cost is three attributes, and it is measured rather than assumed.** `QUSRJOBI` format
+`JOBI0150` carries eleven of the fourteen in one call. The three it does not carry are:
+
+| line RMSC omits | what it means |
+|---|---|
+| `Thread resources affinity (THDRSCAFN):` → `Group:` | whether the job's threads are kept together on one subset of processors and memory, or placed independently |
+| `Thread resources affinity (THDRSCAFN):` → `Level:` | how strictly that placement is honoured — a preference (`*NORMAL`) or binding (`*HIGH`) |
+| `Resources affinity group (RSCAFNGRP):` | whether the job joins a group so related jobs share processors and memory |
+
+All twelve `JOBI*` formats were dumped for a live job and searched for printable runs — not for
+expected names, so a different spelling would still have been found. None carries them. The
+converse could not be staged: **neither `CHGJOB` nor `SBMJOB` accepts `THDRSCAFN` or
+`RSCAFNGRP`** (`CPD0043` from both), so a job with a non-default affinity cannot be created
+without a job description carrying one. That also constrains the suites — nothing can vary these
+values without creating a `*JOBD`.
+
+**Not derived from the job description instead**, though it would have filled the lines: the JOBD
+and the system value say what a job *should have inherited*, not what it holds. Printing an
+inherited value in a column that reports a job's actual attributes would be a worse answer than
+an absent line, because it would be indistinguishable from a measured one.
+
+These three are also the least load-bearing lines of the sixty-six — nothing about whether a
+service is healthy depends on processor affinity, and every job on this system holds the default.
+That is a reason the gap is tolerable, not a reason it is invisible: it is three lines of
+`perfinfo` output that upstream prints and RMSC does not, and the gate must classify it rather
+than pass over it.
+
+### `--sampletime` — matched, including a warning RMSC never emitted
+
+Measured against 1.7.1 on 8 September 2026, both implementations, on a live
+two-job service. RMSC previously accepted only whole numbers and discarded anything else in
+silence, so `--sampletime=2.5` — the form upstream's own help text documents as `x.x` — sampled
+for one second and said nothing.
+
+| argument | upstream | RMSC now |
+|---|---|---|
+| absent | ~1.03s window | same |
+| `=2.5` | ~2.56s | same |
+| `=0.25` | sub-second | same |
+| `=0` | no wait | same |
+| `=2.5555` | ~2.61s | same, truncated to three decimals |
+| `=0000002.5` | ~2.55s | same |
+| `=abc` | `WARNING:` on stderr, then 1s, rc 0 | same, verbatim |
+| `=` (empty) | the same warning | same |
+| `-q =abc` | nothing on stderr | same |
+
+The warning is upstream's exact wording, names the **whole argument** rather than the value,
+appears once however many jobs the service has, and `-q` suppresses it — all measured, not
+inferred.
+
+**Two rows diverge deliberately.** For `--sampletime=-1` and for a value too large to hold,
+upstream accepts the number and then its own sampling code fails, printing `Unable to retrieve
+performance data for job ...` for every job and exiting 0. RMSC clamps a negative window to zero
+without a warning (as upstream does not warn either) and refuses an over-large value with the
+warning above, falling back to one second. Both still produce a report where upstream produces
+error text. Reproducing a crash faithfully is not parity worth having, and it is recorded here
+rather than left to be discovered.
+
+**Three abends were written into this one option's parser in a single afternoon** — `MCH1210`
+from a guard sized against the wrong type, `RNX0103` from a guard counting characters instead of
+the receiver's integer digits, and `RNX0100` from `%SUBST` past the end of a string after the
+threshold was relaxed without copying the guard three lines above it. All three were reachable
+from the command line, and all three were found by hand rather than by any test, because the
+procedure is local to its module and no suite can call it. That is the argument for the harness
+coverage that now exists, and it is a better argument than any of the individual fixes.
+
+### A SECOND difference, found by the rewrite and NOT caused by it — job order
+
+Comparing label-by-label after the rewrite, the line counts agree exactly once the affinity lines
+are allowed for (66 against 58 on a two-job service, four omitted lines per job). But the blocks
+are in the **opposite order**, so upstream's Java figures sit on the first job and RMSC's on the
+second.
+
+Measured 8 September 2026, three runs each, both stable and consistently opposite:
+
+    upstream   420566  420560
+    RMSC       420560  420566
+
+**This is pre-existing and `jobinfo` has always had it** — `scr jobinfo` lists the same two jobs
+the same way round. The rewrite did not cause it; it made it visible, because `perfinfo` now
+prints enough per job to notice which job you are looking at.
+
+What is measured about the cause, and what is not. The service carries **two** criteria,
+`JOBNAME:MAPEPIRE` and `PORT:8076`. The port resolves to one job only (420566); the job name
+resolves to both, and `ACTIVE_JOB_INFO` returns them 420560 first — which is exactly RMSC's
+order. So RMSC's order is its first criterion's natural order, and upstream's is not. Whether
+upstream evaluates the criteria in the other order, sorts, or deduplicates into a structure that
+reorders, **has not been established** — only one service on this machine has more than one job,
+so there is no case available that separates those hypotheses.
+
+Not fixed, deliberately: a fix would be guessing at a rule from a single two-element observation,
+which is the mistake this project keeps writing down. It needs a fixture with a service of three
+or more jobs and more than one criterion, which the fixture pack could stage.
+
+**It also means `perfinfo` is not "matching except three lines".** It matches except three lines
+per job AND the order of the job blocks. The gate cannot see the difference between those two
+statements, because it classifies per operation.
+
+That is why `perfinfo` stays in the gate's **undecided** list rather than moving to
+*intentional*, even though the affinity half is settled. `INTENTIONAL` is the list that lets a
+run eventually report that every difference is intentional and listed, and an ordering
+difference nobody has explained must not be able to hide inside that sentence. It moves when the
+ordering is settled, not before — which was a review finding on the first version of this work,
+where it had been moved on the strength of the half that was decided.
 
 ## Beyond the operations — a quoted `on` in `enabled:`
 

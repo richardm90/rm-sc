@@ -176,7 +176,8 @@ dcl-pr SCEXEC_loginfo;
 end-pr;
 
 dcl-pr SCEXEC_perfinfo;
-  def likeds(SCDEF_t) const;
+  def     likeds(SCDEF_t) const;
+  seconds like(SCQRY_SECS_t) const;
 end-pr;
 
 dcl-pr SCEXEC_scrunattrs;

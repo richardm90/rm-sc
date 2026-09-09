@@ -22,6 +22,18 @@ dcl-s SCQRY_JOBNAME_t varchar(28)  template;
 dcl-s SCQRY_TIME_t    varchar(19)  template;
 dcl-s SCQRY_SPLF_t    varchar(10)  template;
 
+// Each sized to the column it is read from, measured rather than chosen:
+// ACTIVE_JOB_INFO declares AUTHORIZATION_NAME and FUNCTION as VARCHAR(10) and
+// JOB_STATUS as VARCHAR(4).
+// A sampling window in seconds, to a millisecond. Upstream documents the
+// option as `--sampletime=x.x` and honours it: measured, 2.5 gives a 2.55s
+// window and 0.25 gives a sub-second one, so this cannot be a whole number.
+dcl-s SCQRY_SECS_t    packed(10:3) template;
+
+dcl-s SCQRY_USER_t    varchar(10)  template;
+dcl-s SCQRY_FUNC_t    varchar(10)  template;
+dcl-s SCQRY_STATUS_t  varchar(4)   template;
+
 ///
 // A set of job names.
 ///
@@ -40,9 +52,23 @@ dcl-ds SCQRY_PERF_t qualified template inz;
   elapsed_time     like(INTEGER_t) inz(0);
   thread_count     like(INTEGER_t) inz(0);
   temp_storage     like(INTEGER_t) inz(0);
-  cpu_percentage   packed(5:2)     inz(0);
+  // packed(10:2), not the packed(5:2) this held before: the column is
+  // DECIMAL(10,2) and a job on a large partition can be attributed more than
+  // 999.99 percent, which the old holder could not represent. Sized to the
+  // source, like everything else that has been corrected here this fortnight.
+  cpu_percentage   packed(10:2)    inz(0);
   disk_io_count    like(BIGINT_t)  inz(0);
   job_start        like(SCQRY_TIME_t) inz('');
+  // Added for perfinfo. Every one is a line upstream prints, and each was
+  // confirmed against a captured upstream run rather than assumed from the
+  // column name: AUTHORIZATION_NAME/JOB_STATUS/FUNCTION/JOB_ACTIVE_TIME/
+  // TOTAL_DISK_IO_COUNT matched its printed line exactly on a live job.
+  current_user     like(SCQRY_USER_t) inz('');
+  job_status       like(SCQRY_STATUS_t) inz('');
+  job_function     like(SCQRY_FUNC_t) inz('');
+  total_disk_io    like(BIGINT_t)  inz(0);
+  active_since     like(SCQRY_TIME_t) inz('');
+  sample_seconds   packed(10:3)    inz(0);
 end-ds;
 
 ///
@@ -55,6 +81,16 @@ dcl-ds SCQRY_JVM_t qualified template inz;
   max_heap_size    like(BIGINT_t) inz(0);
   in_use_heap      like(BIGINT_t) inz(0);
   gc_cycles        like(BIGINT_t) inz(0);
+  // The four perfinfo also prints. All BIGINT in QSYS2.JVM_INFO.
+  //
+  // heap_size feeds a line upstream labels "Java Heap Current Size (MB)" and
+  // the value is KILOBYTES - 262,144 beside a maximum of 16,777,216 Kb. The
+  // label is upstream's mistake and RMSC reproduces it verbatim, because
+  // parity is the goal and a consumer may match on it.
+  gc_total_time    like(BIGINT_t) inz(0);
+  jit_memory       like(BIGINT_t) inz(0);
+  shared_class     like(BIGINT_t) inz(0);
+  malloc_memory    like(BIGINT_t) inz(0);
 end-ds;
 
 ///
@@ -127,6 +163,26 @@ dcl-pr SCQRY_job_perf like(BOOLEAN_t);
 end-pr;
 
 ///
+// Runtime figures over a MEASURED SAMPLING WINDOW.
+//
+// SCQRY_job_perf reports the elapsed counters as they stand, which is since
+// whenever they were last reset - for a long-running service that is a
+// lifetime average and says nothing about now. This resets them, waits, and
+// reads, so `cpu_percentage` and `disk_io_count` describe the window rather
+// than the job's whole history. `sample_seconds` reports the window actually
+// measured, which is not exactly the number asked for and is not meant to be.
+//
+// Upstream does the same thing by a different route, and pays for it with an
+// optional Python 3 and ibm_db install.
+///
+
+dcl-pr SCQRY_job_sample like(BOOLEAN_t);
+  job_name like(SCQRY_JOBNAME_t) const;
+  seconds  like(SCQRY_SECS_t) const;
+  perf     likeds(SCQRY_PERF_t);
+end-pr;
+
+///
 // JVM figures for a job, if it is running one.
 ///
 
@@ -142,4 +198,76 @@ end-pr;
 dcl-pr SCQRY_splfs_for_job like(INTEGER_t);
   job_name like(SCQRY_JOBNAME_t) const;
   splfs    likeds(SCQRY_SPLFS_t);
+end-pr;
+
+///
+// One job's run attributes, as `perfinfo` reports them beside its figures.
+//
+// ELEVEN of the fourteen attributes upstream prints, not fourteen. Upstream
+// scrapes `DSPJOB OPTION(*RUNA)`; RMSC reads QUSRJOBI instead, and QUSRJOBI
+// does not carry the thread-resources-affinity pair or the resources
+// affinity group. All twelve JOBI* formats were dumped and searched, and
+// neither CHGJOB nor SBMJOB will even set those values (CPD0043), so a job
+// with a non-default one cannot be staged without a *JOBD. docs/parity.md
+// records the resulting three-line difference and why it is accepted.
+//
+// Four of the eleven are TEXT rather than numbers, and that is not a
+// convenience: `*NOMAX`, `*NOGROUP` and `*NORMAL` are real values these
+// attributes take, so a numeric holder could not carry what the system
+// returns. The limit fields hold either `*NOMAX` or a number as text.
+//
+// `default_wait` is the fourth, and it was typed as a number until the test
+// author measured it: `CHGJOB DFTWAIT(*NOMAX)` is accepted, `DSPJOB *RUNA`
+// reports `*NOMAX`, and ACTIVE_JOB_INFO returns NULL. No job on this box is
+// set that way, which is exactly why it was missed - the same shape as every
+// other cap found here.
+//
+// 32 is measured, not chosen: CHGJOB refuses CPUTIME above 9999999 (CPD0085)
+// and MAXTMPSTG above 2147483647 (CPD0095), so ten characters is the widest
+// text any of these can hold.
+//
+// `temp_storage_used` and `peak_temp_storage` are BIGINT for a narrower
+// reason: the API returns them as UNSIGNED 32-bit, whose top half an
+// INTEGER_t cannot hold. That range is not reachable in practice - it is
+// megabytes, so it would take four petabytes in one job - but the holder is
+// sized to its source rather than to what anybody expects to see, which is
+// the rule the last fortnight of this project was spent learning. The other
+// three numerics are signed 32-bit and INTEGER_t holds them exactly.
+//
+// `cpu_time_used` is BIGINT because it is MILLISECONDS: an INTEGER_t would
+// wrap at about 24.8 days of accumulated CPU, and long-lived services are
+// precisely perfinfo's subject.
+//
+// SCQRY_ATTRVAL_t is declared here rather than borrowed from SCDEF_D so this
+// copybook stays free of it - nothing else in SCQRY needs a definition type,
+// and the suites include SCQRY_D without SCDEF_D.
+///
+
+dcl-s SCQRY_ATTRVAL_t varchar(32) template;
+
+dcl-ds SCQRY_ATTRS_t qualified template inz;
+  run_priority      like(INTEGER_t) inz(0);
+  time_slice        like(INTEGER_t) inz(0);
+  purge             like(SCQRY_ATTRVAL_t) inz('');
+  default_wait      like(SCQRY_ATTRVAL_t) inz('');
+  max_cpu_time      like(SCQRY_ATTRVAL_t) inz('');
+  cpu_time_used     like(BIGINT_t) inz(0);
+  max_temp_storage  like(SCQRY_ATTRVAL_t) inz('');
+  temp_storage_used like(BIGINT_t) inz(0);
+  peak_temp_storage like(BIGINT_t) inz(0);
+  max_threads       like(SCQRY_ATTRVAL_t) inz('');
+  thread_count      like(INTEGER_t) inz(0);
+end-ds;
+
+///
+// Run attributes for a job.
+//
+// True when the job was found and the structure filled; false when it was
+// not, and the structure is left as a fresh SCQRY_ATTRS_t rather than half
+// populated - a caller must be able to tell a complete answer from none.
+///
+
+dcl-pr SCQRY_job_attrs like(BOOLEAN_t);
+  job_name like(SCQRY_JOBNAME_t) const;
+  attrs    likeds(SCQRY_ATTRS_t);
 end-pr;

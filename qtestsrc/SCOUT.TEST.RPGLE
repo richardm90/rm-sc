@@ -79,6 +79,14 @@ dcl-pr strip_sgr varchar(512);
   src varchar(512) const;
 end-pr;
 
+// strip_commas - the same text with every ',' removed and NOTHING else
+// touched. The thousands-separator equivalent of strip_sgr, and there for the
+// same reason: it turns "separators are added and no DIGIT moves" into one
+// assertion that never names a width. See the THOUSANDS block at the foot.
+dcl-pr strip_commas varchar(512);
+  src varchar(512) const;
+end-pr;
+
 //------------------------------------------------------------------------------
 // The silence flag as it stood before this suite touched anything.
 //
@@ -2893,5 +2901,568 @@ dcl-proc test_colour_flag_toggles_both_ways export;
          'really did turn something off');
 
   SCOUT_set_colour(false);
+
+end-proc;
+
+//##############################################################################
+//##                                                                          ##
+//##  THOUSANDS SEPARATORS - the perfinfo figures upstream punctuates         ##
+//##                                                                          ##
+//##############################################################################
+//
+// Written BEFORE the implementation, from docs/messages.md
+// section "perfinfo" and the values captured there. Every expectation below is
+// either one of those captured values - marked CAPTURED - or is a width or a
+// boundary the captures do not reach, in which case it says so.
+//
+//   dcl-pr SCOUT_thousands like(SCOUT_LINE_t);
+//     value like(BIGINT_t) const;
+//   end-pr;
+//
+// WHAT THIS PROCEDURE IS NOT RESPONSIBLE FOR, and nothing here asserts:
+// WHICH fields get separated. docs/messages.md is explicit that the split is
+// per FIELD and not per type - measured in one block on one live JVM service,
+//
+//   Java GC Total Time (ms): 1306      <- no separator
+//   Java Heap In Use (Kb): 66,730      <- separator
+//   Total Disk I/O operations: 1860    <- no separator
+//
+// so a value above 999 rendered plainly is not evidence of anything about this
+// procedure. The caller chooses; this formats. A case here that asserted
+// otherwise would read like coverage of the per-field rule while being
+// incapable of detecting a single way of getting it wrong.
+//
+// aEqualExact throughout, never aEqual or aEqualV. SCOUT_LINE_t is varying, so
+// a returned value carrying a leading or trailing blank - a right-justified
+// rendering, say, or a stray pad - is a difference, and the captures show
+// `Java Heap In Use (Kb): 66,730` with the value hard against the space after
+// the colon. aEqual would pad the shorter operand and call the two equal;
+// aEqualV would trim the difference away deliberately.
+//
+// REUSES aEqualExact, already in this suite. Adds strip_commas, below.
+//==============================================================================
+
+//------------------------------------------------------------------------------
+// strip_commas - every ',' removed, every other byte kept, in order
+//
+// Written as a loop rather than as %scanrpl(',': '': src) so that a zero-length
+// replacement operand cannot be the thing that fails to compile. It exists so
+// the sweep case below can say "the separated number IS the plain number with
+// commas in it" without naming a single width, which is the only assertion in
+// this block that stays true when the grouping rule is next argued about.
+//------------------------------------------------------------------------------
+dcl-proc strip_commas;
+  dcl-pi *n varchar(512);
+    src varchar(512) const;
+  end-pi;
+
+  // NOT CALLED `out`, for the reason strip_sgr records above: OUT is an RPG
+  // operation code, so `out = out + ...` parses as the OUT operation and is
+  // reported as three messages, none of which mentions the name. Written here
+  // as well as there because the note is only useful where the mistake is made,
+  // and this author made it.
+  dcl-s kept varchar(512) inz('');
+  dcl-s i    int(10) inz(1);
+
+  for i = 1 to %len(src);
+    if %subst(src: i: 1) <> ',';
+      kept = kept + %subst(src: i: 1);
+    endif;
+  endfor;
+
+  return kept;
+
+end-proc;
+
+//==============================================================================
+// CAPTURED - the six values upstream actually printed
+//
+// From docs/messages.md section "perfinfo", the separated fields and their
+// measured values:
+//
+//   Java Heap Current Size (MB): 262,144
+//   Java Heap In Use (Kb): 66,730
+//   Java Heap Maximum Size (Kb): 16,777,216
+//   Java JIT Memory (KB): 264,192
+//   Java Shared Class Size (Kb): 0
+//   Malloc'ed Memory estimate (Kb): 349,508
+//
+// These are transcriptions, not derivations, and they are the whole reason the
+// procedure exists - so if only one case in this block survives, it is this one.
+//
+// TWO OF THEM CARRY THEIR OWN SEPARATING VALUE, which is why the list is worth
+// asserting entire rather than picking a representative:
+//
+//   262,144 is SIX digits - an exact multiple of three, the width at which a
+//   rule that inserts a separator before every third digit counting from the
+//   right, one step too eagerly, produces ',262,144'. 66,730 and 349,508 cannot
+//   see that; they are five and six digits, and the six-digit one is the same
+//   trap again.
+//
+//   16,777,216 is EIGHT digits and needs two separators in different places.
+//   A rule that groups from the LEFT gets '167,772,16' here and is caught.
+//
+// AND ONE OF THEM SEPARATES NOTHING AT ALL: `0` renders as `0` whether the
+// procedure inserts separators or not. It is here because it is measured - a
+// separated field whose captured value is zero - and not because it can tell
+// two implementations apart. See test_thousands_zero for what it does cover.
+//==============================================================================
+
+dcl-proc test_thousands_captured_perfinfo_values export;
+
+  aEqualExact('262,144':    SCOUT_thousands(262144):
+              '262144 - Java Heap Current Size');
+  aEqualExact('66,730':     SCOUT_thousands(66730):
+              '66730 - Java Heap In Use');
+  aEqualExact('16,777,216': SCOUT_thousands(16777216):
+              '16777216 - Java Heap Maximum Size');
+  aEqualExact('264,192':    SCOUT_thousands(264192):
+              '264192 - Java JIT Memory');
+  aEqualExact('0':          SCOUT_thousands(0):
+              '0 - Java Shared Class Size');
+  aEqualExact('349,508':    SCOUT_thousands(349508):
+              '349508 - Malloc''ed Memory estimate');
+
+end-proc;
+
+//==============================================================================
+// Under a thousand there is NO separator, and in particular none at the front
+//
+// The classic off-by-one renders ',100' for 100, or ',1' for 1. Every value
+// here is one the plain rendering already gets right, so this case CANNOT tell
+// a separating implementation from a non-separating one - it is a guard, not a
+// driver, and it is stated here rather than left implied because a reader
+// scanning this block will otherwise assume every case separates something.
+//
+// What it CAN tell apart is a separating implementation from a separating
+// implementation that leads with a comma, and that is the only rival it is
+// aimed at. The four widths are 1, 2, 3 and 3-at-the-top: 999 is the last
+// value before the rule engages and is where a `>= 1000` written as `> 1000`,
+// or a digit count compared with the wrong constant, shows up.
+//==============================================================================
+
+dcl-proc test_thousands_below_a_thousand_has_no_comma export;
+
+  aEqualExact('1':   SCOUT_thousands(1):   '1 - one digit, no comma');
+  aEqualExact('12':  SCOUT_thousands(12):  '12 - two digits, no comma');
+  aEqualExact('123': SCOUT_thousands(123): '123 - three digits, no comma');
+  aEqualExact('999': SCOUT_thousands(999): '999 - the last unseparated value');
+
+  iEqual(0: %scan(',': SCOUT_thousands(1)):   '1 - no comma anywhere');
+  iEqual(0: %scan(',': SCOUT_thousands(123)): '123 - no comma anywhere');
+  iEqual(0: %scan(',': SCOUT_thousands(999)): '999 - no comma anywhere');
+
+end-proc;
+
+//==============================================================================
+// The boundary: 999 has none, 1000 has exactly one, and it is not at the front
+//
+// The pair either side of the rule engaging. 1000 is the smallest value in the
+// whole block that a non-separating implementation gets wrong, so this is the
+// smallest case that can fail against one.
+//
+// Three assertions about 1000 rather than one, because '1,000' can be arrived
+// at wrongly: the comma must be at position 2 (not 1, which is ',1000'), and
+// the whole value must be five bytes (not six, which is ',1,000' or '1,000,').
+// 1010 and 1100 are there so a rule that only looks at trailing zeros, or that
+// pads with zeros rather than copying digits, cannot pass on 1000 alone.
+//==============================================================================
+
+dcl-proc test_thousands_boundary_at_one_thousand export;
+
+  dcl-s res varchar(512);
+
+  aEqualExact('999': SCOUT_thousands(999): '999 - still no comma');
+
+  res = SCOUT_thousands(1000);
+  aEqualExact('1,000': res: '1000 - exactly one comma');
+  iEqual(2: %scan(',': res): '1000 - the comma is at position 2, not 1');
+  iEqual(5: %len(res):       '1000 - five bytes, so no second comma');
+
+  aEqualExact('1,001': SCOUT_thousands(1001): '1001');
+  aEqualExact('1,010': SCOUT_thousands(1010): '1010');
+  aEqualExact('1,100': SCOUT_thousands(1100): '1100');
+
+end-proc;
+
+//==============================================================================
+// The grouping runs from the RIGHT, and the digits are distinct so order shows
+//
+// Six consecutive widths, 4 through 9, covering every remainder mod 3 twice:
+//
+//   1234       -> 1,234          4 digits, remainder 1
+//   12345      -> 12,345         5 digits, remainder 2
+//   123456     -> 123,456        6 digits, remainder 0 - the leading-comma trap
+//   1234567    -> 1,234,567      7 digits, remainder 1
+//   12345678   -> 12,345,678     8 digits, remainder 2
+//   123456789  -> 123,456,789    9 digits, remainder 0 - the trap again, wider
+//
+// A rule that groups from the LEFT agrees with a right-grouping rule on none of
+// these except by accident - it gives '123,4' for 1234 and '123,456,78' for
+// 12345678 - so the pair of exact-multiple widths and the pair either side of
+// them is what makes a left-grouping implementation impossible to pass with.
+//
+// THE DIGITS ARE 1..9 RATHER THAN ROUND POWERS OF TEN ON PURPOSE. 1,000,000 and
+// 1,000,000 with two groups transposed are the same string. 1,234,567 and its
+// transposition are not, so an implementation that assembles the groups in the
+// wrong order is visible here and is invisible in the case below.
+//==============================================================================
+
+dcl-proc test_thousands_grouping_is_from_the_right export;
+
+  aEqualExact('1,234':       SCOUT_thousands(1234):      '1234 - 4 digits');
+  aEqualExact('12,345':      SCOUT_thousands(12345):     '12345 - 5 digits');
+  aEqualExact('123,456':     SCOUT_thousands(123456):    '123456 - 6 digits');
+  aEqualExact('1,234,567':   SCOUT_thousands(1234567):   '1234567 - 7 digits');
+  aEqualExact('12,345,678':  SCOUT_thousands(12345678):  '12345678 - 8 digits');
+  aEqualExact('123,456,789': SCOUT_thousands(123456789): '123456789 - 9 digits');
+
+end-proc;
+
+//==============================================================================
+// The round powers of ten, which is how the boundaries are usually stated
+//
+// The same six widths as the case above with different digits. Kept separate
+// rather than merged because these are the values a reader checks by eye and
+// the ones the brief for this procedure named, and because a value whose only
+// non-zero digit is the leading one is the shape a "pad to a multiple of three
+// then insert" implementation gets right by luck and the case above catches.
+//
+// 100000 and 100000000 are the exact-multiple-of-three widths here.
+//==============================================================================
+
+dcl-proc test_thousands_round_powers_of_ten export;
+
+  aEqualExact('1,000':         SCOUT_thousands(1000):      '1000');
+  aEqualExact('10,000':        SCOUT_thousands(10000):     '10000');
+  aEqualExact('100,000':       SCOUT_thousands(100000):    '100000 - 6 digits');
+  aEqualExact('1,000,000':     SCOUT_thousands(1000000):   '1000000');
+  aEqualExact('10,000,000':    SCOUT_thousands(10000000):  '10000000');
+  aEqualExact('100,000,000':   SCOUT_thousands(100000000): '100000000 - 9 digits');
+
+end-proc;
+
+//==============================================================================
+// Zero renders as one character, '0'
+//
+// CAPTURED - `Java Shared Class Size (Kb): 0` is a separated field whose
+// measured value is zero, so this is a transcription and not a guess about an
+// edge case nobody has seen.
+//
+// IT SEPARATES NOTHING against a non-separating implementation, and is here for
+// a different rival entirely: an implementation that builds the string by
+// peeling three digits at a time until the value reaches zero, and therefore
+// peels nothing and returns the empty string, or one that pads to a group and
+// returns '000'. Both are ordinary ways to write this and both survive every
+// other case in the block. The length assertion is what states it.
+//==============================================================================
+
+dcl-proc test_thousands_zero export;
+
+  dcl-s res varchar(512);
+
+  res = SCOUT_thousands(0);
+
+  aEqualExact('0': res: '0 renders as 0');
+  iEqual(1: %len(res): '0 is one byte - not empty, not 000, not padded');
+
+end-proc;
+
+//==============================================================================
+// A comma count and a digit sequence for every width from 1 to 19
+//
+// The sweep. Nineteen widths in one loop, each asserting two things:
+//
+//   the number of commas is (digits - 1) / 3, integer division - which is the
+//   grouping rule stated arithmetically rather than as a list of literals, and
+//   is wrong for a left-grouping rule at width 4 and for a leading-comma rule
+//   at widths 4, 7, 10, 13, 16 and 19;
+//
+//   the value with its commas removed is the value rendered plainly - so no
+//   digit is lost, duplicated, reordered or truncated at any width, and the
+//   separator is a comma rather than a space or a stop, because strip_commas
+//   removes commas only and anything else left behind fails the comparison.
+//
+// THE SECOND ASSERTION IS A GUARD, NOT A DRIVER, and passes against a
+// non-separating implementation trivially - strip a string with no commas in it
+// and you have the string. It is the first assertion in the loop that fails
+// there. Said plainly because the two sit two lines apart.
+//
+// THE VALUE IS BUILT RATHER THAN WRITTEN, digit by digit, because nineteen
+// literals would be nineteen chances to mistype one and have it pass. The
+// digits cycle 2,3,4,...,9,1,2,... so none is ever zero: a value with an
+// interior zero would still be a fine test, but a LEADING zero would make
+// %char's rendering and the width disagree for a reason that has nothing to do
+// with separators.
+//
+// IT STOPS AT 19 AND NOT 20. See test_thousands_top_of_range for why that is a
+// question this author cannot answer and what should happen to it.
+//==============================================================================
+
+dcl-proc test_thousands_every_width_to_nineteen export;
+
+  dcl-s v     like(BIGINT_t);
+  dcl-s w     like(INTEGER_t);
+  dcl-s digit like(INTEGER_t);
+  dcl-s res   varchar(512);
+
+  v = 0;
+  for w = 1 to 19;
+    digit = %rem(w: 9) + 1;
+    v = v * 10 + digit;
+    res = SCOUT_thousands(v);
+
+    iEqual(%div(w - 1: 3): %len(res) - %len(strip_commas(res)):
+           'commas at width ' + %char(w));
+
+    aEqualExact(%char(v): strip_commas(res):
+                'digits at width ' + %char(w));
+  endfor;
+
+end-proc;
+
+//==============================================================================
+// The large end: nineteen digits, grouped, with nothing lost
+//
+// Nothing has ever passed a value this size through SCOUT_LINE_t, and the two
+// failures that matter here are silent ones - a holder narrower than the
+// rendered value, or a grouping loop that stops after a fixed number of
+// iterations. 9,223,372,036,854,775,807 is 19 digits and 25 rendered bytes.
+//
+// The three values are chosen so no two share a remainder or a digit pattern:
+//
+//   999999999999999999    18 digits, an exact multiple of three - the
+//                         leading-comma trap at the widest place it can happen
+//   1234567891234567891   19 digits, all different, so a transposed group shows
+//   1000000000000000000   19 digits, one significant digit, so a loop that
+//                         stops early leaves a short string rather than a wrong
+//                         one
+//
+// NONE OF THESE IS THE TYPE'S MAXIMUM, deliberately. That value is
+// 9,223,372,036,854,775,807 and it belongs to test_thousands_top_of_range,
+// which is the case named for it - so the literal is written out in one place
+// in this block rather than two. A 25-character literal mistyped in one of two
+// copies fails in a way that reads like a defect in the code.
+//==============================================================================
+
+dcl-proc test_thousands_large_values export;
+
+  aEqualExact('999,999,999,999,999,999':
+              SCOUT_thousands(999999999999999999):
+              '18 nines - exact multiple of three');
+
+  aEqualExact('1,234,567,891,234,567,891':
+              SCOUT_thousands(1234567891234567891):
+              '19 digits, all different');
+
+  aEqualExact('1,000,000,000,000,000,000':
+              SCOUT_thousands(1000000000000000000):
+              '19 digits, one significant');
+
+  iEqual(25: %len(SCOUT_thousands(1234567891234567891)):
+         '19 digits render as 25 bytes');
+
+end-proc;
+
+//==============================================================================
+// THE TOP OF THE RANGE - the largest value BIGINT_t can hold
+//
+// BIGINT_t is int(20): an eight-byte binary field. "20-digit integer" has two
+// readings in RPG and they have different maxima, which is worth writing down
+// because the wrong one is the easy assumption to make from the width alone:
+//
+//   packed(20: 0) or zoned(20: 0)  ->  99,999,999,999,999,999,999   (20 digits)
+//   int(20)                        ->   9,223,372,036,854,775,807   (19 digits)
+//
+// It is the second. So the maximum is nineteen digits, six commas and 25
+// rendered bytes, and no value in this block exceeds it.
+//
+// WHY THE CASE EXISTS AT ALL. Nothing has ever passed a value this size through
+// SCOUT_LINE_t, and the failures at full width are silent ones: a holder
+// narrower than the rendered value, or a grouping loop with a fixed iteration
+// count. The alternative to writing it was to stop a few digits short of the
+// type's limit on the grounds that no caller will get there - which is the
+// shape of the guard CLAUDE.md records as having been tested with a 20-digit
+// value that its own width check refused before any conversion was attempted.
+// That test passed and could not distinguish a working guard from one that
+// never ran.
+//
+// AND THIS IS A VALUE SOMEBODY REACHES. The top of an eight-byte counter is not
+// a theoretical width the way twenty nines would have been.
+//
+// The second assertion is the one that catches truncation specifically: 25
+// bytes, so a rendering cut short at some internal buffer width fails on the
+// length even if every character it did produce was correct.
+//==============================================================================
+
+dcl-proc test_thousands_top_of_range export;
+
+  dcl-s res varchar(512);
+
+  res = SCOUT_thousands(9223372036854775807);
+
+  aEqualExact('9,223,372,036,854,775,807': res: 'the largest int(20)');
+  iEqual(25: %len(res): 'the maximum renders as 25 bytes, not truncated');
+  aEqualExact('9223372036854775807': strip_commas(res):
+              'every digit of the maximum survives');
+
+end-proc;
+
+//==============================================================================
+// INFERRED - a negative keeps its sign outside the digits
+//
+// NOTHING PERFINFO PRINTS IS NEGATIVE. Every separated field is a memory or
+// storage figure, the captures are all non-negative, and no caller can produce
+// one today. So this case pins behaviour that has not been measured, and I have
+// written it under protest and set out the objection in the hand-back rather
+// than quietly asserting a convention as though it were a capture.
+//
+// WHY IT IS HERE ANYWAY. BIGINT_t is signed, so a negative is representable and
+// will eventually be passed - by a future field, or by a subtraction that went
+// the wrong way. The failure modes are not equally bad. '-1,234' and '-1234'
+// are both readable; ',-1,234' and '-,123,456' are not, and the second is what
+// a grouping loop that counts the '-' as a digit produces at six digits, which
+// is exactly the width the captured 262,144 sits at. So the assertions are
+// ordered with the ones I am confident about first.
+//
+// THE SIX-DIGIT NEGATIVE IS THE SEPARATING VALUE. -1234 is rendered '-1,234' by
+// a correct implementation AND by one that treats the sign as a digit and
+// groups the five characters from the right. -123456 tells them apart:
+// '-123,456' against '-,123,456'.
+//
+// IF THE DECISION IS THAT A NEGATIVE SHOULD RENDER PLAINLY, or should be
+// rejected, replace this case with one that pins that. Do not delete it: an
+// unasserted answer here is one that can change between releases without any
+// test noticing.
+//==============================================================================
+
+dcl-proc test_thousands_negative export;
+
+  dcl-s res varchar(512);
+
+  // The part I am confident about: the sign leads, and no separator touches it.
+  res = SCOUT_thousands(-123456);
+  aEqualExact('-': %subst(res: 1: 1): '-123456 - the sign comes first');
+  iEqual(0: %scan('-,': res): '-123456 - no comma against the sign');
+  aEqualExact('-123456': strip_commas(res): '-123456 - digits and sign intact');
+
+  // The part that is a convention rather than a measurement.
+  aEqualExact('-123,456': res: '-123456 - grouped from the right');
+  aEqualExact('-1,234':   SCOUT_thousands(-1234):   '-1234');
+  aEqualExact('-999':     SCOUT_thousands(-999):    '-999 - no comma');
+  aEqualExact('-1,000':   SCOUT_thousands(-1000):   '-1000 - the boundary');
+
+  // A negative is the positive with a sign in front of it, at every width the
+  // captures reach. Stated as a property so it survives a change of convention
+  // about the sign itself.
+  aEqualExact('-' + SCOUT_thousands(262144): SCOUT_thousands(-262144):
+              '-262144 is 262144 with a sign');
+
+end-proc;
+
+//==============================================================================
+// The rendering is the value and nothing else - no padding, no justification
+//
+// SCOUT_LINE_t is varying and holds 2048 bytes, so a procedure that assembled
+// the digits into a wide buffer and returned the buffer would produce a value
+// that LOOKS right in every message a test prints and is wrong by several
+// hundred trailing blanks. Upstream prints `Java Heap In Use (Kb): 66,730`
+// with the value hard against the space after the colon, so a caller doing
+// label + ': ' + SCOUT_thousands(v) must get that line and not a line with a
+// field of blanks in it.
+//
+// aEqualExact already compares lengths in every case above, so this case adds
+// no rival the block did not have. It is here because it says the thing
+// directly, in the one place a reader would look for it, and because the first
+// and last byte assertions are what a failure message will make obvious where
+// a length mismatch on a 2048-byte value will not.
+//==============================================================================
+
+dcl-proc test_thousands_has_no_padding export;
+
+  dcl-s res varchar(512);
+
+  res = SCOUT_thousands(66730);
+  iEqual(6: %len(res): '66730 - six bytes exactly');
+  aEqualExact('6': %subst(res: 1: 1): '66730 - starts with a digit');
+  aEqualExact('0': %subst(res: %len(res): 1): '66730 - ends with a digit');
+
+  res = SCOUT_thousands(0);
+  aEqualExact('0': %subst(res: 1: 1): '0 - starts with a digit');
+  aEqualExact('0': %subst(res: %len(res): 1): '0 - ends with a digit');
+
+end-proc;
+
+//==============================================================================
+// THE OTHER END OF THE TYPE - the most negative int(20) there is
+//
+// -9,223,372,036,854,775,808. One further from zero than the maximum, and the
+// single value in the whole range with no positive counterpart, because two's
+// complement is not symmetrical.
+//
+// THAT ASYMMETRY IS THE SEPARATING VALUE, and it is the reason this case is
+// worth its own procedure rather than another line in test_thousands_negative.
+// The natural way to handle a sign is to remember it, negate the value, group
+// the digits and put the sign back. That implementation is correct for every
+// other negative in this block and overflows here - negating the minimum of an
+// eight-byte binary does not yield a representable number. It will return the
+// minimum again, or the maximum, or whatever the overflow leaves behind, and
+// nothing else in the suite can see it.
+//
+// THE VALUE IS BUILT RATHER THAN WRITTEN. The literal -9223372036854775808
+// parses as a unary minus applied to 9223372036854775808, which is one past
+// what int(20) holds, so writing it out risks a compile diagnostic about the
+// literal rather than a test of the procedure. Subtracting one from the maximum
+// reaches the same value by a path where every intermediate is representable.
+//
+// IT INHERITS THE PROTEST IN test_thousands_negative. Nothing perfinfo prints
+// is negative, so the sign convention here is a convention. The assertions are
+// ordered accordingly: the ones about the sign and the digits first, the
+// literal last. If the decision is that a negative renders plainly or is
+// rejected, this case changes with that one.
+//
+// HOW TO READ A FAILURE. A rendered value that is not the minimum at all - the
+// maximum, say, or a positive number - is the negate-and-overflow defect and
+// not a punctuation defect. The digits assertion is placed before the literal
+// so the failure report says which.
+//
+// MEASURED, 8 September 2026, and this is why the ordering above earns its
+// keep. Run against an implementation that returned the number unpunctuated,
+// this case failed on its FOURTH assertion - the grouped literal - which means
+// the three ahead of it passed: the sign came first, no comma sat against it,
+// and the digits came back as -9223372036854775808 exactly. So the value really
+// does reach the procedure intact, and `v = max; v = -v; v = v - 1` really does
+// construct the minimum. That was the one thing about this case that could not
+// be checked by reading it.
+//
+// The consequence is the point: the overflow half of this case is LIVE rather
+// than incidentally satisfied. A negate-and-group implementation would fail the
+// third assertion, not the fourth, and the two failures now read differently.
+//
+// This case and the fix it is aimed at were written independently on opposite
+// sides of the wall - the implementation took the sign off the RENDERED value
+// rather than negating, for the same reason this case exists - and neither
+// author had seen the other's work. A measured instance of the arrangement in
+// CLAUDE.md working, rather than a hypothetical one.
+//==============================================================================
+
+dcl-proc test_thousands_type_minimum export;
+
+  dcl-s v   like(BIGINT_t);
+  dcl-s res varchar(512);
+
+  v = 9223372036854775807;
+  v = -v;
+  v = v - 1;
+
+  res = SCOUT_thousands(v);
+
+  aEqualExact('-': %subst(res: 1: 1): 'the minimum keeps its sign first');
+  iEqual(0: %scan('-,': res): 'no comma against the sign at the minimum');
+  aEqualExact('-9223372036854775808': strip_commas(res):
+              'the minimum survives whole - not negated into something else');
+
+  aEqualExact('-9,223,372,036,854,775,808': res: 'the minimum, grouped');
+  iEqual(26: %len(res): '26 bytes - 19 digits, 6 commas and a sign');
 
 end-proc;

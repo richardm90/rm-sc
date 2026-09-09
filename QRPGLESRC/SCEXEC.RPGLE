@@ -728,7 +728,7 @@ dcl-proc SCEXEC_info export;
   dcl-s i    like(INTEGER_t);
 
   SCOUT_writeln('');
-  SCOUT_writeln('---------------------------------------------------------------------');
+  SCOUT_writeln(SCOUT_RULE);
   // Through SCOUT_list_row rather than built here, and the point is that this
   // IS a list row - the same two fields in the same shape. Upstream colours it
   // cyan 36, the identical colour it gives a `list` row, measured through a
@@ -895,39 +895,166 @@ end-proc;
 // SCEXEC_perfinfo
 //==============================================================================
 
-dcl-proc SCEXEC_perfinfo export;
-  dcl-pi *n;
-    def likeds(SCDEF_t) const;
+// Upstream builds this block by scraping DSPJOB OPTION(*RUNA) and printing
+// whatever matched, then appending a set of sampled figures sorted by label.
+// RMSC reads the same values from QUSRJOBI and SQL - docs/parity.md carries
+// the decision and the three affinity lines it costs.
+//
+// The ORDER below is not a choice. Upstream's sampled figures come out of a
+// sorted map, so they appear alphabetically by label, and the arrow on
+// '->Sampling time' is what makes it sort first. Reordering these lines is a
+// parity defect even though every value is still present.
+
+// %char of a packed field with decimals drops the leading zero, so a CPU
+// figure of zero renders '.00' where upstream prints '0.00'. That was live in
+// the old perfinfo output.
+dcl-proc decimal_text;
+  dcl-pi *n like(SCOUT_LINE_t);
+    text like(SCOUT_LINE_t) const;
   end-pi;
 
-  dcl-ds jobs likeds(SCQRY_JOBS_t) inz(*likeds);
-  dcl-ds perf likeds(SCQRY_PERF_t) inz(*likeds);
-  dcl-ds jvm  likeds(SCQRY_JVM_t) inz(*likeds);
+  if %len(text) > 0 and %subst(text: 1: 1) = '.';
+    return '0' + text;
+  endif;
+  if %len(text) > 1 and %subst(text: 1: 2) = '-.';
+    return '-0' + %subst(text: 2);
+  endif;
+
+  return text;
+
+end-proc;
+
+dcl-proc field_line;
+  dcl-pi *n like(SCOUT_LINE_t);
+    label like(SCOUT_LINE_t) const;
+    value like(SCOUT_LINE_t) const;
+  end-pi;
+
+  // Four spaces, and SIX for the figures nested under a limit - the callers
+  // that want six prefix two more rather than this taking an indent level,
+  // because there are exactly three of them and a parameter would invite a
+  // fourth.
+  //
+  // Every line RMSC prints here carries a value. Upstream has one that does
+  // not - `Thread resources affinity (THDRSCAFN): ` with a trailing space and
+  // nothing after it - but that is one of the three lines RMSC omits, so the
+  // empty-value shape never arises. If those three ever become reachable,
+  // this is where the trailing space has to come back.
+  return '    ' + %trimr(label) + ': ' + %trimr(value);
+
+end-proc;
+
+dcl-proc SCEXEC_perfinfo export;
+  dcl-pi *n;
+    def     likeds(SCDEF_t) const;
+    seconds like(SCQRY_SECS_t) const;
+  end-pi;
+
+  dcl-ds jobs  likeds(SCQRY_JOBS_t) inz(*likeds);
+  dcl-ds perf  likeds(SCQRY_PERF_t) inz(*likeds);
+  dcl-ds jvm   likeds(SCQRY_JVM_t) inz(*likeds);
+  dcl-ds attrs likeds(SCQRY_ATTRS_t) inz(*likeds);
   dcl-s i like(INTEGER_t);
 
+  SCOUT_writeln('Gathering performance information...');
+  SCOUT_writeln('');
+  SCOUT_writeln(SCOUT_RULE);
+  SCOUT_writeln(SCOUT_list_row(def.short_name: def.friendly));
+
   if SCEXEC_jobs(def: jobs) = 0;
-    SCOUT_writeln(%trim(def.short_name) + ': not running');
+    // Measured: NOT RUNNING sits directly under the title with no blank line
+    // between, and the whole thing is eight lines.
+    SCOUT_writeln('NOT RUNNING');
+    SCOUT_writeln(SCOUT_RULE);
+    SCOUT_writeln('');
+    SCOUT_writeln('');
     return;
   endif;
 
+  SCOUT_writeln('');
+
   for i = 1 to jobs.count;
-    SCOUT_writeln(%trim(def.short_name) + ': ' + %trim(jobs.name(i)));
+    SCOUT_writeln('Job: ' + %trim(jobs.name(i)));
 
-    if SCQRY_job_perf(jobs.name(i): perf);
-      SCOUT_writeln('    started: ' + %trim(perf.job_start));
-      SCOUT_writeln('    threads: ' + %char(perf.thread_count));
-      SCOUT_writeln('    temporary storage (MB): ' + %char(perf.temp_storage));
-      SCOUT_writeln('    CPU %: ' + %char(perf.cpu_percentage));
-      SCOUT_writeln('    disk I/O: ' + %char(perf.disk_io_count));
+    if SCQRY_job_attrs(jobs.name(i): attrs);
+      SCOUT_writeln(field_line('Run priority (RUNPTY)':
+                               %char(attrs.run_priority)));
+      SCOUT_writeln(field_line('Time slice in milliseconds (TIMESLICE)':
+                               %char(attrs.time_slice)));
+      SCOUT_writeln(field_line('Eligible for purge (PURGE)':
+                               attrs.purge));
+      SCOUT_writeln(field_line('Default wait time in seconds (DFTWAIT)':
+                               attrs.default_wait));
+      SCOUT_writeln(field_line('Maximum CPU time in milliseconds (CPUTIME)':
+                               attrs.max_cpu_time));
+      SCOUT_writeln('  ' + field_line('CPU time used':
+                               %char(attrs.cpu_time_used)));
+      SCOUT_writeln(field_line(
+                    'Maximum temporary storage in megabytes (MAXTMPSTG)':
+                               attrs.max_temp_storage));
+      SCOUT_writeln('  ' + field_line('Temporary storage used':
+                               %char(attrs.temp_storage_used)));
+      SCOUT_writeln('  ' + field_line('Peak temporary storage used':
+                               %char(attrs.peak_temp_storage)));
+      SCOUT_writeln(field_line('Maximum threads (MAXTHD)':
+                               attrs.max_threads));
+      SCOUT_writeln('  ' + field_line('Threads':
+                               %char(attrs.thread_count)));
     endif;
 
-    // Only services that run one, which is why it is not an error to have none
-    if SCQRY_jvm_info(jobs.name(i): jvm);
-      SCOUT_writeln('    JVM heap in use: ' + %char(jvm.in_use_heap));
-      SCOUT_writeln('    JVM heap max: ' + %char(jvm.max_heap_size));
-      SCOUT_writeln('    JVM collections: ' + %char(jvm.gc_cycles));
+    // Only services that run one, which is why finding none is not an error.
+    clear jvm;
+    SCQRY_jvm_info(jobs.name(i): jvm);
+
+    if SCQRY_job_sample(jobs.name(i): seconds: perf);
+      SCOUT_writeln(field_line('->Sampling time (s)':
+                    decimal_text(%char(perf.sample_seconds))));
+      SCOUT_writeln(field_line('CPU Usage (%)':
+                    decimal_text(%char(perf.cpu_percentage))));
+      SCOUT_writeln(field_line('Current User': perf.current_user));
+      SCOUT_writeln(field_line('Disk I/O operations during sampling time':
+                    %char(perf.disk_io_count)));
+      SCOUT_writeln(field_line('Function': perf.job_function));
+
+      // Alphabetical by label, which is what puts the Java block here rather
+      // than at the end. Separators on the memory figures only - measured;
+      // 'Java GC Total Time (ms): 1306' beside 'Java Heap In Use (Kb):
+      // 66,730' is the pair that settles it.
+      if jvm.found;
+        SCOUT_writeln(field_line('Java GC Cycle Number':
+                      %char(jvm.gc_cycles)));
+        SCOUT_writeln(field_line('Java GC Total Time (ms)':
+                      %char(jvm.gc_total_time)));
+        SCOUT_writeln(field_line('Java Heap Current Size (MB)':
+                      SCOUT_thousands(jvm.heap_size)));
+        SCOUT_writeln(field_line('Java Heap In Use (Kb)':
+                      SCOUT_thousands(jvm.in_use_heap)));
+        SCOUT_writeln(field_line('Java Heap Maximum Size (Kb)':
+                      SCOUT_thousands(jvm.max_heap_size)));
+        SCOUT_writeln(field_line('Java JIT Memory (KB)':
+                      SCOUT_thousands(jvm.jit_memory)));
+        SCOUT_writeln(field_line('Java Shared Class Size (Kb)':
+                      SCOUT_thousands(jvm.shared_class)));
+      endif;
+
+      SCOUT_writeln(field_line('Job Status': perf.job_status));
+      SCOUT_writeln(field_line('Job active since': perf.active_since));
+
+      if jvm.found;
+        SCOUT_writeln(field_line('Malloc''ed Memory estimate (Kb)':
+                      SCOUT_thousands(jvm.malloc_memory)));
+      endif;
+
+      SCOUT_writeln(field_line('Total Disk I/O operations':
+                    %char(perf.total_disk_io)));
     endif;
+
+    SCOUT_writeln('');
   endfor;
+
+  SCOUT_writeln(SCOUT_RULE);
+  SCOUT_writeln('');
+  SCOUT_writeln('');
 
 end-proc;
 

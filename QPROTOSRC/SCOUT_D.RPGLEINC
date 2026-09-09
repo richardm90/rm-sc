@@ -420,3 +420,29 @@ end-pr;
 
 dcl-pr SCOUT_silent like(BOOLEAN_t);
 end-pr;
+
+///
+// The 69-dash rule `info` and `perfinfo` both print.
+//
+// A constant rather than a literal in each, for the reason SCEXEC_info's own
+// comment gives about SCOUT_list_row: a byte-sensitive string written out
+// twice is how two places come to disagree without anyone editing either on
+// purpose. It was already written out twice when this was added.
+///
+
+dcl-c SCOUT_RULE
+      '---------------------------------------------------------------------';
+
+///
+// A whole number with thousands separators: 349508 -> '349,508'.
+//
+// Upstream applies this to SOME of what perfinfo prints and not others, and
+// the split is per FIELD rather than per type - measured on a live JVM
+// service, where `Java Heap In Use (Kb): 66,730` is separated and
+// `Java GC Total Time (ms): 1306` beside it is not. So the caller decides;
+// this only formats. docs/messages.md carries the list.
+///
+
+dcl-pr SCOUT_thousands like(SCOUT_LINE_t);
+  value like(BIGINT_t) const;
+end-pr;

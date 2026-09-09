@@ -149,13 +149,26 @@ INTENTIONAL="file scrunattrs"
 #   info        plan says only "Formatted definition dump"
 #   jobinfo     plan says only "Active job names"
 #   loginfo     plan says only "Log paths, sizes, spooled files"
-#   perfinfo    the plan's "Improved - drops upstream's optional Python 3 +
-#               ibm_db dependency" is a decision about DEPENDENCIES, not about
-#               output. Dropping that dependency did not require printing less:
-#               JVM_INFO and ACTIVE_JOB_INFO are both reachable from embedded
-#               SQL. Nothing explains 12 lines where upstream prints 66, and
-#               Phase 2 asked for "every QueryUtils query as embedded SQL", so
-#               the narrower output is undocumented rather than designed.
+#   perfinfo    TWO differences, and only one of them is settled. RMSC now
+#               reports eleven of the fourteen job attributes upstream prints;
+#               the three it omits are the affinity values, which QUSRJOBI
+#               does not carry and which RMSC will not scrape DSPJOB to get -
+#               Richard's decision, 8 September 2026, evidence in
+#               docs/parity.md. That part IS decided.
+#
+#               The other is not: upstream lists a service's JOBS in the
+#               opposite order to RMSC. Pre-existing, shared with jobinfo,
+#               stable on both sides, and the cause has NOT been established -
+#               only one service on this machine has more than one job, so
+#               nothing available separates the candidate explanations.
+#
+#               It sits here rather than in INTENTIONAL for that reason. This
+#               gate classifies per operation, so INTENTIONAL would have
+#               sanctioned both differences at once, and INTENTIONAL is the
+#               list that lets the run eventually report every difference as
+#               intentional and listed. An unexplained ordering difference
+#               must not be able to hide inside that sentence. It moves when
+#               the ordering is settled, not before.
 UNDECIDED="info jobinfo loginfo perfinfo"
 
 mkdir -p "$WORK"
@@ -165,12 +178,25 @@ pass=0; bydesign=0; undecided_n=0; unexpected=0
 # numbers, wall-clock timestamps, and the storage/CPU/IO counters that both
 # implementations sample live. Everything else, including whitespace, is compared
 # as-is.
+# Masks the fields that move between two invocations seconds apart, so a live
+# differential compares what is stable rather than reporting noise forever.
+#
+# WHAT IS DELIBERATELY NOT MASKED, and this matters more than what is: the run
+# attributes (RUNPTY, TIMESLICE, PURGE, DFTWAIT, and the three limits),
+# Current User, Job active since, Java Heap Maximum Size and Java Shared Class
+# Size. Those are the fields that would catch RMSC reading the wrong column -
+# notably the maximum temporary storage, which exists in the source in both
+# kilobytes and megabytes and reads plausibly either way. Masking them to
+# quieten the output would leave this comparing labels and nothing else.
+#
+# Numeric masks accept commas because the memory figures are separated.
 normalise() {
   sed -E \
     -e 's#[0-9]{6}/#NNNNNN/#g' \
     -e 's#/home/[A-Za-z0-9_.-]+/#/home/USER/#g' \
     -e 's#[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}#TIMESTAMP#g' \
-    -e 's#^([[:space:]]*(CPU time used|Temporary storage used|Peak temporary storage used|Threads|Disk I/O operations during sampling time|Total Disk I/O operations|->Sampling time \(s\)|CPU Usage \(%\)|started|threads|temporary storage \(MB\)|CPU %|disk I/O)[^0-9-]*)[-0-9.]+#\1VALUE#'
+    -e 's#^([[:space:]]*(CPU time used|Temporary storage used|Peak temporary storage used|Threads|Disk I/O operations during sampling time|Total Disk I/O operations|->Sampling time \(s\)|CPU Usage \(%\)|Java GC Cycle Number|Java GC Total Time \(ms\)|Java Heap In Use \(Kb\)|Java Heap Current Size \(MB\)|Java JIT Memory \(KB\)|Malloc.ed Memory estimate \(Kb\)|started|threads|temporary storage \(MB\)|CPU %|disk I/O)[^0-9-]*)[-0-9.,]+#\1VALUE#' \
+    -e 's#^([[:space:]]*(Function|Job Status): ).*#\1VALUE#'
 }
 
 echo "== stage 1: byte-exact against captured Java fixtures"

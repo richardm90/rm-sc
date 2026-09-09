@@ -585,3 +585,52 @@ dcl-proc SCOUT_log_detail export;
   return 'For details, see log file at: ' + %trim(path);
 
 end-proc;
+
+//==============================================================================
+// SCOUT_thousands
+//==============================================================================
+
+dcl-proc SCOUT_thousands export;
+  dcl-pi *n like(SCOUT_LINE_t);
+    value like(BIGINT_t) const;
+  end-pi;
+
+  dcl-s rendered like(SCOUT_LINE_t);
+  dcl-s digits   like(SCOUT_LINE_t);
+  dcl-s grouped  like(SCOUT_LINE_t);
+  dcl-s i        like(INTEGER_t);
+  dcl-s n        like(INTEGER_t);
+  dcl-s neg      like(BOOLEAN_t);
+
+  // The sign is taken off the RENDERED value rather than by %abs, which
+  // overflows on the most negative int(20) - there is no positive counterpart
+  // to it. Nothing calls this with a negative today, but an abend on one
+  // input of a pure formatter is not worth leaving in for the sake of a
+  // shorter line.
+  rendered = %char(value);
+  neg = (%len(rendered) > 0 and %subst(rendered: 1: 1) = '-');
+  if neg;
+    digits = %subst(rendered: 2);
+  else;
+    digits = rendered;
+  endif;
+
+  n = %len(digits);
+  grouped = '';
+  for i = 1 to n;
+    // Separator before every third digit counting from the RIGHT, and the
+    // `i > 1` is what stops it leading: 1000 is '1,000', 100 is '100', and
+    // 123456 is '123,456' rather than ',123,456'.
+    if i > 1 and %rem(n - i + 1: 3) = 0;
+      grouped += ',';
+    endif;
+    grouped += %subst(digits: i: 1);
+  endfor;
+
+  if neg;
+    return '-' + grouped;
+  endif;
+
+  return grouped;
+
+end-proc;

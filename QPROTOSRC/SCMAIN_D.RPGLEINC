@@ -13,6 +13,7 @@
 /define SCMAIN_D
 
 /include 'SCDEF_D.rpgleinc'
+/include 'SCQRY_D.rpgleinc'
 /include 'include/RMTOOLS_D.rpgleinc'
 
 dcl-c SCMAIN_ARGS_SIZE const(1024);
@@ -65,7 +66,15 @@ dcl-ds SCMAIN_OPTS_t qualified template inz;
   all       like(BOOLEAN_t) inz(false);
   ignore_globals like(BOOLEAN_t) inz(false);
   ignore_groups  like(SCDEF_NAME_t) inz(SCMAIN_DFT_IGNORE);
+  // The raw text, kept for the message that quotes it back, and the value it
+  // parsed to. Both, because upstream validates --sampletime WHEN IT PARSES
+  // THE ARGUMENT rather than when perfinfo uses it - measured: it warns on
+  // `check` and on `list` as well, and a `-q` placed AFTER the bad option
+  // does not suppress the warning while one placed before it does. That
+  // ordering is only reproducible if the value is converted in the parse
+  // loop, in argument order, which is why the parsed figure lives here.
   sampletime     like(SCDEF_NAME_t) inz('1');
+  sample_secs    like(SCQRY_SECS_t) inz(1);
   err       like(SCMAIN_ARGS_t) inz('');
 end-ds;
 

@@ -1,4 +1,4 @@
-STRPGMEXP PGMLVL(*CURRENT) SIGNATURE('RMSC 0.3.0')
+STRPGMEXP PGMLVL(*CURRENT) SIGNATURE('RMSC 0.4.0')
   /* The signature is fixed, so the ORDER of these exports is the contract.
      Add new exports at the END only. Inserting one shifts every export after
      it by a position: the binder stays silent because the signature still
@@ -130,4 +130,11 @@ STRPGMEXP PGMLVL(*CURRENT) SIGNATURE('RMSC 0.3.0')
   EXPORT SYMBOL(SCOUT_silent)
   /* Validates, converts and normalises a port from ONE string - see SCDEF. */
   EXPORT SYMBOL(SCDEF_port_text)
+  /* Run attributes for one job, as perfinfo reports them.
+     Appended, never inserted: the signature pins export ORDER. */
+  EXPORT SYMBOL(SCQRY_job_attrs)
+  /* Runtime figures over a measured sampling window - see SCQRY_D. */
+  EXPORT SYMBOL(SCQRY_job_sample)
+  /* Thousands separators, for the perfinfo fields upstream separates. */
+  EXPORT SYMBOL(SCOUT_thousands)
 ENDPGMEXP

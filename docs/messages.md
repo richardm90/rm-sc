@@ -544,6 +544,54 @@ RMSC prints five of these under different names and three JVM figures. So closin
 columns. `docs/parity.md` is right that the plan's "drops the Python 3 + `ibm_db` dependency"
 never authorised printing less.
 
+#### Settled 8 September 2026 — the mechanism, and three corrections to the above
+
+**Upstream scrapes `DSPJOB OPTION(*RUNA)`.** `docs/parity.md` carries the evidence and Richard's
+decision that RMSC will not. The consequence for this section is that the three affinity lines —
+`Thread resources affinity (THDRSCAFN)` with `Group:` and `Level:`, and
+`Resources affinity group (RSCAFNGRP)` — are **not reachable from QUSRJOBI** and RMSC omits them.
+Sixty-three lines where upstream prints sixty-six, recorded as a deliberate departure.
+
+**Correction: this document's claim that upstream "thousands-separates the Java figures" is
+wrong**, and the truth is finer. The split is per FIELD, not per type. Measured on a live JVM
+service, in the same block:
+
+    Java GC Total Time (ms): 1306          <- no separator
+    Java Heap In Use (Kb): 66,730          <- separator
+    Total Disk I/O operations: 1860        <- no separator
+
+Separated: `Java Heap Current Size (MB)`, `Java Heap In Use (Kb)`,
+`Java Heap Maximum Size (Kb)`, `Java JIT Memory (KB)`, `Java Shared Class Size (Kb)`,
+`Malloc'ed Memory estimate (Kb)`. Everything else plain — the two GC figures and both disk I/O
+counts included. Every one of those has a value above 999 in the capture, so each is separable
+from its rival rather than merely consistent with it.
+
+**`Java Heap Current Size (MB)` is mislabelled by upstream.** The value is kilobytes — 262,144
+beside a maximum of 16,777,216 Kb. RMSC reproduces the wrong label verbatim, because parity is
+the goal and a consumer may be matching on it.
+
+**The order of the sampled block is alphabetical by label**, because upstream builds it in a
+sorted map, and `->Sampling time (s)` sorts first precisely because of the arrow. `Job Status`
+precedes `Job active since` for the same reason — uppercase sorts before lowercase. Reordering
+these lines is a parity defect even when every value is present.
+
+**The not-running form is eight lines**, byte-confirmed: the header, a blank, the rule, the
+`<short> (<friendly>)` title, `NOT RUNNING` with **no blank line before it**, the rule, and two
+blank lines.
+
+#### One more line upstream emits and RMSC did not — the sample-time warning
+
+    WARNING: Value specified for sample time argument is not valid: --sampletime=abc
+
+On **stderr**, exit 0, once per invocation however many jobs the service has, suppressed by `-q`,
+and it names the **whole argument** rather than just the offending value. Emitted for any value
+that is not a number, the empty `--sampletime=` included; upstream then samples for one second.
+
+RMSC now matches this, and `--sampletime` accepts the decimal form upstream documents. Before
+this it took whole numbers only and discarded anything else without a word, so the documented
+`x.x` spelling sampled for one second and reported that it had. `docs/parity.md` carries the full
+measured table and the two rows where RMSC deliberately does not follow upstream into failing.
+
 Two details that will matter when it is written: upstream **thousands-separates** the Java figures
 (`262,144`) and not the others, and `->Sampling time (s)` really does carry that arrow.
 
@@ -608,8 +656,10 @@ Reproduce it exactly. Every line of it is somebody's expectation.
 
 Ordered by size rather than by importance:
 
-1. **`perfinfo`** — the largest by far, and the only one that is not a text change. Upstream
-   reports the job's *attributes* beside its measurements; RMSC queries neither. A query change.
+1. ~~**`perfinfo`**~~ — **done, 8 September 2026.** It was a query change, as this said. RMSC now
+   reads the attributes from `QUSRJOBI` and the sampled figures from SQL, and prints sixty-three
+   of upstream's sixty-six lines; the three it omits are the affinity values, which no API
+   carries. See `docs/parity.md`.
 2. **The usage block** — now measured verbatim, 33 lines, wanted by four rows and by D3. Large to
    type, trivial to get right.
 3. **`info`** — eight differences, of which two are shape rather than spelling: the dependency
