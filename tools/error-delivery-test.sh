@@ -114,10 +114,24 @@ WORK="${WORK:-/tmp/error-delivery.$$}"
 # number - an overridden WORK= belongs to whoever set it, and this cannot know
 # who that is.
 #
-# The same block appears in all five harnesses. Deliberately duplicated rather
-# than shared: each is deployed and run standalone, and a shared file would be
-# a dependency that costs more than the repetition does. Change one, change
-# all five.
+# The same block appears in every script in tools/ that keeps its work directory
+# and names it by PID. That is the membership rule, and it is a property rather
+# than a count deliberately.
+#
+# THE COUNT WAS WRONG IN BOTH DIRECTIONS AT ONCE, which is why nobody noticed it
+# was wrong at all. This line used to say "all five harnesses" and CLAUDE.md used
+# to say "the five harnesses", and they meant DIFFERENT fives: the block lives in
+# narration, api-silence, error-delivery, colour and fidelity-gate, while
+# CLAUDE.md was counting verify.sh stages - narration, api-silence,
+# error-delivery, load-warning and colour. load-warning-test.sh has never carried
+# this block (it takes a mktemp directory and a trap instead) and fidelity-gate.sh
+# is not a harness. The two agreed on the digit and never on the membership, so
+# correcting the digit would have preserved the fault and sent the next reader
+# hunting for a copy in load-warning-test.sh that does not exist.
+#
+# Deliberately duplicated rather than shared: each is deployed and run
+# standalone, and a shared file would be a dependency that costs more than the
+# repetition does. Change one, change all of them.
 ls -dt /tmp/error-delivery.* 2>/dev/null | tail -n +3 | while read -r stale; do
   owner="${stale##*.}"
   case "$owner" in

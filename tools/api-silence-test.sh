@@ -139,10 +139,16 @@ WORK="${WORK:-/tmp/api-silence-test.$$}"
 # number - an overridden WORK= belongs to whoever set it, and this cannot know
 # who that is.
 #
-# The same block appears in all five harnesses. Deliberately duplicated rather
-# than shared: each is deployed and run standalone, and a shared file would be
-# a dependency that costs more than the repetition does. Change one, change
-# all five.
+# The same block appears in every script in tools/ that keeps its work directory
+# and names it by PID. That is the membership rule. It replaces "all five
+# harnesses", which was wrong in both directions at once - load-warning-test.sh
+# is a harness with no copy of this block, fidelity-gate.sh has a copy and is
+# not a harness - and which would have gone stale again the moment a sixth
+# script was added. A property does not go stale; a number does, every time.
+#
+# Deliberately duplicated rather than shared: each is deployed and run
+# standalone, and a shared file would be a dependency that costs more than the
+# repetition does. Change one, change all of them.
 ls -dt /tmp/api-silence-test.* 2>/dev/null | tail -n +3 | while read -r stale; do
   owner="${stale##*.}"
   case "$owner" in

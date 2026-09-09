@@ -112,10 +112,18 @@ WORK="${WORK:-/tmp/colour-test.$$}"
 # number - an overridden WORK= belongs to whoever set it, and this cannot know
 # who that is.
 #
-# The same block appears in all five harnesses. Deliberately duplicated rather
-# than shared: each is deployed and run standalone, and a shared file would be
-# a dependency that costs more than the repetition does. Change one, change
-# all five.
+# The same block appears in every script in tools/ that keeps its work directory
+# and names it by PID. This file already had it right at the top and wrong at the
+# bottom, which is worth noticing before writing the next one: the opening line
+# above names narration-test.sh and fidelity-gate.sh as the scripts carrying the
+# rule - a membership - while this line used to say "all five harnesses", a count
+# that was wrong in both directions (load-warning-test.sh is a harness with no
+# copy, fidelity-gate.sh has a copy and is not a harness). Prefer the opening
+# line's habit.
+#
+# Deliberately duplicated rather than shared: each is deployed and run
+# standalone, and a shared file would be a dependency that costs more than the
+# repetition does. Change one, change all of them.
 ls -dt /tmp/colour-test.* 2>/dev/null | tail -n +3 | while read -r stale; do
   owner="${stale##*.}"
   case "$owner" in

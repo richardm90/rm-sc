@@ -221,6 +221,44 @@ opcode table.** `list`, `result`, `rows` are safe; `out`, `other`, `in`, `eval`,
 Found while fixing the flaky query suites, by bisecting probe sources — not by
 reading the compile listing, which CLAUDE.md now forbids outright.
 
+**Third instance, 8 September 2026, and this time the note above already
+existed.** `SCQRY_job_attrs` used `out` for the packed job name it was
+building; the whole service program build failed on one module with
+
+    RNF5008  Factor 1 operand is not valid; defaults to blanks.
+    RNF7260  The Factor 2 operand *BLANKS is not valid ...
+
+which names neither the word nor the reason, and points at the line *after*
+the declaration. Two things are worth keeping from it. The diagnostic sends
+you looking at the assignment's right-hand side — `*BLANKS` — when the fault
+is entirely on the left. And the cost was not the rename but the isolation:
+the failure arrives from `makei` as one failed object with an expanded-source
+line number that maps to the SQL precompiler's temporary member, so it cannot
+be read back to a line in the file you edited.
+
+**The technique that resolved it in one compile** is worth reusing for any
+`SQLRPGLE` failure: lift the new declarations and procedures into a standalone
+`.rpgle` in a scratch directory, compile it with `CRTRPGMOD` against the same
+`INCDIR`, and read *those* diagnostics, which carry real line numbers in a file
+you control. It also separates "my RPG is wrong" from "the SQL precompiler
+dislikes this", which the combined build cannot tell you. Note `CRTRPGMOD` has
+no `RPGPPOPT` keyword (`CPD0043`), and an isolation file carrying its own
+`ctl-opt` will draw a harmless `RNF1302` against the one in `RMCOMP_H`.
+
+**Fourth instance, the same day, in `SCOUT.RPGLE`** — the test author named a
+local accumulator `out` in a helper it had copied the shape of from
+`strip_sgr`, three procedures away. `strip_sgr` carries a comment saying not
+to use that name and why. The author, who may not read `QRPGLESRC/`, resolved
+it from `COMPILE_RC` alone by bisecting its own source, and then repeated the
+warning inside its own procedure rather than relying on the existing one.
+
+That last decision is the point, and it is a better statement of the rule than
+the two above it. **A warning only works where the mistake gets made.** Nobody
+reads a neighbouring procedure's comments before naming a local variable, so a
+note attached to the one procedure that already got it right protects nothing.
+Twice in one file in one day, from opposite sides of the wall, with the
+warning already present both times.
+
 ## iRPGUnit truncates your failure message at 64 characters
 
 `iEqual`, `nEqual` and `aEqual` declare `fieldName varchar(64)` with **no
@@ -252,3 +290,23 @@ someone is reading it to find out what broke. It is the same defect as every
 other silent truncation in this project, in the one place designed to explain
 the others. It was found while widening a helper's message parameter in the
 suites that exist to prove nothing is truncated at 64.
+
+## The PASE `system` utility eats the rest of your script
+
+Reported by the test author on 8 September 2026, after it cost three round
+trips. In a script fed over stdin —
+
+    ssh host 'bash -s' <<EOF
+      system "CHGJOB ..."
+      ...everything after this line silently vanishes...
+    EOF
+
+— the first `system` call **consumes stdin**, so the remainder of the script is
+swallowed as that command's input and never runs. Redirect every call:
+`system "..." < /dev/null`.
+
+It matters because of how it fails: no error, no output, and the commands that
+did not run leave no trace. That is indistinguishable from a connection
+problem, which is the most expensive diagnosis to be wrong about on this box —
+the project has already lost time to a dead IP looking exactly like a slow
+boot.

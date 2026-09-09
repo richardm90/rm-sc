@@ -110,14 +110,22 @@ source**, plus a cross-reference of field names and widths. Not part of it — a
 author grepping that listing for anything at all can pull back the copybooks it is forbidden to
 read.
 
-This was found twice, both times disclosed unprompted by the author that hit it: first grepping
-`RNF[0-9]{4}` for diagnostics, then grepping `created` and matching copybook header comments. The
-second correction is the important one, because the first version of this note said "do not grep
-for `RNF`", which reads as though some patterns are safe.
+This has now been found three times, every time disclosed unprompted by the author that hit it:
+first grepping `RNF[0-9]{4}` for diagnostics, then grepping `created` and matching copybook header
+comments, then grepping `COMPILE_RC|CPF|CPD` — which matched the author's own suite comments
+mentioning `CPD0085` and `CPF0906` and printed four listing lines back.
 
-**None are. Do not read a compile listing.** Take `COMPILE_RC` from the shell and nothing else;
-if a compile fails, bisect the source rather than reading the diagnostic. The wall is a
-discipline, not a mechanism, and a discipline survives only on its traps being named accurately.
+The second correction is the important one, because the first version of this note said "do not
+grep for `RNF`", which reads as though some patterns are safe. The third says why that matters
+even when nothing leaks: the author checked, found only its own source had come back, and
+reported it anyway — because "it was only my own source this time" is a judgement made *after*
+reading, and it is the same reasoning that failed the first two times. What is unsafe is the
+unanchored grep, not the pattern that happened to match.
+
+**None are. Do not read a compile listing.** Take `COMPILE_RC` from the shell and nothing else —
+anchored, `grep -E '^COMPILE_RC'`, so a pattern cannot wander into the listing. If a compile
+fails, bisect the source rather than reading the diagnostic. The wall is a discipline, not a
+mechanism, and a discipline survives only on its traps being named accurately.
 
 ## Build and test
 
@@ -148,7 +156,7 @@ it fails when something regresses *and* when something is fixed without the list
 makei build && BASELINE=<captured-upstream-dir> tools/verify.sh
 ```
 
-`tools/verify.sh` is the whole of it in one run: thirteen suites, the five harnesses, the gate
+`tools/verify.sh` is the whole of it in one run: thirteen suites, the harnesses, the gate
 and the fixture pack, with a time against each stage and `VERIFY_DONE` at the end. **Run it
 before every commit.** Three things about it are worth knowing before you do:
 
@@ -160,6 +168,15 @@ before every commit.** Three things about it are worth knowing before you do:
   `sc` invocations, each starting a JVM. Named stages run a subset while iterating
   (`tools/verify.sh suites gate`), but a partial run is not a verification and the script says
   so in its own output.
+
+- **Do not write the number of harnesses down anywhere.** This line said "the five harnesses"
+  and was wrong within a day of a sixth arriving - and the count had been misleading before
+  that, because two different fives were in circulation: the harnesses `verify.sh` runs, and the
+  scripts carrying the shared work-directory cleanup block. They never had the same membership
+  (`load-warning-test.sh` uses `mktemp -d` and carries no such block; `fidelity-gate.sh` carries
+  one and is not a harness). `verify.sh` prints its own stage list, so name the invariant rather
+  than the number: *every script here that keeps its work directory and names it by PID carries
+  the cleanup block.* That stays true when a seventh arrives.
 - **`BASELINE` is not defaulted.** It points at captured upstream output naming real services,
   so it lives outside this repository; the gate exits 2 with a clear message rather than
   guessing.

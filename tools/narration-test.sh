@@ -115,10 +115,16 @@ WORK="${WORK:-/tmp/narration-test.$$}"
 # number - an overridden WORK= belongs to whoever set it, and this cannot know
 # who that is.
 #
-# The same block appears in all five harnesses. Deliberately duplicated rather
-# than shared: each is deployed and run standalone, and a shared file would be
-# a dependency that costs more than the repetition does. Change one, change
-# all five.
+# The same block appears in every script in tools/ that keeps its work directory
+# and names it by PID. That is the membership rule, and it is stated as a
+# PROPERTY rather than as a count because the count was wrong twice over: this
+# line used to read "all five harnesses", and load-warning-test.sh is a harness
+# that has never carried the block while fidelity-gate.sh carries it and is not
+# a harness at all.
+#
+# Deliberately duplicated rather than shared: each is deployed and run
+# standalone, and a shared file would be a dependency that costs more than the
+# repetition does. Change one, change all of them.
 ls -dt /tmp/narration-test.* 2>/dev/null | tail -n +3 | while read -r stale; do
   owner="${stale##*.}"
   case "$owner" in

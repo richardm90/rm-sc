@@ -68,10 +68,17 @@ WORK="${WORK:-/tmp/fidelity-gate.$$}"
 # number - an overridden WORK= belongs to whoever set it, and this cannot know
 # who that is.
 #
-# The same block appears in all five harnesses. Deliberately duplicated rather
-# than shared: each is deployed and run standalone, and a shared file would be
-# a dependency that costs more than the repetition does. Change one, change
-# all five.
+# The same block appears in every script in tools/ that keeps its work directory
+# and names it by PID. THIS SCRIPT IS HALF OF WHY THAT IS PHRASED AS A PROPERTY.
+# It carries the block and it is NOT a harness - verify.sh runs it as the `gate`
+# stage - so "all five harnesses", which this line used to say, counted it as one
+# and was wrong here first. It was wrong at the other end too: load-warning-test.sh
+# is a harness and has never carried the block, taking a mktemp directory and a
+# trap instead.
+#
+# Deliberately duplicated rather than shared: each is deployed and run
+# standalone, and a shared file would be a dependency that costs more than the
+# repetition does. Change one, change all of them.
 ls -dt /tmp/fidelity-gate.* 2>/dev/null | tail -n +3 | while read -r stale; do
   owner="${stale##*.}"
   case "$owner" in
