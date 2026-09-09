@@ -27,6 +27,7 @@ ctl-opt bnddir('RMSCPGM':'RMSCDEPS');
 /include 'SCQRY_D.rpgleinc'
 /include 'SCMAIN_D.rpgleinc'
 /include 'include/RMIFS_D.rpgleinc'
+/include 'include/RMQCMD_D.rpgleinc'
 /include 'include/RMTOOLS_D.rpgleinc'
 /include 'include/PSDS_D.rpgleinc'
 /include QINCLUDE,TESTCASE
@@ -88,6 +89,102 @@ dcl-pr az_spec varchar(512);
   tail varchar(64) const;
 end-pr;
 
+
+//------------------------------------------------------------------------------
+// JOB-ORDER block - see the group header at the end of this suite. Global
+// declarations must precede the first subprocedure, so these live here rather
+// than beside the procedures that use them.
+//------------------------------------------------------------------------------
+
+// Two invented job names. This suite submits every job carrying either of
+// them and ends every one it finds, so neither may be a name anything else on
+// a machine could reasonably choose.
+dcl-c ORD_JOB_A const('RMSCSEQA');
+dcl-c ORD_JOB_B const('RMSCSEQB');
+
+// How many jobs are staged under ORD_JOB_B. Three rather than one so the
+// order WITHIN a criterion is visible as well as the order BETWEEN criteria.
+dcl-c ORD_B_JOBS const(3);
+
+// Long enough that the suite cannot outlive them, short enough that a job
+// leaked by a run killed before its teardown goes away on its own.
+dcl-c ORD_RUNS_FOR const('600');
+
+// How long to wait for a staged job to start, and to go away again
+dcl-c ORD_WAIT const(60);
+
+dcl-s g_ord_a      varchar(64);
+dcl-s g_ord_b      varchar(64) dim(ORD_B_JOBS);
+dcl-s g_ord_staged like(BOOLEAN_t) inz(false);
+dcl-s g_ord_tried  like(BOOLEAN_t) inz(false);
+
+dcl-pr ord_stage end-pr;
+dcl-pr ord_sweep end-pr;
+
+dcl-pr ord_end_all;
+  jobname varchar(10) const;
+end-pr;
+
+dcl-pr ord_submit varchar(64);
+  jobname varchar(10) const;
+  known   varchar(2048) const;
+  want    like(INTEGER_t) const;
+end-pr;
+
+dcl-pr ord_is_staged like(BOOLEAN_t);
+  qualified varchar(64) const;
+  jobname   varchar(10) const;
+end-pr;
+
+dcl-pr ord_number varchar(16);
+  qualified varchar(64) const;
+end-pr;
+
+dcl-pr ord_names varchar(512);
+  jobs likeds(SCQRY_JOBS_t);
+end-pr;
+
+dcl-pr ord_expected varchar(512);
+  with_a like(BOOLEAN_t) const;
+end-pr;
+
+dcl-pr ord_equal;
+  expected varchar(512) const;
+  actual   varchar(512) const;
+  ctx      varchar(500) const;
+end-pr;
+
+// A THIRD invented name, for the per-criterion overflow case. Its jobs are
+// staged separately from A and B and swept separately, because under
+// ORDER(*API) the overflow case may run either side of the others and a
+// shared sweep would let whichever staged second end the other's jobs.
+dcl-c ORD_JOB_C const('RMSCSEQC');
+
+// SCQRY_MAX_JOBS, and one more than it. Written as literals rather than
+// derived from the constant ON PURPOSE: deriving them would make a future
+// widening of the array silently stage that many jobs, and a suite that
+// submits five hundred jobs because a constant moved is a worse outcome than
+// one that goes red and says so. The case asserts the constant is still 32.
+dcl-c ORD_CAP    const(32);
+dcl-c ORD_C_JOBS const(33);
+
+dcl-s g_ord_c_first  varchar(64);
+dcl-s g_ord_c_set    varchar(2048);
+dcl-s g_ord_c_staged like(BOOLEAN_t) inz(false);
+dcl-s g_ord_c_tried  like(BOOLEAN_t) inz(false);
+
+dcl-pr ord_stage_c end-pr;
+
+dcl-pr ord_submit_many;
+  jobname varchar(10) const;
+  from    like(INTEGER_t) const;
+  want    like(INTEGER_t) const;
+end-pr;
+
+dcl-pr ord_known varchar(2048);
+  jobs likeds(SCQRY_JOBS_t);
+end-pr;
+
 //==============================================================================
 // Suite set-up and tear-down
 //==============================================================================
@@ -101,6 +198,11 @@ dcl-proc setUpSuite export;
 end-proc;
 
 dcl-proc tearDownSuite export;
+
+  // Unconditionally, whatever the tests did, and whether or not they were
+  // ever staged. A suite that leaves submitted jobs behind when it fails is
+  // worse than no suite.
+  ord_sweep();
 
   remove_fixtures();
 
@@ -4147,5 +4249,860 @@ dcl-proc test_check_row_two_short_criteria_control export;
          'the row ends with its closing bracket');
   assert((%scan('JOBNAME:' + v2: rtext) > 0):
          'and the second criterion is in the row whole');
+
+end-proc;
+
+//##############################################################################
+//##                                                                          ##
+//##  JOB-ORDER block - SCEXEC_jobs returns its list in ASCENDING JOB NUMBER  ##
+//##                                                                          ##
+//##############################################################################
+//
+// SCEXEC_jobs(def: jobs) returns the count of jobs satisfying a service's
+// check-alive criteria and fills jobs.name(1..count) with qualified names in
+// the form number/user/name. The ORDER of that list is becoming defined:
+// ascending job number. These cases were written before the change and are
+// red on it.
+//
+//------------------------------------------------------------------------------
+// WHAT IS NOT ASSERTED HERE, AND WHY
+//------------------------------------------------------------------------------
+//
+// NOT AGREEMENT WITH UPSTREAM. Upstream sc lists the same jobs in a different
+// order, measured to be Java HashSet iteration order over the job-name
+// strings - a function of the job NUMBERS, which change on every restart. It
+// reshuffles whenever a service is restarted, so it is not an order anything
+// can be implemented against and no case here asks for it. This is a
+// deliberate departure, not a defect.
+//
+// NOT "SORTED BY NUMBER" AS AGAINST "SORTED AS A STRING". An IBM i job number
+// is always six digits, zero-padded, so the two implementations give
+// identical results on every input that can exist. NO FIXTURE CAN SEPARATE
+// THEM and none below claims to. What the fixture guard DOES assert is the
+// premise: that every staged number is six characters wide. If that ever
+// stopped being true the two readings would part company, and the guard is
+// where that would be noticed.
+//
+//------------------------------------------------------------------------------
+// THE FIXTURE, AND WHY IT IS SHAPED THIS WAY
+//------------------------------------------------------------------------------
+//
+// The database's natural order is USUALLY ALREADY ASCENDING - three jobs
+// staged under one name were measured coming back in ascending number order.
+// So a service with a SINGLE criterion gives the same answer before and after
+// the change, and a case built on one alone would pass either way: watching
+// the change not crash rather than testing it (CLAUDE.md, "Test first").
+//
+// What separates them is TWO criteria where the criterion written FIRST
+// matches a job with a HIGHER number than the jobs the second criterion
+// matches. Today's answer visits the criteria in the order they are written,
+// so the high-numbered job comes FIRST; ascending order puts it LAST.
+//
+// Job numbers ascend with submission, so the suite stages the SECOND
+// criterion's three jobs FIRST and the FIRST criterion's single job LAST:
+//
+//   submitted   1st  2nd  3rd        4th
+//   name        B    B    B          A
+//   number      low  ..   ..         highest
+//
+//   check_alive: A,B     today ->  a,  b1, b2, b3
+//                        after ->  b1, b2, b3, a
+//
+// EVERY EXPECTED VALUE IS ABSOLUTE. The suite records which qualified name
+// each SBMJOB produced, in submission order, and the expected list is built
+// from that record - it is never computed by sorting anything. A test helper
+// that sorted would be a second implementation of the thing under test, and
+// this project has already had a helper share the defect it was covering.
+//
+// THE JOBS ARE THE SUITE'S OWN. Two invented names, submitted by this suite,
+// ended by it on the way out and swept on the way in. Nothing pre-existing on
+// the machine is counted, per docs/testing-notes.md - "Test against a service
+// the suite owns, not one the system owns".
+//
+// STAGED LAZILY, not in setUpSuite. Standing four jobs up costs a few seconds
+// and can fail; done in set-up, a failure would take every one of this
+// suite's eighty-odd unrelated cases with it. Done here, only the four cases
+// that need the jobs go red, and they say why.
+//
+//------------------------------------------------------------------------------
+// BASIS
+//------------------------------------------------------------------------------
+//
+//   MEASURED  the natural-order and separating-fixture shapes quoted above
+//             were measured on this machine before these cases were written.
+//   CHOSEN    ascending job number itself. Upstream's order is not
+//             implementable; this one is, and is a deliberate departure.
+//
+// 09/09/2026 - RM - written against the change, before the change
+//==============================================================================
+
+//------------------------------------------------------------------------------
+// ord_is_staged - is this qualified name one of ours?
+//
+// GUARDED FOR THE SAME REASON SCQRY.TEST's end_pgm_job is: the sweep ENDJOBs
+// whatever a lookup returns, and that lookup is code this project tests
+// rather than trusts. A lookup that started returning every active job would
+// otherwise have this suite end all of them.
+//------------------------------------------------------------------------------
+dcl-proc ord_is_staged;
+  dcl-pi *n like(BOOLEAN_t);
+    qualified varchar(64) const;
+    jobname   varchar(10) const;
+  end-pi;
+
+  dcl-s q varchar(64);
+  dcl-s w varchar(16);
+
+  q = %trimr(qualified);
+  w = '/' + %trimr(jobname);
+
+  if %len(q) <= %len(w);
+    return false;
+  endif;
+
+  return (%subst(q: %len(q) - %len(w) + 1) = w);
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// ord_number - the job number out of a qualified name
+//------------------------------------------------------------------------------
+dcl-proc ord_number;
+  dcl-pi *n varchar(16);
+    qualified varchar(64) const;
+  end-pi;
+
+  dcl-s q varchar(64);
+  dcl-s p like(INTEGER_t);
+
+  q = %trimr(qualified);
+  p = %scan('/': q);
+
+  if p < 2;
+    return '';
+  endif;
+
+  return %subst(q: 1: p - 1);
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// ord_names - the whole returned list as one value
+//
+// Plain concatenation, per docs/testing-notes.md: aEqual reads array element N
+// with element N-1's length, so comparing the list one subscript at a time
+// would compare truncated values. One joined string also makes a failure
+// legible - it says what the order WAS, not merely that element 3 differed.
+//------------------------------------------------------------------------------
+dcl-proc ord_names;
+  dcl-pi *n varchar(512);
+    jobs likeds(SCQRY_JOBS_t);
+  end-pi;
+
+  dcl-s i    like(INTEGER_t);
+  dcl-s list varchar(512) inz('');
+
+  for i = 1 to jobs.count;
+    if i > 1;
+      list += ', ';
+    endif;
+    list += %trim(jobs.name(i));
+  endfor;
+
+  if list = '';
+    return '(none)';
+  endif;
+
+  return list;
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// ord_expected - the answer, built from what was submitted and when
+//
+// NOT SORTED. The three B jobs are listed in submission order and the A job
+// last, because that is the order they were created in and job numbers ascend
+// with creation - which the fixture guard asserts rather than assumes.
+//------------------------------------------------------------------------------
+dcl-proc ord_expected;
+  dcl-pi *n varchar(512);
+    with_a like(BOOLEAN_t) const;
+  end-pi;
+
+  dcl-s k    like(INTEGER_t);
+  dcl-s list varchar(512) inz('');
+
+  for k = 1 to ORD_B_JOBS;
+    if k > 1;
+      list += ', ';
+    endif;
+    list += %trim(g_ord_b(k));
+  endfor;
+
+  if with_a;
+    list += ', ' + %trim(g_ord_a);
+  endif;
+
+  return list;
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// ord_equal - compare two lists, with the reasoning intact
+//
+// Its own helper rather than aEqualV because aEqualV's fieldName is
+// varchar(64) and iRPGUnit's own parameters are too: docs/testing-notes.md
+// records that anything longer is silently cut at 64, at exactly the moment
+// someone is reading it to find out what broke. assert's msgIfFalse is
+// varchar(16384), so routing the whole message through assert keeps it.
+//------------------------------------------------------------------------------
+dcl-proc ord_equal;
+  dcl-pi *n;
+    expected varchar(512) const;
+    actual   varchar(512) const;
+    ctx      varchar(500) const;
+  end-pi;
+
+  assert((%trimr(expected) = %trimr(actual)):
+         %trim(ctx) + ' - expected [' + %trim(expected) +
+         '] but was [' + %trim(actual) + ']');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// ord_submit - submit one job and say which one it turned out to be
+//
+// It waits for the job to be ACTIVE and then identifies it as the one of that
+// name NOT already accounted for in `known`. Identified rather than assumed:
+// a lookup returns jobs in whatever order it likes, and the whole subject
+// here is order, so nothing may be inferred from the order this comes back
+// in.
+//
+// It asserts the exact count of jobs carrying the name, not merely that one
+// more appeared. A job left active by a run killed before its teardown would
+// otherwise be silently absorbed into the fixture and make every count below
+// wrong by one.
+//------------------------------------------------------------------------------
+dcl-proc ord_submit;
+  dcl-pi *n varchar(64);
+    jobname varchar(10) const;
+    // 2048, not 512: the overflow fixture hands this the names of 32 jobs,
+    // and a set truncated on the way in would let this return a job that is
+    // already known as though it were the one just submitted.
+    known   varchar(2048) const;
+    want    like(INTEGER_t) const;
+  end-pi;
+
+  dcl-ds jobs likeds(SCQRY_JOBS_t) inz(*likeds);
+  dcl-ds qerr likeds(QCMD_ERR_t);
+  dcl-s cmd    varchar(256);
+  dcl-s ok     like(BOOLEAN_t);
+  dcl-s waited like(INTEGER_t) inz(0);
+  dcl-s i      like(INTEGER_t);
+  dcl-s n      like(INTEGER_t);
+  dcl-s cand   varchar(64);
+
+  // DLYJOB rather than a PASE delay: the job need only exist under a name of
+  // our choosing for the length of the run, and this needs nothing installed
+  // and nothing staged in the IFS.
+  cmd = 'SBMJOB CMD(DLYJOB DLY(' + ORD_RUNS_FOR + ')) JOB(' +
+        %trim(jobname) + ') JOBQ(QUSRNOMAX)';
+  ok = QCMD_exc(cmd: qerr);
+  assert(ok: 'submitted a staged job: ' + %trim(cmd));
+
+  dow waited < ORD_WAIT;
+    if SCQRY_jobs_by_name(jobname: '': jobs) >= want;
+      leave;
+    endif;
+    QCMD_exc('DLYJOB DLY(1)': qerr);
+    waited += 1;
+  enddo;
+
+  n = SCQRY_jobs_by_name(jobname: '': jobs);
+  iEqual(want: n: 'staged jobs active named ' + %trim(jobname));
+
+  for i = 1 to jobs.count;
+    cand = %trim(jobs.name(i));
+    if %scan('|' + %trim(cand) + '|': known) = 0;
+      return cand;
+    endif;
+  endfor;
+
+  assert(false: 'could not tell the job just submitted as ' +
+                %trim(jobname) + ' from the ones already staged - active: ' +
+                ord_names(jobs) + ', already known: ' + %trim(known));
+
+  return '';
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// ord_end_all - end every staged job of one name, and WAIT for it to go
+//
+// ENDJOB returns when the request is made, not when the job has ended. The
+// same shortcut made SCLIFE.TEST flaky; docs/testing-notes.md has it.
+//------------------------------------------------------------------------------
+dcl-proc ord_end_all;
+  dcl-pi *n;
+    jobname varchar(10) const;
+  end-pi;
+
+  dcl-ds jobs likeds(SCQRY_JOBS_t) inz(*likeds);
+  dcl-ds qerr likeds(QCMD_ERR_t);
+  dcl-s i      like(INTEGER_t);
+  dcl-s waited like(INTEGER_t) inz(0);
+  dcl-s name   varchar(64);
+
+  // ENDS AND RE-QUERIES IN ONE LOOP, rather than ending once and then
+  // waiting. A lookup fills a structure holding SCQRY_MAX_JOBS names, so a
+  // single pass CANNOT SEE more jobs than that - and the overflow fixture
+  // stages one more than that on purpose. Written the other way round, this
+  // ended the 32 it could see, waited sixty seconds for a thirty-third it
+  // had never asked about, and left it running on the machine. Measured, on
+  // the first run of that fixture.
+  //
+  // Re-ending a job that is already ending is harmless; the message is
+  // ignored, as every other command in this sweep's is.
+  dow waited < ORD_WAIT;
+    if SCQRY_jobs_by_name(jobname: '': jobs) = 0;
+      return;
+    endif;
+
+    for i = 1 to jobs.count;
+      name = %trim(jobs.name(i));
+      if ord_is_staged(name: jobname);
+        QCMD_exc('ENDJOB JOB(' + name + ') OPTION(*IMMED)': qerr);
+      endif;
+    endfor;
+
+    QCMD_exc('DLYJOB DLY(1)': qerr);
+    waited += 1;
+  enddo;
+
+  assert((SCQRY_jobs_by_name(jobname: '': jobs) = 0):
+         'staged jobs named ' + %trim(jobname) + ' did not end within ' +
+         %char(ORD_WAIT) + 's - end them by hand before the next run, or ' +
+         'the fixture counts below will be wrong by however many are left');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// ord_sweep - both names, unconditionally
+//------------------------------------------------------------------------------
+dcl-proc ord_sweep;
+
+  ord_end_all(ORD_JOB_A);
+  ord_end_all(ORD_JOB_B);
+  ord_end_all(ORD_JOB_C);
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// ord_stage - stand the four jobs up, once per run
+//
+// B FIRST AND A LAST, which is the whole of the fixture: job numbers ascend
+// with submission, so the job the first criterion matches carries the highest
+// number.
+//------------------------------------------------------------------------------
+dcl-proc ord_stage;
+
+  dcl-s k     like(INTEGER_t);
+  dcl-s known varchar(512);
+
+  if g_ord_staged;
+    return;
+  endif;
+
+  // A second attempt after a failed one would cost another minute of waiting
+  // and fail the same way, and the reader would then have four failures to
+  // read instead of one.
+  assert((not g_ord_tried):
+         'the staged jobs could not be created earlier in this run - ' +
+         'whichever ordering case ran first says why');
+  g_ord_tried = true;
+
+  // Debris from a run killed before its teardown. ITS OWN TWO NAMES ONLY -
+  // ord_sweep also ends the overflow fixture's jobs, and under ORDER(*API)
+  // this may run after ord_stage_c has staged them.
+  ord_end_all(ORD_JOB_A);
+  ord_end_all(ORD_JOB_B);
+
+  known = '|';
+  for k = 1 to ORD_B_JOBS;
+    g_ord_b(k) = ord_submit(ORD_JOB_B: known: k);
+    known += %trim(g_ord_b(k)) + '|';
+  endfor;
+
+  g_ord_a = ord_submit(ORD_JOB_A: '|': 1);
+
+  g_ord_staged = true;
+
+end-proc;
+
+//==============================================================================
+// FIXTURE GUARD - the four staged jobs, and the premise the others rest on
+//
+// Asserts what the ordering cases below would otherwise assume:
+//
+//   - every staged job number is SIX characters, which is what makes sorting
+//     the qualified name as a string and sorting by job number as a number
+//     the same operation. Nothing here can separate those two readings and
+//     nothing claims to; this is the assertion that says WHY.
+//   - the numbers ascend with submission, so the A job - submitted last, and
+//     matched by the FIRST criterion below - carries the HIGHEST number.
+//
+// The second is the one that can genuinely go wrong: the system's job number
+// counter wraps at 999999, and a run that straddled the wrap would make the
+// separating case below fail for a reason that has nothing to do with the
+// code. It fails HERE instead, saying so.
+//
+// SEPARATES NOTHING about ordering, and is not meant to. It is green today
+// and green after the change.
+//==============================================================================
+
+dcl-proc test_jobs_fixture_numbers_ascend export;
+
+  dcl-s k   like(INTEGER_t);
+  dcl-s num varchar(16);
+  dcl-s prv varchar(16) inz('');
+
+  ord_stage();
+
+  for k = 1 to ORD_B_JOBS;
+    iEqual(6: %len(ord_number(g_ord_b(k))):
+           'FIXTURE: job number is six digits');
+  endfor;
+  iEqual(6: %len(ord_number(g_ord_a)):
+         'FIXTURE: job number is six digits');
+
+  for k = 1 to ORD_B_JOBS;
+    num = ord_number(g_ord_b(k));
+    assert((num > prv):
+           'FIXTURE: staged job numbers ascend with submission - got ' +
+           %trim(g_ord_b(k)) + ' after ' + %trim(prv) +
+           '. If this failed the system job number counter wrapped ' +
+           'during the run; re-run it');
+    prv = num;
+  endfor;
+
+  num = ord_number(g_ord_a);
+  assert((num > prv):
+         'FIXTURE: the job the FIRST criterion matches was submitted LAST ' +
+         'and so carries the HIGHEST number - got ' + %trim(g_ord_a) +
+         ' after ' + %trim(prv) + '. Without that the separating case ' +
+         'below cannot separate anything');
+
+end-proc;
+
+//==============================================================================
+// ONE CRITERION - the three jobs come back in ascending number order
+//
+// GREEN TODAY, and said plainly: the database's natural order for three jobs
+// staged under one name was measured as already ascending, so this case
+// SEPARATES NOTHING from today's unordered behaviour.
+//
+// It is here because it is the working case, and because two of the rival
+// readings of the change fail it where they pass everything else:
+//
+//   - sorted the WRONG WAY round. A descending sort satisfies any assertion
+//     that only checks "the list is sorted"; this one names the direction.
+//   - a sort that DROPS or DUPLICATES an entry. The count is asserted as well
+//     as the order, and the order is asserted as an exact list rather than as
+//     a property.
+//==============================================================================
+
+dcl-proc test_jobs_one_criterion_ascends export;
+
+  dcl-ds def  likeds(SCDEF_t)      inz(*likeds);
+  dcl-ds jobs likeds(SCQRY_JOBS_t) inz(*likeds);
+  dcl-s  n    like(INTEGER_t);
+
+  ord_stage();
+
+  assert(pt_load_def('ordone.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: ' + ORD_JOB_B + LF: def): 'load');
+
+  iEqual(1: def.criteria_count: 'one criterion');
+
+  n = SCEXEC_jobs(def: jobs);
+
+  iEqual(ORD_B_JOBS: n: 'the three staged jobs, and only those');
+  iEqual(ORD_B_JOBS: jobs.count: 'the structure agrees with the return value');
+
+  ord_equal(ord_expected(false): ord_names(jobs):
+            'one criterion, three jobs, ascending job number - a descending ' +
+            'sort fails here and passes every "is it sorted" test');
+
+end-proc;
+
+//==============================================================================
+// TWO CRITERIA - THE SEPARATING CASE
+//
+// RED TODAY. The first criterion matches the job submitted LAST, so today's
+// answer - criteria in the order they are written, jobs in whatever order the
+// database returned them - puts the highest-numbered job FIRST:
+//
+//   today   a,  b1, b2, b3
+//   after   b1, b2, b3, a
+//
+// This is the only shape in this suite where the two readings disagree, and
+// every other case in this block gives the same answer either way. If this
+// case is ever weakened - to "the list is sorted", or to a single criterion -
+// the block stops testing the change and starts watching it not crash.
+//
+// THE COUNT IS ASSERTED TOO. A sort that also deduplicated, or one that
+// dropped an entry off an end, would satisfy an order-only assertion; four
+// distinct jobs are staged and four must come back.
+//==============================================================================
+
+dcl-proc test_jobs_ascend_across_criteria export;
+
+  dcl-ds def  likeds(SCDEF_t)      inz(*likeds);
+  dcl-ds jobs likeds(SCQRY_JOBS_t) inz(*likeds);
+  dcl-s  n    like(INTEGER_t);
+
+  ord_stage();
+
+  // A FIRST and B SECOND, deliberately. Written the other way round the
+  // criteria would already be visited low-number-first and today's code would
+  // return the ascending answer by accident.
+  assert(pt_load_def('ordtwo.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: ' + ORD_JOB_A + ',' + ORD_JOB_B + LF: def): 'load');
+
+  iEqual(2: def.criteria_count: 'two criteria');
+
+  n = SCEXEC_jobs(def: jobs);
+
+  iEqual(ORD_B_JOBS + 1: n: 'all four staged jobs');
+  iEqual(ORD_B_JOBS + 1: jobs.count:
+         'the structure agrees with the return value');
+
+  ord_equal(ord_expected(true): ord_names(jobs):
+            'the job matched by the FIRST criterion has the HIGHEST number ' +
+            'and must be listed LAST - today it is listed first, which is ' +
+            'the whole of what this case separates');
+
+end-proc;
+
+//==============================================================================
+// A JOB MATCHED BY TWO CRITERIA IS LISTED ONCE, AND STILL IN ORDER
+//
+// RED TODAY, on the same shape as the case above, with the deduplication
+// question added: the A criterion is written twice, so the A job satisfies
+// criterion 1 and criterion 3.
+//
+//   today   a,  b1, b2, b3      (deduplicated, unordered)
+//   after   b1, b2, b3, a
+//
+// FOUR, NOT FIVE, and that number is the assertion. Deduplication exists
+// today - test_jobs_deduplicated covers it for a repeated PORT criterion -
+// and a sort dropped in front of, behind, or instead of it could lose it
+// without changing the ORDER of anything. An order-only assertion would not
+// notice; a count-only assertion would not notice the order. Both are here.
+//==============================================================================
+
+dcl-proc test_jobs_repeated_criterion_listed_once_in_order export;
+
+  dcl-ds def  likeds(SCDEF_t)      inz(*likeds);
+  dcl-ds jobs likeds(SCQRY_JOBS_t) inz(*likeds);
+  dcl-s  n    like(INTEGER_t);
+
+  ord_stage();
+
+  assert(pt_load_def('orddup.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: ' + ORD_JOB_A + ',' + ORD_JOB_B + ',' + ORD_JOB_A + LF:
+    def): 'load');
+
+  iEqual(3: def.criteria_count: 'three criteria, two of them the same');
+
+  n = SCEXEC_jobs(def: jobs);
+
+  iEqual(ORD_B_JOBS + 1: n:
+         'four jobs, not five - the repeated criterion adds nothing');
+  iEqual(ORD_B_JOBS + 1: jobs.count:
+         'the structure agrees with the return value');
+
+  ord_equal(ord_expected(true): ord_names(jobs):
+            'a job matched by two criteria is listed once, and the list is ' +
+            'still in ascending job number - a sort that deduplicated, or ' +
+            'one that lost the deduplication, fails one of these two');
+
+end-proc;
+
+//==============================================================================
+// PER-CRITERION OVERFLOW - the cap keeps the OLDEST jobs, in order
+//
+// SCQRY_JOBS_t holds SCQRY_MAX_JOBS names, 32 today. A criterion matching
+// more than that overflows, and the truncation happens inside the fetch -
+// before any merged list exists - so which jobs survive cannot be decided by
+// sorting afterwards. It is decided by the order the rows arrive in. Rows now
+// arrive lowest job number first, so the cap keeps the OLDEST 32.
+//
+// THE FIXTURE IS 33 JOBS UNDER ONE NAME. The first 32 are staged and RECORDED
+// - a lookup of exactly 32 returns all of them, so the recorded set is exact
+// - and the 33rd is submitted afterwards.
+//
+// FOUR ASSERTIONS, each ruling out a different wrong answer:
+//
+//   count is exactly 32        the cap holds at all
+//   the first-submitted job
+//     is kept and listed 1st   rules out a cap that kept the NEWEST 32,
+//                              which ascends just as prettily
+//   ascends at every step      rules out an ordering that survives four jobs
+//                              and not thirty-two
+//   every job kept is one of
+//     the 32 RECORDED          rules out a cap that kept an arbitrary 32.
+//                              Thirty-two distinct ascending names, all drawn
+//                              from a set of 32, can only be that whole set,
+//                              so this pins the kept set exactly
+//
+//------------------------------------------------------------------------------
+// THE ONE THING THIS CASE CANNOT VERIFY, SAID PLAINLY
+//------------------------------------------------------------------------------
+//
+// That the 33rd job is really there. EVERY job lookup this suite has fills a
+// structure holding SCQRY_MAX_JOBS names, so all of them answer 32 whether 32
+// or 33 jobs of that name are active. The suite cannot count past its own cap,
+// and it cannot name the job the cap drops, because the dropped job is by
+// definition the one no lookup returns.
+//
+// So the residual risk is exactly this: if the 33rd SBMJOB were accepted and
+// the job never went active, there would be no overflow, the four assertions
+// above would all hold, and the case would report a pass having tested
+// nothing. It is thin - the queue is *NOMAX, the same command started the 32
+// jobs before it milliseconds earlier, and the submit itself is asserted - but
+// it is real and it is not asserted away.
+//
+// TWO WAYS TO CLOSE IT, neither taken, both recorded so the next person does
+// not have to find them again:
+//
+//   - END one of the 32 and look again. If a 33rd existed the lookup still
+//     returns 32, one of them a name not in the recorded set; if it did not,
+//     it returns 31. That both proves and NAMES the extra job - but it also
+//     destroys the overflow it just proved, so the assertions above would have
+//     to run before it and would still be about the unproved state.
+//   - READ THE JOB NUMBER OUT OF THE SUBMIT. SBMJOB's completion message
+//     names the job it created; if the command helper surfaces completion
+//     messages on success as well as failure, the 33rd job's identity comes
+//     from the submit rather than from a lookup, and the absence assertion
+//     can be made directly. Whether it does was not established.
+//
+// WHAT IS NOT ASSERTED AT ALL: which 32 survive when more than 32 match
+// ACROSS criteria. The merge fills from each criterion in turn, so that is a
+// property of the criterion order rather than of the job numbers, and it is
+// documented rather than fixed. This case uses ONE criterion so it cannot be
+// quietly asserting the undocumented half.
+//
+// 09/09/2026 - RM - written after the fix, on a path the fix created
+//==============================================================================
+
+//------------------------------------------------------------------------------
+// ord_known - every name in a list, delimited, for membership tests
+//
+// 2048 wide because 32 qualified names do not fit in 512, and a set truncated
+// on the way in would make a membership test answer "not one of ours" for a
+// job that is - the assertion below failing for a reason that is entirely the
+// helper's.
+//------------------------------------------------------------------------------
+dcl-proc ord_known;
+  dcl-pi *n varchar(2048);
+    jobs likeds(SCQRY_JOBS_t);
+  end-pi;
+
+  dcl-s i    like(INTEGER_t);
+  dcl-s list varchar(2048) inz('|');
+
+  for i = 1 to jobs.count;
+    list += %trim(jobs.name(i)) + '|';
+  endfor;
+
+  return list;
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// ord_submit_many - fill a name up to `want` active jobs
+//
+// Submits without identifying each one, which is the point: only two of the
+// staged jobs are ever named in an assertion, and identifying all of them
+// would cost a lookup apiece to no purpose.
+//
+// The submits are COUNTED rather than asserted one at a time, so a fixture
+// this size contributes two assertions rather than thirty-two and the suite's
+// assertion count still means something. A submit that was refused shows up
+// in the count assertion that follows it either way.
+//
+// `want` MUST NOT EXCEED SCQRY_MAX_JOBS: the count it verifies comes from a
+// lookup that cannot return more than that, so asking for more would wait out
+// the timeout and then fail on a number that was never obtainable. Measured,
+// by asking for 33.
+//------------------------------------------------------------------------------
+dcl-proc ord_submit_many;
+  dcl-pi *n;
+    jobname varchar(10) const;
+    from    like(INTEGER_t) const;
+    want    like(INTEGER_t) const;
+  end-pi;
+
+  dcl-ds jobs likeds(SCQRY_JOBS_t) inz(*likeds);
+  dcl-ds qerr likeds(QCMD_ERR_t);
+  dcl-s cmd    varchar(256);
+  dcl-s k      like(INTEGER_t);
+  dcl-s bad    like(INTEGER_t) inz(0);
+  dcl-s waited like(INTEGER_t) inz(0);
+  dcl-s n      like(INTEGER_t);
+
+  cmd = 'SBMJOB CMD(DLYJOB DLY(' + ORD_RUNS_FOR + ')) JOB(' +
+        %trim(jobname) + ') JOBQ(QUSRNOMAX)';
+
+  for k = from + 1 to want;
+    if not QCMD_exc(cmd: qerr);
+      bad += 1;
+    endif;
+  endfor;
+
+  iEqual(0: bad: 'SBMJOBs refused while staging ' + %trim(jobname));
+
+  dow waited < ORD_WAIT;
+    if SCQRY_jobs_by_name(jobname: '': jobs) >= want;
+      leave;
+    endif;
+    QCMD_exc('DLYJOB DLY(1)': qerr);
+    waited += 1;
+  enddo;
+
+  n = SCQRY_jobs_by_name(jobname: '': jobs);
+  iEqual(want: n: 'staged jobs active named ' + %trim(jobname));
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// ord_stage_c - 33 jobs under one name, 32 of them recorded
+//
+// Sweeps ONLY its own name, and ord_stage sweeps only A and B. Sharing one
+// sweep between them would have whichever staged second end the other's jobs,
+// and under ORDER(*API) which runs second is a coin toss - a failure that
+// arrives on some runs and not others.
+//------------------------------------------------------------------------------
+dcl-proc ord_stage_c;
+
+  dcl-ds jobs likeds(SCQRY_JOBS_t) inz(*likeds);
+  dcl-ds qerr likeds(QCMD_ERR_t);
+  dcl-s cmd varchar(256);
+  dcl-s ok  like(BOOLEAN_t);
+
+  if g_ord_c_staged;
+    return;
+  endif;
+
+  assert((not g_ord_c_tried):
+         'the 33 staged jobs could not be created earlier in this run - ' +
+         'the overflow case says why');
+  g_ord_c_tried = true;
+
+  ord_end_all(ORD_JOB_C);
+
+  // The first one, identified: it is the only job of that name at this
+  // point, and it is the job the cap must KEEP and list first.
+  g_ord_c_first = ord_submit(ORD_JOB_C: '|': 1);
+
+  // Up to a full structure's worth, unidentified but counted.
+  ord_submit_many(ORD_JOB_C: 1: ORD_CAP);
+
+  // The recorded set, taken while it is still exactly obtainable. One more
+  // job than this and no lookup here can see the difference.
+  iEqual(ORD_CAP: SCQRY_jobs_by_name(ORD_JOB_C: '': jobs):
+         'the 32 recorded before the 33rd is submitted');
+  g_ord_c_set = ord_known(jobs);
+
+  // AND ONE MORE, WHICH NOTHING IN THIS SUITE CAN SEE - see the case header,
+  // "the one thing this case cannot verify".
+  cmd = 'SBMJOB CMD(DLYJOB DLY(' + ORD_RUNS_FOR + ')) JOB(' + ORD_JOB_C +
+        ') JOBQ(QUSRNOMAX)';
+  ok = QCMD_exc(cmd: qerr);
+  assert(ok: 'submitted the 33rd job, the one that overflows: ' + %trim(cmd));
+
+  // Nothing can be polled for, so it is given the time the other 32 needed
+  // rather than being asked about.
+  QCMD_exc('DLYJOB DLY(2)': qerr);
+
+  g_ord_c_staged = true;
+
+end-proc;
+
+dcl-proc test_jobs_overflowing_criterion_keeps_the_oldest export;
+
+  dcl-ds def  likeds(SCDEF_t)      inz(*likeds);
+  dcl-ds jobs likeds(SCQRY_JOBS_t) inz(*likeds);
+  dcl-s  n    like(INTEGER_t);
+  dcl-s  i    like(INTEGER_t);
+  dcl-s  bad  like(INTEGER_t) inz(0);
+  dcl-s  num  varchar(16);
+  dcl-s  prv  varchar(16) inz('');
+  dcl-s  why  varchar(256) inz('');
+
+  ord_stage_c();
+
+  iEqual(ORD_CAP: SCQRY_MAX_JOBS: 'cap moved - restage this case for it');
+
+  assert(pt_load_def('ordcap.yaml':
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: ' + ORD_JOB_C + LF: def): 'load');
+
+  n = SCEXEC_jobs(def: jobs);
+
+  iEqual(ORD_CAP: n: '33 jobs match, 32 come back');
+  iEqual(ORD_CAP: jobs.count: 'the structure agrees with the return value');
+
+  ord_equal(g_ord_c_first: %trim(jobs.name(1)):
+            'the FIRST-submitted job is kept and listed first - a cap that ' +
+            'kept the NEWEST 32 would ascend just as prettily and fail only ' +
+            'here');
+
+  for i = 1 to jobs.count;
+    num = ord_number(%trim(jobs.name(i)));
+    if num <= prv;
+      bad = i;
+      leave;
+    endif;
+    prv = num;
+  endfor;
+
+  // BUILT BEFORE THE ASSERT, not inside it. Both of assert's arguments are
+  // evaluated before it is called, so naming jobs.name(bad) in the message
+  // would subscript with zero on every PASSING run and end the job.
+  if bad > 0;
+    why = ' - first descent at element ' + %char(bad) + ', which is ' +
+          %trim(ord_number(%trim(jobs.name(bad)))) + ' after ' + %trim(prv);
+  else;
+    why = '';
+  endif;
+
+  assert((bad = 0):
+         'all 32 kept jobs ascend by job number at every step' + %trim(why) +
+         '. Four jobs ascending does not prove thirty-two do');
+
+  bad = 0;
+  for i = 1 to jobs.count;
+    if %scan('|' + %trim(jobs.name(i)) + '|': g_ord_c_set) = 0;
+      bad = i;
+      leave;
+    endif;
+  endfor;
+
+  if bad > 0;
+    why = ' - element ' + %char(bad) + ' is ' + %trim(jobs.name(bad)) +
+          ', which was submitted after the first 32';
+  else;
+    why = '';
+  endif;
+
+  assert((bad = 0):
+         'every job kept is one of the 32 OLDEST' + %trim(why) +
+         '. With the count and the ascent above, this pins the kept set ' +
+         'exactly: the cap keeps the oldest, not an arbitrary 32');
 
 end-proc;

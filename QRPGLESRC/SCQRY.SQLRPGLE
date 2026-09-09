@@ -148,7 +148,14 @@ dcl-proc SCQRY_jobs_on_port export;
       FROM QSYS2.NETSTAT_JOB_INFO
      WHERE LOCAL_PORT = :port_l
        AND REMOTE_PORT = 0
-       AND JOB_NAME IS NOT NULL;
+       AND JOB_NAME IS NOT NULL
+    -- ORDER BY, and it earns its place twice. It makes the list the caller
+    -- gets deterministic rather than whatever order the service happened to
+    -- return; and because the fetch loop stops at SCQRY_MAX_JOBS, it also
+    -- decides WHICH jobs survive when more match than the array holds - the
+    -- lowest-numbered, which are the oldest, rather than an arbitrary subset.
+    -- Sorting after the truncation could not have fixed that second part.
+     ORDER BY JOB_NAME;
 
   exec sql OPEN c_port;
   if sqlcode <> 0;
@@ -208,7 +215,8 @@ dcl-proc SCQRY_jobs_by_name export;
       SELECT JOB_NAME
         FROM TABLE(QSYS2.ACTIVE_JOB_INFO(
                      JOB_NAME_FILTER        => :name_l,
-                     SUBSYSTEM_LIST_FILTER  => :sbs_l));
+                     SUBSYSTEM_LIST_FILTER  => :sbs_l))
+     ORDER BY JOB_NAME;
 
     exec sql OPEN c_jobsbs;
     if sqlcode <> 0;
@@ -231,7 +239,8 @@ dcl-proc SCQRY_jobs_by_name export;
   exec sql
     DECLARE c_job CURSOR FOR
     SELECT JOB_NAME
-      FROM TABLE(QSYS2.ACTIVE_JOB_INFO(JOB_NAME_FILTER => :name_l));
+      FROM TABLE(QSYS2.ACTIVE_JOB_INFO(JOB_NAME_FILTER => :name_l))
+     ORDER BY JOB_NAME;
 
   exec sql OPEN c_job;
   if sqlcode <> 0;
@@ -281,7 +290,8 @@ dcl-proc SCQRY_jobs_by_pgm export;
     SELECT JOB_NAME
       FROM TABLE(QSYS2.ACTIVE_JOB_INFO()) X
      WHERE X.FUNCTION_TYPE = 'PGM'
-       AND UPPER(TRIM(X.FUNCTION)) = UPPER(:pgm_l);
+       AND UPPER(TRIM(X.FUNCTION)) = UPPER(:pgm_l)
+     ORDER BY JOB_NAME;
 
   exec sql OPEN c_pgm;
   if sqlcode <> 0;

@@ -147,7 +147,31 @@ STEP8_SYSTEM="${STEP8_SYSTEM:-system_admin1 system_telnet}"
 #   file        "Raw YAML passthrough" - and Risks relies on it: "scr file <svc>
 #               prints the raw file so the source of truth stays inspectable"
 #   scrunattrs  "SCOMMANDER_* vars from the running job", which is what it emits
-INTENTIONAL="file scrunattrs"
+#   perfinfo    TWO differences, and BOTH are now settled - it sat in
+#               UNDECIDED until 9 September 2026 because only one was.
+#
+#               Three lines per job: the thread-resources-affinity pair and
+#               the resources affinity group. Upstream scrapes DSPJOB
+#               OPTION(*RUNA) for them; RMSC reads QUSRJOBI, which does not
+#               carry them (IBM's reference for the API does not contain the
+#               word "affinity"). Richard's decision, 8 September 2026.
+#
+#               The order of the job blocks. Upstream's is Java HashSet
+#               iteration order over the job-name strings - measured, by
+#               predicting its output exactly on three job sets from
+#               String.hashCode and the HashMap bucket layout. It is a
+#               function of the job numbers, so it reshuffles on every
+#               restart and there is no order there to match. RMSC sorts
+#               ascending by job number instead. Same answer as the conflict
+#               block members in 7791266, for the same reason.
+#
+#               docs/parity.md carries both, with the evidence.
+#
+#               STILL per-operation, not per-line: this list accepts any
+#               perfinfo difference, not only those two. A THIRD would pass
+#               unnoticed. That is the open granularity item on the fixture
+#               pack, and this is one of the entries it should cover.
+INTENTIONAL="file scrunattrs perfinfo"
 
 # Divergences the plan does NOT settle either way. These need a decision before
 # step 8 can be called complete. Byte-exactness is required for check only, so
@@ -156,27 +180,7 @@ INTENTIONAL="file scrunattrs"
 #   info        plan says only "Formatted definition dump"
 #   jobinfo     plan says only "Active job names"
 #   loginfo     plan says only "Log paths, sizes, spooled files"
-#   perfinfo    TWO differences, and only one of them is settled. RMSC now
-#               reports eleven of the fourteen job attributes upstream prints;
-#               the three it omits are the affinity values, which QUSRJOBI
-#               does not carry and which RMSC will not scrape DSPJOB to get -
-#               Richard's decision, 8 September 2026, evidence in
-#               docs/parity.md. That part IS decided.
-#
-#               The other is not: upstream lists a service's JOBS in the
-#               opposite order to RMSC. Pre-existing, shared with jobinfo,
-#               stable on both sides, and the cause has NOT been established -
-#               only one service on this machine has more than one job, so
-#               nothing available separates the candidate explanations.
-#
-#               It sits here rather than in INTENTIONAL for that reason. This
-#               gate classifies per operation, so INTENTIONAL would have
-#               sanctioned both differences at once, and INTENTIONAL is the
-#               list that lets the run eventually report every difference as
-#               intentional and listed. An unexplained ordering difference
-#               must not be able to hide inside that sentence. It moves when
-#               the ordering is settled, not before.
-UNDECIDED="info jobinfo loginfo perfinfo"
+UNDECIDED="info jobinfo loginfo"
 
 mkdir -p "$WORK"
 pass=0; bydesign=0; undecided_n=0; unexpected=0

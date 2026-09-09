@@ -65,7 +65,7 @@ that step asks for.
 | `info` | live differential | **undecided** | omits the environment-variables block and the closing separator, adds a `Group:` line, and shows a resolved working directory rather than the raw one |
 | `jobinfo` | live differential | **undecided** | upstream prints a header then indented jobs; RMSC prints one `name: job` line each |
 | `loginfo` | live differential | **undecided** | one trailing blank line, nothing else |
-| `perfinfo` | live differential | **undecided** | two differences: three affinity lines per job, which is settled and deliberate; and the order of the job blocks, which is not — see below |
+| `perfinfo` | live differential | **by design** | two differences, both settled: three affinity lines per job that no API carries, and the order of the job blocks, which upstream draws from a hash and RMSC sorts — see below |
 | `start` | not gated | — | state-changing; `SCLIFE.TEST` covers the lifecycle against a service it creates and removes |
 | `stop` | not gated | — | as above |
 | `kill` | not gated | — | as above |
@@ -360,7 +360,7 @@ from the command line, and all three were found by hand rather than by any test,
 procedure is local to its module and no suite can call it. That is the argument for the harness
 coverage that now exists, and it is a better argument than any of the individual fixes.
 
-### A SECOND difference, found by the rewrite and NOT caused by it — job order
+### The job order — SETTLED 9 September 2026, and there was nothing to reproduce
 
 Comparing label-by-label after the rewrite, the line counts agree exactly once the affinity lines
 are allowed for (66 against 58 on a two-job service, four omitted lines per job). But the blocks
@@ -384,9 +384,35 @@ upstream evaluates the criteria in the other order, sorts, or deduplicates into 
 reorders, **has not been established** — only one service on this machine has more than one job,
 so there is no case available that separates those hypotheses.
 
-Not fixed, deliberately: a fix would be guessing at a rule from a single two-element observation,
-which is the mistake this project keeps writing down. It needs a fixture with a service of three
-or more jobs and more than one criterion, which the fixture pack could stage.
+**The fixtures were staged and the question is answered: upstream's order is Java `HashSet`
+iteration order over the qualified job-name strings.** Computing `String.hashCode`, HashMap's
+spread function and the bucket layout at capacity 16 predicts upstream's output *exactly* on
+three independent job sets — a three-job service, a four-job service with two criteria, and the
+original two-job one.
+
+Two fixtures were needed because a two-job service cannot separate the candidates. A single
+criterion over three jobs killed "upstream sorts": its answer was neither ascending, descending,
+nor the database's natural order. A pair of definitions with the same two criteria written in
+*opposite* orders killed "upstream evaluates criteria in the other order": both produced
+identical output.
+
+**So there is no order to match.** That sequence is a function of the job NUMBERS, which change
+every time a service restarts, so it reshuffles on every restart. Reproducing it would mean
+reimplementing `String.hashCode` and HashMap's bucket layout to copy a shuffle. This is the same
+finding as the conflict-block member order in `7791266`, and it gets the same answer.
+
+**RMSC sorts instead, ascending by job number**, which is a defined order rather than the
+incidental one it had before — it was previously whichever criterion appeared first in the YAML,
+which is a property of the definition rather than of the jobs. Every job query also carries
+`ORDER BY JOB_NAME` now, which matters beyond tidiness: the fetch loop stops at
+`SCQRY_MAX_JOBS`, so ordering in the database is what decides *which* jobs survive an overflow —
+the lowest-numbered, which are the oldest, rather than an arbitrary subset. Sorting after the
+truncation could not have fixed that.
+
+Two limits recorded rather than fixed. Which 32 survive when more than 32 match **across
+criteria** is undefined, because the merge fills from each criterion in turn. And the
+specification is *ascending job number*, not *oldest first*; those differ after the job-number
+counter wraps at 999999.
 
 **It also means `perfinfo` is not "matching except three lines".** It matches except three lines
 per job AND the order of the job blocks. The gate cannot see the difference between those two

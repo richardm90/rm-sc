@@ -140,7 +140,51 @@ dcl-proc SCEXEC_jobs export;
     endfor;
   endfor;
 
+  // ORDERED, ascending by job number, and this is the ONE place it can be
+  // done: every criterion is a separate query, so each arrives sorted but the
+  // merged list is not. Without this the order is whichever criterion was
+  // written first, which is a property of the YAML rather than of the jobs.
+  //
+  // NOT to match upstream. Upstream's order is Java HashSet iteration order
+  // over the job-name strings - measured 9 September 2026 by computing
+  // String.hashCode and the HashMap bucket layout and predicting its output
+  // exactly on three independent job sets. That is a function of the job
+  // NUMBERS, which change on every restart, so it is a shuffle rather than an
+  // order and there is nothing there to reproduce. docs/parity.md records it.
+  //
+  // A NATIVE comparison is correct here, unlike the service-name sort in
+  // SCCOLL which needed a UTF-8 key: the first six characters of a qualified
+  // job name are always digits and job numbers are unique, so every
+  // comparison resolves inside the digits, and digits ascend the same way in
+  // EBCDIC as in ASCII. The trap that caught SCCOLL is digits against
+  // letters, and no comparison here reaches one.
+  sort_by_number(jobs);
+
   return jobs.count;
+
+end-proc;
+
+// Insertion sort: the array is capped at SCQRY_MAX_JOBS, so n is small and
+// bounded, and an insertion sort over it is both obviously correct and
+// stable. Nothing here is hot - it runs once per service per operation.
+dcl-proc sort_by_number;
+  dcl-pi *n;
+    jobs likeds(SCQRY_JOBS_t);
+  end-pi;
+
+  dcl-s i    like(INTEGER_t);
+  dcl-s j    like(INTEGER_t);
+  dcl-s held like(SCQRY_JOBNAME_t);
+
+  for i = 2 to jobs.count;
+    held = jobs.name(i);
+    j = i - 1;
+    dow j >= 1 and jobs.name(j) > held;
+      jobs.name(j + 1) = jobs.name(j);
+      j -= 1;
+    enddo;
+    jobs.name(j + 1) = held;
+  endfor;
 
 end-proc;
 
@@ -678,6 +722,20 @@ dcl-proc stop_one;
     return false;
   endif;
 
+  // This re-queries rather than reusing the list from the first pass, and it
+  // looks redundant. It is not, for two reasons, and the second only became
+  // visible when the job list gained a defined order.
+  //
+  // A job that ended between the passes should not be ENDJOB'd again; and
+  // SCQRY_JOBS_t holds at most SCQRY_MAX_JOBS, so a service with more jobs
+  // than that has some the first pass never saw. Re-querying is what reaches
+  // them. Nothing here reports success without SCEXEC_status agreeing, so the
+  // overflow case cannot end as a false 'stopped' - it ends as a second pass
+  // that finishes the job, or as a plain failure past two passes.
+  //
+  // A test author hit exactly this hazard from the other side: a sweep that
+  // asked once and ended what it was told about left a job running, because
+  // the one the cap dropped is by definition the one no lookup returns.
   SCEXEC_jobs(def: jobs);
   for i = 1 to jobs.count;
     SCLAUNCH_endjob(jobs.name(i): 0: true: lerr);
