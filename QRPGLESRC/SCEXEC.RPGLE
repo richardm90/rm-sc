@@ -918,20 +918,51 @@ dcl-proc SCEXEC_loginfo export;
 
   dcl-ds jobs  likeds(SCQRY_JOBS_t) inz(*likeds);
   dcl-ds splfs likeds(SCQRY_SPLFS_t) inz(*likeds);
-  dcl-ds stats likeds(IFS_stats_t);
-  dcl-s path like(STMF_t);
-  dcl-s i    like(INTEGER_t);
-  dcl-s j    like(INTEGER_t);
+  // inz, because st_size now decides BETWEEN TWO MESSAGES rather than being
+  // printed. A stale or uninitialised zero used to show as a visibly wrong
+  // number; it would now silently choose '(no data)' over the path alone.
+  dcl-ds stats likeds(IFS_stats_t) inz(*likeds);
+  dcl-s path   like(STMF_t);
+  dcl-s handle like(INTEGER_t);
+  dcl-s i      like(INTEGER_t);
+  dcl-s j      like(INTEGER_t);
 
   path = SCLOG_path(def);
 
-  if IFS_open_file(path: IFS_OPEN_TYPE_READ) >= 0;
+  // Measured against 1.7.1, 9 September 2026, streams kept apart:
+  //
+  //   log found, empty      stdout  '<name>: <path> (no data)'
+  //   log found, has data   stdout  '<name>: <path>'   - NO suffix at all
+  //   no log found          stderr  '<name>: <unknown> (try checking ...)'
+  //
+  // and stdout carries exactly one trailing blank line in every case - which
+  // for the not-found case makes it the ONLY thing on stdout.
+  //
+  // The rule is FOUND TO STDOUT, NOT FOUND TO STDERR. It is not "loginfo goes
+  // to stderr", which is what docs/parity.md said for weeks: that was measured
+  // only on the not-found case, where both implementations fail to find a log,
+  // and generalised from it. The gate merges stderr into stdout, so it could
+  // not see the difference and the residue - a blank line somewhere odd - was
+  // what got written down.
+  //
+  // The size suffix is TWO changes, not one. A fix that mapped 0 bytes to
+  // '(no data)' and left the rest alone would still print '(15 bytes)' where
+  // upstream prints nothing.
+  // The descriptor was opened and discarded here, leaking one per service -
+  // and a group operation leaks one per member. Pre-existing; found by review
+  // while these lines were open.
+  handle = IFS_open_file(path: IFS_OPEN_TYPE_READ);
+  if handle >= 0;
+    IFS_close_file(handle);
     stats = IFS_stats(path);
-    SCOUT_writeln(%trim(def.short_name) + ': ' + %trim(path) +
-                  ' (' + %char(stats.st_size) + ' bytes)');
+    if stats.st_size = 0;
+      SCOUT_writeln(%trim(def.short_name) + ': ' + %trim(path) + ' (no data)');
+    else;
+      SCOUT_writeln(%trim(def.short_name) + ': ' + %trim(path));
+    endif;
   else;
-    SCOUT_writeln(%trim(def.short_name) + ': <unknown> (try checking in ' +
-                  'log directory ' + %trim(SCLOG_dir(def)) + ')');
+    SCOUT_warnln(%trim(def.short_name) + ': <unknown> (try checking in ' +
+                 'log directory ' + %trim(SCLOG_dir(def)) + ')');
   endif;
 
   // A batch service writes to a spooled file rather than, or as well as, the
@@ -946,6 +977,26 @@ dcl-proc SCEXEC_loginfo export;
       endfor;
     endif;
   endfor;
+
+  // NO TRAILING BLANK LINE HERE. Upstream ends the loginfo REPORT with one
+  // blank line, not each service's part of it, so it belongs in SCMAIN
+  // beside check's - which is emitted once per command, outside the group
+  // loop, for exactly the same reason.
+  //
+  // It was here first, because the measurement had been taken on a single
+  // named service, where per-service and per-command are indistinguishable.
+  // A two-member group separates them: upstream printed one blank, RMSC
+  // printed two. Found by review, which noticed the placement disagreed with
+  // how the neighbouring code had already solved the same problem.
+  //
+  // What is NOT changed here, deliberately: upstream reports no log for a
+  // STOPPED service whose log file is still on disk - its loginfo is scoped
+  // to the running instance where RMSC's is scoped to the file. Measured by
+  // the test author while writing the cases for this change, and pinned by
+  // tools/loginfo-test.sh rather than asserted either way. It is a separate
+  // decision, recorded in docs/parity.md; changing it here would be a second
+  // behaviour change arriving inside the first, which is exactly what a
+  // reader implementing "not found goes to stderr" might reach for.
 
 end-proc;
 

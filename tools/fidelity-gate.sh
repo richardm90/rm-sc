@@ -132,6 +132,24 @@ export QIBM_MULTI_THREADED=Y
 # and nothing compared it until this line existed: a trailing blank line that
 # upstream prints and RMSC did not went unnoticed because no test ran
 # 'check <service>' against upstream at all.
+# loginfo is on NEITHER classification list, deliberately, and that needs a
+# word because it is not obvious.
+#
+# It was undecided until 9 September 2026 and now matches upstream in all
+# three of its states - see docs/parity.md. On this system no service has a
+# log file, so every sweep service lands in the not-found state and the
+# comparison is clean. Listing it as intentional would therefore fire
+# RECLASSIFY and fail the run, which is the discipline working correctly on a
+# stale entry.
+#
+# WHAT WILL CHANGE THAT. RMSC writes ~/.sc/logs/<svc>.log where upstream
+# writes ~/.sc/logs/<timestamp>.<svc>.log, so the moment a swept service has
+# a log the two paths differ and loginfo fails here. That is the recorded
+# log-naming divergence surfacing, NOT a regression in the wording work - and
+# the failure will look like a formatting defect, which is why this is
+# written down before it happens. If it fires, the question is whether to
+# normalise the timestamp or to settle the naming divergence; do not simply
+# put loginfo back on a list.
 DIFF_OPS="check info file loginfo jobinfo scrunattrs perfinfo"
 
 # Verification step 8 requires the sweep to include "two system-group services".
@@ -179,8 +197,7 @@ INTENTIONAL="file scrunattrs perfinfo"
 #
 #   info        plan says only "Formatted definition dump"
 #   jobinfo     plan says only "Active job names"
-#   loginfo     plan says only "Log paths, sizes, spooled files"
-UNDECIDED="info jobinfo loginfo"
+UNDECIDED="info jobinfo"
 
 mkdir -p "$WORK"
 pass=0; bydesign=0; undecided_n=0; unexpected=0

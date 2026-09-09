@@ -626,7 +626,15 @@ dcl-proc SCMAIN_run export;
     // and an empty one; the state-changing operations are left alone, since
     // nothing has been checked about them. list never reaches this point -
     // SCEXEC_list writes its own trailing blank line.
-    if opts.operation = 'check';
+    //
+    // loginfo joins it, and the way that was got wrong is the reason this
+    // comment is worth reading. Its blank line was first emitted inside
+    // SCEXEC_loginfo, per service, because the measurement had been taken on
+    // a single named service - where per-service and per-command cannot be
+    // told apart. On a two-member group upstream printed ONE blank and RMSC
+    // printed TWO. Anything measured only on a named service should be
+    // checked against a group before it is believed.
+    if opts.operation = 'check' or opts.operation = 'loginfo';
       SCOUT_writeln('');
     endif;
 
@@ -699,6 +707,11 @@ dcl-proc SCMAIN_run export;
       SCOUT_writeln(SCOUT_list_row(def.short_name: def.friendly));
     other;
       run_reporting(opts: def);
+      // The same trailer as the group path above, for the single-service
+      // form. Both paths need it because neither reaches the other.
+      if opts.operation = 'loginfo';
+        SCOUT_writeln('');
+      endif;
   endsl;
 
   return SCMAIN_EXIT_OK;

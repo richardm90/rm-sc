@@ -30,7 +30,7 @@
 #     tools/verify.sh suites gate          a quick pass while iterating
 #
 # Stage names are the lower-case words below: suites, narration, api-silence,
-# error-delivery, load-warning, sampletime, colour, gate, fixture-pack.
+# error-delivery, load-warning, loginfo, sampletime, colour, gate, fixture-pack.
 #
 # A PARTIAL RUN IS NOT A VERIFICATION. The stage list exists for the edit-run
 # loop, not for deciding something is finished. Before a commit, run the lot.
@@ -71,7 +71,7 @@ want() {
 
 # Reject a stage name that matches nothing, rather than running a subset the
 # caller did not ask for and reporting it as a pass.
-ALL="suites narration api-silence error-delivery load-warning sampletime colour gate fixture-pack"
+ALL="suites narration api-silence error-delivery load-warning loginfo sampletime colour gate fixture-pack"
 for w in $WANTED; do
   case " $ALL " in
     *" $w "*) ;;
@@ -185,6 +185,19 @@ harness narration       tools/narration-test.sh      3
 harness api-silence     tools/api-silence-test.sh    6
 harness error-delivery  tools/error-delivery-test.sh 3
 harness load-warning    tools/load-warning-test.sh   4
+# STAGES A SERVICE IN THE USER'S REAL SERVICES DIRECTORY, because that is the
+# only place BOTH implementations look - SC_SERVICES_DIR is RMSC's alone. It
+# invents both names from its own PID, refuses to overwrite a name it did not
+# write, and removes them in a trap; a run killed between those points leaves
+# debris the next run reaps. About 1m20s, most of it JVM start-up: eight `sc`
+# invocations and seven `scr` ones.
+#
+# 4 lines is the summary block and nothing else, and that is deliberate rather
+# than mean: its cases fail in stage 1 with the upstream reference table and the
+# pinned row printed AFTER them, so no tail short enough to belong in this log
+# reaches the evidence. The counts decide the run; a failure is diagnosed by
+# running tools/loginfo-test.sh directly.
+harness loginfo         tools/loginfo-test.sh        4
 # NEEDS A RUNNING SERVICE, and fails loudly rather than skipping when there is
 # none - see the fixture stage in the harness for why that is the right way
 # round. It is also the slowest non-pack stage at about 4m on a two-job

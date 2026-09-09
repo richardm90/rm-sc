@@ -502,7 +502,25 @@ Measured 3 September, with the streams kept apart:
 | stdout | a single blank line | the whole message |
 | stderr | `<name>: <unknown> (try checking in log directory <dir>)` | nothing |
 
-The **text matches exactly**. It is on the other stream.
+**CORRECTED 9 September 2026 — this was measured on one state and generalised, which is the very
+mistake the paragraph below complains about.**
+
+Both readings above were taken on a service with **no log file** — the only state reachable
+without staging and starting one, and the state in which *both* implementations fail to find a
+log. With a service started for the purpose, upstream prints to **stdout** when it finds one, and
+the text does **not** match:
+
+| state | upstream | RMSC before |
+|---|---|---|
+| log found, empty | stdout `<name>: <path> (no data)` | stdout `<name>: <path> (0 bytes)` |
+| log found, has data | stdout `<name>: <path>` — nothing after it | stdout `<name>: <path> (15 bytes)` |
+| no log found | stderr, as recorded above | stdout |
+| all three | one trailing blank line on stdout | none |
+
+The rule is **found to stdout, not found to stderr**. RMSC matches all four as of 9 September
+2026, covered by `tools/loginfo-test.sh` with the streams kept apart — the gate structurally
+cannot, which is how this stayed wrong for six days. `docs/parity.md` carries the full account and
+the three things deliberately left alone.
 
 `tools/fidelity-gate.sh:135` merges stderr into the comparison with `2>&1`, so a line that moved
 from one stream to the other looks identical to the gate — and the only residue is a blank line
@@ -667,8 +685,9 @@ Ordered by size rather than by importance:
    `dir`.
 4. **Narration** — a decision of Richard's; ten-odd new lines on stdout if yes.
 5. **The load-failure split into two lines** — fixes the wording and `-q` together.
-6. **`loginfo`'s stream** — one line of code, and a decision about which stream a *report* belongs
-   on.
+6. ~~**`loginfo`'s stream**~~ — **done, 9 September 2026.** It was not one line of code: four
+   differences, of which the stream was one, plus three items deliberately left open. See
+   `docs/parity.md`.
 7. **`jobinfo`'s header, indentation and trailing blank line** — shape.
 8. **The command-line texts** — ten one-line changes, each trivial, none urgent, `--version`
    among them.

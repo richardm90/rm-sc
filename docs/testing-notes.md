@@ -310,3 +310,36 @@ did not run leave no trace. That is indistinguishable from a connection
 problem, which is the most expensive diagnosis to be wrong about on this box —
 the project has already lost time to a dead IP looking exactly like a slow
 boot.
+
+## An interrupted harness reports SUCCESS
+
+Found 9 September 2026 by the author of `tools/loginfo-test.sh`, while acting
+on a review finding about its own trap. The finding was "the handler does not
+exit, so the script resumes after tearing down". Measured, it is worse than
+that: **the shape exits 0.**
+
+    trap teardown EXIT INT TERM
+
+On SIGINT bash runs the handler, then RESUMES the script, which runs its
+remaining cases against fixtures teardown has just deleted, and then fires
+teardown a second time on EXIT — finishing with status 0. So a harness
+interrupted half way through reports success to `tools/verify.sh`, and the run
+says `VERDICT OK` for stages that never finished.
+
+That is the failure this project cares about more than any other: a suite that
+reports success it has not earned. It is also invisible, because the thing you
+interrupted is the thing that would have told you.
+
+`tools/loginfo-test.sh` diverges from the convention deliberately: its handler
+disarms the EXIT trap, tears down once, and exits 130.
+
+    trap 'on_signal' INT TERM
+
+**Five sibling harnesses still carry the old shape** — `narration`,
+`api-silence`, `error-delivery`, `colour` and `sampletime`. For most of them an
+interrupt costs a work directory in /tmp and a false green; for any harness
+whose teardown deletes files in a SHARED directory it costs more. None has been
+changed, because changing five harnesses that are currently green is its own
+piece of work with its own verification, and folding it into an unrelated
+change is how a green run stops meaning anything.
+

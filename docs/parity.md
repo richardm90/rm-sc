@@ -64,7 +64,7 @@ that step asks for.
 | `scrunattrs` | live differential | **by design** | upstream lists running jobs and their run attributes; RMSC prints the `SCOMMANDER_*` variables it sets |
 | `info` | live differential | **undecided** | omits the environment-variables block and the closing separator, adds a `Group:` line, and shows a resolved working directory rather than the raw one |
 | `jobinfo` | live differential | **undecided** | upstream prints a header then indented jobs; RMSC prints one `name: job` line each |
-| `loginfo` | live differential | **undecided** | one trailing blank line, nothing else |
+| `loginfo` | live differential | **pass** (three items open, none of them this) | matched 9 September 2026 — see below for what was actually different and for three things deliberately left alone |
 | `perfinfo` | live differential | **by design** | two differences, both settled: three affinity lines per job that no API carries, and the order of the job blocks, which upstream draws from a hash and RMSC sorts — see below |
 | `start` | not gated | — | state-changing; `SCLIFE.TEST` covers the lifecycle against a service it creates and removes |
 | `stop` | not gated | — | as above |
@@ -99,8 +99,9 @@ Two stages, deliberately different:
   implementations on the spot and compared to each other. Nothing is captured for these: they
   embed job numbers, timestamps and storage counters that differ between two runs seconds apart,
   so a stored fixture would rot almost immediately. Only those values are normalised. Whitespace
-  is not — a stray blank line is exactly the class of difference the gate exists to catch, and
-  is the whole of the `loginfo` divergence.
+  is not — a stray blank line is exactly the class of difference the gate exists to catch. It was
+  once described here as "the whole of the `loginfo` divergence", which was wrong twice over: the
+  divergence was four things, and a blank line was the only one a merged comparison could show.
 
 The sweep covers five services: the three a default `check` displays, plus two from the `system`
 group chosen to reach paths the others never touch — one using the `SBS/JOB` form of
@@ -248,15 +249,72 @@ None of these is on the `check` path, so none affects a figure in `performance.m
 byte-exact gate. That is also why they went unnoticed until the gate was widened past the three
 operations that are.
 
-**`loginfo`** — **not a formatting difference at all: the text matches and the STREAM differs.**
-Upstream writes `<name>: <unknown> (try checking in log directory <dir>)` to **stderr** and leaves
-a single blank line on stdout; RMSC writes the whole thing to stdout. Measured 3 September.
+**`loginfo`** — **matched 9 September 2026.** What it took is worth recording, because this entry
+was wrong twice before it was right, in the same way both times.
 
-This was recorded here as "one trailing blank line" until then, and the reason is worth keeping:
-`tools/fidelity-gate.sh:135` merges stderr into the comparison with `2>&1`, so a line that moves
-between streams reads as identical and the only residue is a blank line somewhere unexpected. **A
-merged comparison cannot see a stream difference.** Every formatting difference this document
-records for a stream-merged operation should be re-read with that in mind.
+It was first recorded as "one trailing blank line, nothing else". On 3 September that was
+corrected to "not a formatting difference at all: the text matches and the STREAM differs", with
+the reasoning that `tools/fidelity-gate.sh` merges stderr into the comparison with `2>&1`, so a
+line that moves between streams reads as identical and the only residue is a blank line somewhere
+unexpected. **A merged comparison cannot see a stream difference**, and that part stands.
+
+But the correction was itself generalised from one case. Both measurements had been taken on a
+service with no log file, where **both implementations fail to find one** — the only state that
+could be produced without staging and starting a service. Measured properly, with the streams
+apart and a service started for the purpose:
+
+| state | upstream | RMSC before |
+|---|---|---|
+| log found, empty | stdout `<name>: <path> (no data)` | stdout `<name>: <path> (0 bytes)` |
+| log found, has data | stdout `<name>: <path>` — nothing after the path | stdout `<name>: <path> (15 bytes)` |
+| no log found | **stderr** `<name>: <unknown> (try checking in log directory <dir>)` | stdout, same text |
+| all three | one trailing blank line on stdout | none |
+
+So the rule is **found to stdout, not found to stderr**, not "loginfo goes to stderr"; and the
+text did *not* match, which is what the previous entry claimed. Exit status is 0 throughout, both
+implementations, in every state.
+
+RMSC now matches all four. `tools/loginfo-test.sh` covers them with the streams kept apart,
+because the gate structurally cannot — which is how this stayed mis-recorded for six days.
+
+### An unrelated leak found while these lines were open
+
+`SCCOLL.RPGLE`'s `only_if_executable` test calls `IFS_open_file` inside a boolean condition and
+discards the descriptor, leaking one per definition per load. The same defect in
+`SCEXEC_loginfo` was fixed with the `loginfo` work because the lines were already being edited;
+this one is not, because closing it means restructuring a condition on the definition-loading
+path, which feeds the byte-exact operations and wants its own test rather than a drive-by change.
+
+### Three things about `loginfo` deliberately NOT changed
+
+**A stopped service whose log is still on disk.** Upstream reports no log; RMSC reports the log.
+Upstream's `loginfo` is scoped to the *running instance*, RMSC's to the *file*. Found by the test
+author while writing the cases above, and pinned by the harness — which asserts only which case
+each implementation is in, not the text — rather than asserted either way. **This needs a
+decision.** It is a scoping change rather than a wording one, and it is the change somebody
+implementing "not found goes to stderr" would reach for next without noticing it is a second
+decision.
+
+**The log file naming.** Upstream writes `~/.sc/logs/<timestamp>.<svc>.log` and RMSC writes
+`~/.sc/logs/<svc>.log`, so neither finds a log written by the other. Pre-existing, recorded in
+`docs/messages.md` as a property of `SCLOG_path`, and untouched here — closing it would change
+where RMSC writes logs, which is a larger decision than this one.
+
+**The spooled-file section.** RMSC prints `    spooled file <name> number <n> in <job>` after the
+log line. Upstream has a spooled-file path of its own (`getSpooledFiles`), and **what it prints
+has not been measured**: producing a spooled file owned by the service's own job needs a
+`batch_mode` fixture, because PASE runs each `system` call in its own job and the spooled file
+then belongs to a transient one. Not changed, and not asserted against upstream anywhere.
+
+Two consequences of that, found by review and worth knowing before anyone measures it:
+
+- The spooled loop runs in the **not-found** case too, so for a batch service with spooled files
+  and no log, a spooled line becomes the FIRST thing on stdout — the log line having moved to
+  stderr. Pre-existing behaviour, but the not-found case's stdout used to carry the log line and
+  now carries only the blank, so the spooled line is newly exposed there. Whether upstream lists
+  spooled files for a service it reports no log for is part of the same unmeasured question.
+- `tools/loginfo-test.sh` tolerates spooled lines from line 2 onward, which does not cover that
+  case. It would fail quoting a spooled line rather than anything about the log.
 
 **`jobinfo`** — a layout difference only, since the job *set* was corrected. Upstream prints a
 header then indented jobs; RMSC prints one `name: job` line each.
