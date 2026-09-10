@@ -295,6 +295,10 @@ dcl-proc SCMAIN_adhoc export;
 
   dcl-s work  like(SCMAIN_SPEC_t);
   dcl-s value like(SCMAIN_SPEC_t);
+  // The specifier's value AS TYPED. `value` is upper-cased for the job form,
+  // correctly - the criterion is matched upper-cased. The ad-hoc service's
+  // NAME must not follow it: upstream preserves the case the user typed.
+  dcl-s typed like(SCMAIN_SPEC_t);
   dcl-s adhoc_port like(INTEGER_t);
   dcl-s adhoc_norm like(SCDEF_CRIT_t);
   dcl-s slash like(INTEGER_t);
@@ -308,8 +312,14 @@ dcl-proc SCMAIN_adhoc export;
 
   if %len(work) > 5 and STRING_lower(%subst(work: 1: 5)) = 'port:';
     value = %subst(work: 6);
-    def.short_name = 'port:' + %trim(value);
-    def.friendly   = 'ad hoc port ' + %trim(value);
+    // Upstream's naming, matched deliberately even though RMSC's was arguably
+    // better: `scr check port:22` used to print a name that could be fed back
+    // in, where upstream's `ad_hoc_port_22` cannot. Richard's decision, 10
+    // September 2026 - on existing functionality RMSC aims for parity unless
+    // there is a good reason not to, and "ours is better" is not one.
+    // docs/parity.md carries the measured table and the argument.
+    def.short_name = 'ad_hoc_port_' + %trim(value);
+    def.friendly   = 'Ad hoc service running at port ' + %trim(value);
     def.criteria_count = 1;
     def.criteria(1).kind = SCDEF_CHECK_PORT;
     def.criteria(1).raw  = value;
@@ -363,9 +373,23 @@ dcl-proc SCMAIN_adhoc export;
   endif;
 
   if %len(work) > 4 and STRING_lower(%subst(work: 1: 4)) = 'job:';
-    value = STRING_upper(%subst(work: 5));
-    def.short_name = 'job:' + %trim(value);
-    def.friendly   = 'ad hoc job ' + %trim(value);
+    typed = %subst(work: 5);
+    value = STRING_upper(typed);
+    // THREE things here, and each is separately easy to get wrong.
+    //
+    // The name is built from `typed`, not `value`: upstream preserves case,
+    // so `job:qinter` is `ad_hoc_job_qinter`. RMSC used to name it from the
+    // upper-cased criterion and printed `job:QINTER`.
+    //
+    // The SLASH is translated in the NAME and NOT in the description -
+    // `job:QUSRWRK/QINTER` gives `ad_hoc_job_QUSRWRK_QINTER` described as
+    // `at job QUSRWRK/QINTER`. Built from one string, one of the two is
+    // wrong whichever string is chosen.
+    //
+    // `value` stays upper-cased for the criterion below. That is not a
+    // casualty of this change; it is why the two are now separate.
+    def.short_name = 'ad_hoc_job_' + %xlate('/': '_': %trim(typed));
+    def.friendly   = 'Ad hoc service running at job ' + %trim(typed);
     def.criteria_count = 1;
     def.criteria(1).kind = SCDEF_CHECK_JOB;
     def.criteria(1).raw  = value;

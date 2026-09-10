@@ -30,8 +30,8 @@
 #     tools/verify.sh suites gate          a quick pass while iterating
 #
 # Stage names are the lower-case words below: suites, narration, api-silence,
-# error-delivery, load-warning, loginfo, jobinfo, sampletime, colour, gate,
-# fixture-pack.
+# error-delivery, load-warning, loginfo, jobinfo, adhoc-name, sampletime,
+# colour, gate, fixture-pack.
 #
 # A PARTIAL RUN IS NOT A VERIFICATION. The stage list exists for the edit-run
 # loop, not for deciding something is finished. Before a commit, run the lot.
@@ -72,7 +72,7 @@ want() {
 
 # Reject a stage name that matches nothing, rather than running a subset the
 # caller did not ask for and reporting it as a pass.
-ALL="suites narration api-silence error-delivery load-warning loginfo jobinfo sampletime colour gate fixture-pack"
+ALL="suites narration api-silence error-delivery load-warning loginfo jobinfo adhoc-name sampletime colour gate fixture-pack"
 for w in $WANTED; do
   case " $ALL " in
     *" $w "*) ;;
@@ -212,6 +212,19 @@ harness loginfo         tools/loginfo-test.sh        4
 # pinned job-order row - the one row whose meaning is that something nobody
 # asked for has changed. A failure is diagnosed by running the harness directly.
 harness jobinfo         tools/jobinfo-test.sh        6
+# STAGES NOTHING AT ALL for the six stages that matter, and that is the point of
+# it: an ad-hoc service is named on the command line and has no definition, so
+# there is no fixture to own. It reads port 22, which is listening because this
+# run arrived over SSH, and job names that do not exist. Its one staging stage
+# writes into its own work directory and shows it to RMSC through
+# SC_SERVICES_DIR, never to $HOME/.sc/services, so a killed run leaves nothing
+# anywhere. About 1m, and roughly a dozen `sc` invocations are all of it.
+#
+# 8 lines, not 4: three stages end in a row that can carry several detail lines
+# - the pinned PGM- row, a REFDRIFT quoting upstream, and stage 5's three-way
+# row comparison - and the summary counts must not be truncated away behind
+# them. A failure is diagnosed by running the harness directly.
+harness adhoc-name      tools/adhoc-name-test.sh     8
 # NEEDS A RUNNING SERVICE, and fails loudly rather than skipping when there is
 # none - see the fixture stage in the harness for why that is the right way
 # round. It is also the slowest non-pack stage at about 4m on a two-job

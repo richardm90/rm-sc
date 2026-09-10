@@ -597,16 +597,53 @@ before the lines are added.
 
 Two differences the gate cannot currently see, because it only exercises defined services.
 
-**Ad-hoc services are named differently, and this is on the `check` path:**
+**Ad-hoc services are named differently, and this is on the `check` path.**
+**DECIDED 10 September 2026: RMSC matches upstream.**
 
 ```
 upstream:    RUNNING            | ad_hoc_port_445 (Ad hoc service running at port 445)
-RMSC:        RUNNING            | port:445 (ad hoc port 445)
+RMSC before: RUNNING            | port:445 (ad hoc port 445)
 ```
 
-The status column and layout match; the name and description do not. `check` is the byte-exact
-surface, so this matters more than any of the four above — it simply is not reached by a gate
-that runs bare `check` against three defined services.
+The status column and layout matched; the name and description did not.
+
+**Richard's decision, and the reasoning is the part that generalises: on existing functionality
+RMSC aims for parity unless there is a good reason not to, and "ours is better" is not one.**
+That is worth stating because RMSC's version *was* arguably better, and the argument for keeping
+it was real:
+
+    sc  check ad_hoc_port_22   ->  rc 253, Could not find definition for 'ad_hoc_port_22'
+    scr check port:22          ->  rc 0,   RUNNING
+
+Upstream prints a name it will not accept back. RMSC's was round-trippable — a usable handle
+where upstream's is a label. It was still the wrong thing to keep: `check` is the byte-exact
+surface, the round-trip property serves a consumer that does not exist (the client uses short
+names and `group:` only), and an ad-hoc row cannot appear in a bare `check` at all — it only
+exists when somebody typed a specifier.
+
+**The measured rule**, taken 10 September 2026 across every form:
+
+| specifier | name | description |
+|---|---|---|
+| `port:22` | `ad_hoc_port_22` | `Ad hoc service running at port 22` |
+| `job:QINTER` | `ad_hoc_job_QINTER` | `Ad hoc service running at job QINTER` |
+| `job:qinter` | `ad_hoc_job_qinter` | `... at job qinter` |
+| `job:QUSRWRK/QINTER` | `ad_hoc_job_QUSRWRK_QINTER` | `... at job QUSRWRK/QINTER` |
+
+Two things in that table are easy to get wrong and are the reason it is written out in full.
+**Case is preserved, not upper-cased** — which is a live rival because RMSC upper-cases a job
+name when it builds the criterion, correctly, and the ad-hoc *name* must not follow it. And the
+`/` in the subsystem-qualified form becomes `_` **in the name** while staying `/` **in the
+description**, so the two cannot be built from one string.
+
+The name propagates: `jobinfo`'s header and `loginfo`'s line both carry it, so this is one
+change where the ad-hoc definition is constructed rather than several at the printing sites.
+
+**`PGM-` is deliberately NOT brought into line, and stays an RMSC extension.** Upstream rejects
+it outright — `sc check PGM-QZSHSH` exits 253 with `Could not find definition for service
+'PGM-QZSHSH'` — where RMSC reports it as an ad-hoc service. Richard's decision: it costs an
+upstream user nothing, the plan lists `PGM-` among the criterion forms, and RMSC is expected to
+grow beyond upstream in places. Recorded here so it is not later "fixed" into a rejection.
 
 **`port:N` resolves differently.** Upstream matches the specifier to a *defined* service when
 one carries that port as a criterion, and reports it under its real name with all of that

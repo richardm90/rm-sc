@@ -393,3 +393,55 @@ in.** A harness comparing RMSC against upstream over the real service list is
 measuring the definitions that account can see, and a difference that only
 appears with a broken definition present cannot appear without one.
 
+## `/tmp` on the box is CASE-INSENSITIVE
+
+Found 10 September 2026 by the author of `tools/adhoc-name-test.sh`, after two
+reference-drifts against an upstream that was behaving perfectly.
+
+A harness that names a captured artefact after its input — `sc.job_QINTER.out`
+and `sc.job_qinter.out` — writes **one file**. The second capture silently
+replaces the first, and the comparison then reports a difference between two
+things that were never separately recorded.
+
+It bites hardest where it is least affordable. A subject whose whole content is
+a specifier and its lower-case twin has exactly two artefacts that must stay
+apart, and they are exactly the two the file system merges. Put an index or a
+hash in the tag rather than the input, and assert that the tags survive a case
+fold before trusting any capture taken with them.
+
+## A killed watcher is not a killed run — check for the process before relaunching
+
+Recorded 10 September 2026 after doing it, and it is a sharper version of the
+note above about detaching work.
+
+A local background task was killed for memory. The build log on the box was
+empty, which was read as "it never started" when the correct reading was "it
+has not finished yet". A second `makei build` was launched over the same
+objects, and only the NEXT command revealed five build processes already
+running.
+
+Two concurrent builds writing one service program can leave it half-linked, and
+every test afterwards runs against whatever that produced. The missing step is
+one line:
+
+    ps -ef | grep "[m]akei build"
+
+before relaunching anything. An empty log distinguishes nothing.
+
+### And a wait loop must not match itself
+
+The cleanup for that mistake was worse than the mistake. Two loops of the shape
+
+    until [ "$(ps -ef | grep -c "[m]akei")" -eq 0 ]; do sleep 5; done
+
+waited forever, because **each loop's own command line contains the string
+`makei`**, so each was waiting for a count of zero that included itself. The
+`[m]` trick prevents `grep` matching its own `grep`; it does nothing about a
+shell whose command line quotes the pattern.
+
+Match on something the waiting process does not contain — a log sentinel is
+better than a process count for exactly this reason, and every other wait in
+this project already uses one:
+
+    until grep -q BUILD_DONE "$log"; do sleep 15; done
+

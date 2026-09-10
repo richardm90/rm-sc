@@ -683,12 +683,15 @@ Ordered by size rather than by importance:
 3. **`info`** — eight differences, of which two are shape rather than spelling: the dependency
    header, and a `Working Directory:` line RMSC invents for every definition that does not set
    `dir`.
-4. **Narration** — a decision of Richard's; ten-odd new lines on stdout if yes.
+4. ~~**Narration**~~ — **decided and implemented, 3 September 2026.** RMSC narrates. See
+   `docs/parity.md`.
 5. **The load-failure split into two lines** — fixes the wording and `-q` together.
 6. ~~**`loginfo`'s stream**~~ — **done, 9 September 2026.** It was not one line of code: four
    differences, of which the stream was one, plus three items deliberately left open. See
    `docs/parity.md`.
-7. **`jobinfo`'s header, indentation and trailing blank line** — shape.
+7. ~~**`jobinfo`'s header, indentation and trailing blank line**~~ — **done, 10 September 2026.**
+   Five differences, not three: the two above plus the not-running text and the colour, and the
+   blank line turned out to be per COMMAND. See `docs/parity.md`.
 8. **The command-line texts** — ten one-line changes, each trivial, none urgent, `--version`
    among them.
 9. **The `sc: ` prefix, and short-versus-friendly naming** — two decisions that touch many rows.

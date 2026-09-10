@@ -1,9 +1,16 @@
 /* RMSC: the project's own service programs, for *PGM objects and test        */
 /* programs to bind to.                                                       */
 /*                                                                            */
-/* TOBi's CRTBNDRPGFLAGS has no BNDDIR parameter, and RUCRTRPG is not given    */
-/* one either, so anything binding to RMSC must carry                         */
-/* ctl-opt bnddir('RMSCPGM') in its source.                                   */
+/* TOBi's CRTBNDRPGFLAGS has no BNDDIR parameter, so anything binding to RMSC  */
+/* must carry ctl-opt bnddir('RMSCPGM') in its source.                        */
+/*                                                                            */
+/* This used to add "and RUCRTRPG is not given one either". That is no longer */
+/* true: IBM i Testing 1.3.4 passes bndDir and bndSrvPgm through to RUCRTRPG  */
+/* from .vscode/testing.json. The ctl-opt route is kept anyway, and it is the */
+/* right one here rather than merely the older one - testing.json applies     */
+/* only when the EXTENSION compiles the suite, and tools/verify.sh compiles   */
+/* all thirteen of them with RUCRTRPG directly from a shell. A testing.json   */
+/* binding would pass in the Test Explorer and fail the verification.         */
 /*                                                                            */
 /* The entry is library-qualified (&O, not *LIBL) deliberately: an entry       */
 /* recorded as *LIBL makes activation search the caller's library list,       */
