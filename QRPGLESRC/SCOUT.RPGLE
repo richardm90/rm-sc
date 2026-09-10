@@ -634,3 +634,25 @@ dcl-proc SCOUT_thousands export;
   return grouped;
 
 end-proc;
+
+//==============================================================================
+// SCOUT_no_job_info
+//==============================================================================
+
+dcl-proc SCOUT_no_job_info export;
+  dcl-pi *n like(SCOUT_LINE_t);
+  end-pi;
+
+  dcl-c NO_JOB_INFO
+        'NO JOB INFO (either not running, or running in kernel task)';
+
+  // The indent is OUTSIDE the escape, so the coloured run is the sentence
+  // alone. Upstream does the same - four escape bytes on a stopped service,
+  // and the four spaces are not among them.
+  if SCOUT_colour();
+    return '    ' + ESC + ANSI_MAGENTA + NO_JOB_INFO + ESC + ANSI_RESET;
+  endif;
+
+  return '    ' + NO_JOB_INFO;
+
+end-proc;

@@ -30,7 +30,8 @@
 #     tools/verify.sh suites gate          a quick pass while iterating
 #
 # Stage names are the lower-case words below: suites, narration, api-silence,
-# error-delivery, load-warning, loginfo, sampletime, colour, gate, fixture-pack.
+# error-delivery, load-warning, loginfo, jobinfo, sampletime, colour, gate,
+# fixture-pack.
 #
 # A PARTIAL RUN IS NOT A VERIFICATION. The stage list exists for the edit-run
 # loop, not for deciding something is finished. Before a commit, run the lot.
@@ -71,7 +72,7 @@ want() {
 
 # Reject a stage name that matches nothing, rather than running a subset the
 # caller did not ask for and reporting it as a pass.
-ALL="suites narration api-silence error-delivery load-warning loginfo sampletime colour gate fixture-pack"
+ALL="suites narration api-silence error-delivery load-warning loginfo jobinfo sampletime colour gate fixture-pack"
 for w in $WANTED; do
   case " $ALL " in
     *" $w "*) ;;
@@ -198,6 +199,19 @@ harness load-warning    tools/load-warning-test.sh   4
 # reaches the evidence. The counts decide the run; a failure is diagnosed by
 # running tools/loginfo-test.sh directly.
 harness loginfo         tools/loginfo-test.sh        4
+# STAGES NOTHING IN A SHARED DIRECTORY, unlike the stage above it. Its three
+# invented definitions live in its own work directory and are shown to both
+# implementations through -Dservices.dir and SC_SERVICES_DIR, because nothing
+# here is ever started - the RUNNING fixture is running because the harness
+# holds the two ports its criteria name. So a run killed mid-way leaves no
+# definition for the gate to trip over; what it can leave is two listeners, and
+# the next run's port check fails loudly on exactly that. About 1m, nine `sc`
+# and `scr` invocations.
+#
+# 6 lines, not 4: the summary block is three, and the two above it are stage 3's
+# pinned job-order row - the one row whose meaning is that something nobody
+# asked for has changed. A failure is diagnosed by running the harness directly.
+harness jobinfo         tools/jobinfo-test.sh        6
 # NEEDS A RUNNING SERVICE, and fails loudly rather than skipping when there is
 # none - see the fixture stage in the harness for why that is the right way
 # round. It is also the slowest non-pack stage at about 4m on a two-job

@@ -196,8 +196,16 @@ INTENTIONAL="file scrunattrs perfinfo"
 # none of these is a correctness problem - but none is a documented choice.
 #
 #   info        plan says only "Formatted definition dump"
-#   jobinfo     plan says only "Active job names"
-UNDECIDED="info jobinfo"
+#   jobinfo     matched 10 September 2026 and is on NEITHER list, for the
+#               same reason loginfo is: it now agrees on every swept service,
+#               so listing it as intentional would fire RECLASSIFY and fail
+#               the run. Its job ORDER still differs by design (upstream's is
+#               a HashSet shuffle, RMSC sorts - see docs/parity.md), but the
+#               gate normalises job numbers to NNNNNN, so it cannot see that.
+#               Do not read this entry's absence as the order having been
+#               matched; tools/jobinfo-test.sh compares the job SET for
+#               exactly that reason.
+UNDECIDED="info"
 
 mkdir -p "$WORK"
 pass=0; bydesign=0; undecided_n=0; unexpected=0

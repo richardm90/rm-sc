@@ -63,7 +63,7 @@ that step asks for.
 | `file` | live differential | **by design** | upstream prints the definition's *path*; RMSC prints its *contents* |
 | `scrunattrs` | live differential | **by design** | upstream lists running jobs and their run attributes; RMSC prints the `SCOMMANDER_*` variables it sets |
 | `info` | live differential | **undecided** | omits the environment-variables block and the closing separator, adds a `Group:` line, and shows a resolved working directory rather than the raw one |
-| `jobinfo` | live differential | **undecided** | upstream prints a header then indented jobs; RMSC prints one `name: job` line each |
+| `jobinfo` | live differential | **pass** | matched 10 September 2026 — header, indent, not-running text, per-command blank line and colour |
 | `loginfo` | live differential | **pass** (three items open, none of them this) | matched 9 September 2026 — see below for what was actually different and for three things deliberately left alone |
 | `perfinfo` | live differential | **by design** | two differences, both settled: three affinity lines per job that no API carries, and the order of the job blocks, which upstream draws from a hash and RMSC sorts — see below |
 | `start` | not gated | — | state-changing; `SCLIFE.TEST` covers the lifecycle against a service it creates and removes |
@@ -316,8 +316,37 @@ Two consequences of that, found by review and worth knowing before anyone measur
 - `tools/loginfo-test.sh` tolerates spooled lines from line 2 onward, which does not cover that
   case. It would fail quoting a spooled line rather than anything about the log.
 
-**`jobinfo`** — a layout difference only, since the job *set* was corrected. Upstream prints a
-header then indented jobs; RMSC prints one `name: job` line each.
+**`jobinfo`** — **matched 10 September 2026.** Five differences, all measured with the streams
+apart before anything was written:
+
+| | upstream | RMSC before |
+|---|---|---|
+| header | `<short> (<friendly>):` once per service | none |
+| job line | four-space indent, job name bare | `<short>: <job>` |
+| no jobs | `    NO JOB INFO (either not running, or running in kernel task)` | `<short>: not running` |
+| trailing blank | one per **command** | none |
+| colour | short name cyan `36`; the no-jobs sentence magenta `35` | none |
+
+Two of those were nearly got wrong, and both for the same reason — a rule inferred from the one
+case in front of the person inferring it.
+
+**The blank line is per COMMAND, not per service.** A single named service cannot tell them
+apart. `loginfo` had exactly this wrong for a day; here it was measured on a group first, and
+`tools/jobinfo-test.sh` pins it with a **three**-member group whose running member has **two
+jobs** — because `jobinfo`'s branches print different numbers of lines, so *per job* is a third
+rival, and the blank counts then separate all four readings: per command 1, per job 2, per pair
+2, per service 3.
+
+**The header's cyan is FIXED, not derived from status** — measured at `36` on RUNNING, PARTIAL
+and NOT RUNNING within one command. `check` colours those same two fields *by* status, so
+reusing its colouring would have looked reasonable and been wrong twice over. The header goes
+through `SCOUT_list_row`, which is the third place that construct appears, and
+`tools/colour-test.sh` now pins all three together rather than leaving them to drift apart.
+
+**What still differs, by design:** the ORDER of jobs within a service. Upstream's is a
+`HashSet` shuffle keyed on job numbers; RMSC sorts ascending — see the job-order section above.
+The gate cannot see it, because it normalises job numbers to `NNNNNN`, so `tools/jobinfo-test.sh`
+compares the job **set** rather than the output, and says so.
 
 **`info`** — eight measured differences, listed in full in `docs/messages.md`. The two that are
 shape rather than spelling: upstream prints `Depends on the following services:` once and indents
@@ -642,16 +671,30 @@ inconsistent.** Measured escape bytes, upstream against RMSC: `info` 20 against 
 against 0, `jobinfo` 2 against 0; `loginfo` and the usage block are 0 on both sides. Upstream
 colours `info`'s field labels cyan and its rule lines white `37`.
 
+**Correction, 10 September 2026: "`jobinfo` 2 against 0" is incomplete, and taken literally it is
+wrong.** Two escape bytes is the RUNNING case. A **stopped** service emits **four** — the
+`NO JOB INFO (…)` sentence wrapped in magenta `35`, the same colour `check` gives NOT RUNNING,
+with the four-space indent sitting **outside** the coloured run. A three-member group emits
+eight. Found by the test author, who would have failed correct behaviour had it asserted the two.
+
+Same shape as the other measurements corrected on this page: taken on the one state that was in
+front of the person taking it, and written down as though it were the rule.
+
 The one that mattered is `info`'s header, `short_name (Friendly)`, which upstream colours **cyan
 `36` — exactly as it colours a `list` row**. **Fixed:** `SCEXEC_info` now calls `SCOUT_list_row`
 instead of building the same two fields by hand, so the identical construct is coloured
 identically, and a byte-sensitive format string is written once rather than twice.
 
 The **rest** of `info`'s colour is deliberately still open — upstream colours its field labels
-cyan and its rule lines white `37` — and so are `jobinfo`'s 2 escape bytes and `perfinfo`'s 54.
-All three operations remain `undecided` in the gate, and their colour belongs with their content:
-`info` alone carries eight measured non-colour differences, two of them shape rather than
-spelling, so colouring the body before the content matches would mean doing it twice.
+cyan and its rule lines white `37` — as is `perfinfo`'s 54. Their colour belongs with their
+content: `info` alone carries eight measured non-colour differences, two of them shape rather
+than spelling, so colouring the body before the content matches would mean doing it twice.
+
+`jobinfo` is **no longer among them.** Its colour landed on 10 September 2026 with its layout,
+and the "2 escape bytes" quoted above is the figure the correction earlier on this page retracts
+— two is the running case, four is a stopped one, eight a three-member group.
+`tools/colour-test.sh` pins all three states. Of the three operations this paragraph once
+described as undecided, only `info` still is.
 
 **RMSC's gate is in the shell, not in RPG, and RMSC's rule is deliberately not upstream's.**
 `scripts/scr` adds `--colors` when `[ -t 1 ]`; `SCOUT_is_tty` is a stub returning false, so RMSC

@@ -634,7 +634,8 @@ dcl-proc SCMAIN_run export;
     // told apart. On a two-member group upstream printed ONE blank and RMSC
     // printed TWO. Anything measured only on a named service should be
     // checked against a group before it is believed.
-    if opts.operation = 'check' or opts.operation = 'loginfo';
+    if opts.operation = 'check' or opts.operation = 'loginfo'
+       or opts.operation = 'jobinfo';
       SCOUT_writeln('');
     endif;
 
@@ -709,7 +710,7 @@ dcl-proc SCMAIN_run export;
       run_reporting(opts: def);
       // The same trailer as the group path above, for the single-service
       // form. Both paths need it because neither reaches the other.
-      if opts.operation = 'loginfo';
+      if opts.operation = 'loginfo' or opts.operation = 'jobinfo';
         SCOUT_writeln('');
       endif;
   endsl;

@@ -446,3 +446,16 @@ dcl-c SCOUT_RULE
 dcl-pr SCOUT_thousands like(SCOUT_LINE_t);
   value like(BIGINT_t) const;
 end-pr;
+
+///
+// `jobinfo`'s line for a service with no jobs.
+//
+// Magenta - the same colour `check` gives NOT RUNNING - and the four-space
+// indent sits OUTSIDE the coloured run, matching upstream byte for byte.
+// Measured through a pseudo-terminal: a running service's jobinfo emits two
+// escape bytes and a stopped one emits four, which is how the indent's
+// position was established rather than assumed.
+///
+
+dcl-pr SCOUT_no_job_info like(SCOUT_LINE_t);
+end-pr;

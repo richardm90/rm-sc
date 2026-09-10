@@ -896,14 +896,35 @@ dcl-proc SCEXEC_jobinfo export;
   dcl-ds jobs likeds(SCQRY_JOBS_t) inz(*likeds);
   dcl-s i like(INTEGER_t);
 
+  // The header IS a list row with a colon after it - the same two fields, in
+  // the same order, in the same fixed cyan. Through SCOUT_list_row rather
+  // than built here, for the reason SCEXEC_info's comment already gives: a
+  // byte-sensitive format string written out twice is how two places come to
+  // disagree without anyone editing either on purpose. This is the third
+  // place the construct appears.
+  //
+  // The cyan is FIXED, not derived from status - measured at 36 on RUNNING,
+  // PARTIAL and NOT RUNNING within one command. `check` colours these same
+  // two fields BY status, so that was a live rival, and no measurement of a
+  // single service could have separated them.
+  SCOUT_writeln(SCOUT_list_row(def.short_name: def.friendly) + ':');
+
   if SCEXEC_jobs(def: jobs) = 0;
-    SCOUT_writeln(%trim(def.short_name) + ': not running');
+    SCOUT_writeln(SCOUT_no_job_info());
     return;
   endif;
 
+  // Four spaces, and the job name BARE - it no longer carries the service
+  // name, which the header now supplies once instead of once per job.
   for i = 1 to jobs.count;
-    SCOUT_writeln(%trim(def.short_name) + ': ' + %trim(jobs.name(i)));
+    SCOUT_writeln('    ' + %trim(jobs.name(i)));
   endfor;
+
+  // NO trailing blank line here. Upstream ends the jobinfo REPORT with one,
+  // per COMMAND, so it lives in SCMAIN beside check's and loginfo's. loginfo
+  // had it per service for a day because the measurement was taken on a
+  // single named service, where the two are indistinguishable; a group
+  // separates them, and this was measured on one before a line was written.
 
 end-proc;
 

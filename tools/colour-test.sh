@@ -3,6 +3,14 @@
 # colour-test.sh - what `check`, `list` and `groups` look like ON A TERMINAL,
 # and where RMSC's colour differs from upstream's.
 #
+# It also owns the colour of two REPORTING operations, because the instrument
+# is here and nowhere else: `info`'s header (stage 4 case 7) and the whole of
+# `jobinfo`'s colour (case 8). Those two and a `list` row are the SAME
+# construct - `<short> (<friendly>)` with the short name cyan - so they are
+# pinned together rather than in three files. `jobinfo`'s SHAPE, which needs no
+# terminal, belongs to tools/jobinfo-test.sh; the two are a pair, so change one
+# and read the other.
+#
 # Runs ON the IBM i box, beside tools/fidelity-gate.sh, tools/narration-test.sh
 # and tools/error-delivery-test.sh, and modelled on the second of those.
 #
@@ -1063,6 +1071,161 @@ n=$(n_esc "$WORK/sc.infop.out")
 check_named info-header-plain-on-a-pipe measured \
   "piped, info's header and the list row are identical and carry no escapes" \
   "${probs[@]}"
+
+# (8) `jobinfo`'S HEADER IS THE SAME CONSTRUCT AGAIN, AND ITS NOT-RUNNING LINE
+#     CARRIES THE `check` STOPPED COLOUR.
+#
+# WHY THIS CASE IS HERE AND THE REST OF jobinfo IS NOT. tools/jobinfo-test.sh
+# owns jobinfo's SHAPE - the header, the four-space indent, the bare job name,
+# the not-running text and the one blank line per COMMAND. It cannot own the
+# colour: that needs a pseudo-terminal and SSH_TTY in the child's environment,
+# which is this file's whole apparatus. The two files are a pair; change one
+# and read the other.
+#
+# It is here rather than there for a second reason as well. This is the THIRD
+# instance of one construct. `list` rows are cyan (case 5); `info`'s header is
+# the same two fields and case (7) exists because RMSC built it by hand rather
+# than going through the shared row builder; `jobinfo`'s `<short> (<friendly>):`
+# is the same again. That family belongs in one place, or the next person to
+# fix one of the three never finds the other two.
+#
+# MEASURED 10 SEPTEMBER 2026, sc 1.7.1, through this script's own PTY, on a
+# three-member group in three different states:
+#
+#   the header      ESC[36m<short>ESC[0m then ' (<friendly>):' UNCOLOURED,
+#                   and 36 for the RUNNING, the PARTIAL and the STOPPED
+#                   service alike
+#   the job lines   no escapes at all
+#   NO JOB INFO     four spaces, then ESC[35m ... ESC[0m round the WHOLE
+#                   sentence - magenta, the same $C_NOT that `check` gives
+#                   NOT RUNNING, with the indent left OUTSIDE the coloured run
+#   RMSC            no escapes anywhere, in any of those places
+#
+# THAT CORRECTS A RECORDED NUMBER. docs/parity.md says "`jobinfo` 2 against 0"
+# escape bytes. Two is what a RUNNING service produces - one cyan pair for its
+# header. A stopped one produces four, and this three-member group produces
+# eight. The recorded figure was taken on a running service and is not the
+# whole of jobinfo's colour; the magenta half had never been measured.
+#
+# SEPARATING VALUES, one per rule:
+#
+#   the three headers are all 36 while their services are in three different
+#   states. That is what separates "the header is cyan" from "the header takes
+#   the row's status colour" - which is what `check` does to the same two
+#   fields, so it is a live rival and not a hypothetical one. A single-service
+#   case cannot tell them apart.
+#
+#   the NO JOB INFO line is 35 and not 36. A fix that put one colour behind one
+#   flag would light the whole operation cyan and satisfy every header
+#   assertion.
+#
+#   the four spaces sit OUTSIDE the escape. Asserting only that the sentence is
+#   coloured would be satisfied by an implementation that swallowed the indent
+#   into the coloured run, which moves where the visible text starts the moment
+#   the escapes are stripped - the same trap as case (4).
+#
+#   zero escapes on a PIPE, from both. CLAUDE.md's opening failure mode.
+
+pty_run  sc.jobinfo   -- "$SC_ENV \"$SC\" jobinfo group:$GROUP"
+pty_run  scr.jobinfo  -- "$SCR_ENV \"$SCR\" jobinfo group:$GROUP"
+pipe_run sc.jobinfop  -- "$SC_ENV \"$SC\" jobinfo group:$GROUP"
+pipe_run scr.jobinfop -- "$SCR_ENV \"$SCR\" jobinfo group:$GROUP"
+
+NOJOB='    NO JOB INFO (either not running, or running in kernel task)'
+
+# --- the reference, re-measured rather than trusted -------------------------
+#
+# Stage 2's discipline again: say whether upstream still does this BEFORE
+# failing RMSC for not doing it. A REFDRIFT here means the four rules above
+# have moved, not that RMSC regressed.
+probs=()
+for pair in "$UP:$UP_F" "$HALF:$HALF_F" "$DOWN:$DOWN_F"; do
+  s="${pair%%:*}"; f="${pair#*:}"
+  got=$(code_before "$WORK/sc.jobinfo.out" "$s")
+  [ "$got" = "$C_LIST" ] \
+    || probs+=("upstream: the jobinfo header for '$s' is preceded by '${got:-nothing}', wanted $C_LIST")
+  grep -qF " ($f):" "$WORK/sc.jobinfo.out" \
+    || probs+=("upstream: ' ($f):' is not contiguous - the friendly name or the colon was coloured")
+done
+grep -qF "    $(e $C_NOT)NO JOB INFO" "$WORK/sc.jobinfo.out" \
+  || probs+=("upstream: the NO JOB INFO line is not four spaces then $C_NOT")
+grep -qF "kernel task)$(e $C_RESET)" "$WORK/sc.jobinfo.out" \
+  || probs+=("upstream: the NO JOB INFO sentence is not closed by a reset")
+if [ ${#probs[@]} -eq 0 ]; then
+  report PASS ref-jobinfo-colours \
+    "(reference) upstream: cyan header in all 3 states, magenta NO JOB INFO, $(n_esc "$WORK/sc.jobinfo.out") escape bytes"
+  pass=$((pass+1))
+else
+  drift_case ref-jobinfo-colours "${probs[@]}"
+fi
+
+# --- COLOUR ON: the separating half ----------------------------------------
+#
+# THE HEADERS ARE COMPARED AGAINST UPSTREAM'S OWN BYTES, line by line, located
+# by their visible text - case (7)'s method, and for its reason: locating by
+# the escape-stripped text finds the line whether it is coloured or not, so the
+# search cannot presuppose the answer. A whole-output diff is deliberately NOT
+# done: the job lines are ordered differently by design (upstream Java HashSet,
+# RMSC ascending by job number - docs/parity.md), so it would fail for a reason
+# that has nothing to do with colour. tools/jobinfo-test.sh compares the job
+# SET instead.
+probs=()
+for pair in "$UP:$UP_F" "$HALF:$HALF_F" "$DOWN:$DOWN_F"; do
+  s="${pair%%:*}"; f="${pair#*:}"
+  got=$(code_before "$WORK/scr.jobinfo.out" "$s")
+  [ "$got" = "$C_LIST" ] \
+    || probs+=("RMSC: the jobinfo header for '$s' is preceded by '${got:-nothing}', wanted $C_LIST")
+  grep -qF " ($f):" "$WORK/scr.jobinfo.out" \
+    || probs+=("RMSC: ' ($f):' is not contiguous - something coloured the friendly name or the colon")
+  if find_line "$WORK/sc.jobinfo.out" "$WORK/sc.jhdr.$s" "$s ($f):"; then
+    if find_line "$WORK/scr.jobinfo.out" "$WORK/scr.jhdr.$s" "$s ($f):"; then
+      cmp -s "$WORK/sc.jhdr.$s" "$WORK/scr.jhdr.$s" || \
+        probs+=("RMSC's jobinfo header for '$s' is not upstream's bytes:" \
+                "RMSC:     $(shq "$WORK/scr.jhdr.$s")" \
+                "upstream: $(shq "$WORK/sc.jhdr.$s")")
+    else
+      probs+=("RMSC's \`jobinfo\` has no line whose visible text is '$s ($f):'")
+    fi
+  else
+    probs+=("upstream's \`jobinfo\` has no line whose visible text is '$s ($f):' - the reference has changed")
+  fi
+done
+grep -qF "    $(e $C_NOT)NO JOB INFO" "$WORK/scr.jobinfo.out" \
+  || probs+=("RMSC: the NO JOB INFO line is not four spaces then $(e $C_NOT | cat -v) - the indent must stay outside the colour and the sentence must be $C_NOT, not $C_LIST")
+grep -qF "kernel task)$(e $C_RESET)" "$WORK/scr.jobinfo.out" \
+  || probs+=("RMSC: the NO JOB INFO sentence is not closed by a reset")
+# The job lines carry nothing. Counted rather than pattern-matched, because
+# what would be wrong here is an escape appearing at all.
+jl=$("$PY" -c '
+import re, sys
+d = open(sys.argv[1], "rb").read().decode("utf-8", "replace")
+n = 0
+for line in d.split("\n"):
+    if re.search(r"[0-9]{6}/", line) and "\x1b" in line:
+        n += 1
+print(n)' "$WORK/scr.jobinfo.out")
+[ "$jl" = 0 ] || probs+=("RMSC: $jl job line(s) carry an escape; upstream leaves them plain")
+ns=$(n_esc "$WORK/sc.jobinfo.out"); nr=$(n_esc "$WORK/scr.jobinfo.out")
+[ "$nr" = "$ns" ] || probs+=("RMSC emits $nr escape bytes where upstream emits $ns")
+check_named jobinfo-is-coloured measured \
+  "cyan header in all three states, magenta NO JOB INFO, plain job lines, $ns escape bytes" \
+  "${probs[@]}"
+
+# --- COLOUR OFF: the control ------------------------------------------------
+#
+# Piped, neither implementation may carry an escape. This passes today for RMSC
+# for the uninteresting reason that it colours nothing anywhere, and it is the
+# guard on the fix: the moment jobinfo learns about colour, this is where it
+# can leak.
+probs=()
+n=$(n_esc "$WORK/scr.jobinfop.out")
+[ "$n" -eq 0 ] || probs+=("RMSC put $n escape byte(s) into a PIPED \`jobinfo\`")
+n=$(n_esc "$WORK/sc.jobinfop.out")
+[ "$n" -eq 0 ] || probs+=("upstream put $n escape byte(s) into a piped \`jobinfo\` - the reference has changed")
+grep -qFx -- "$NOJOB" "$WORK/sc.jobinfop.out" \
+  || probs+=("upstream's piped NO JOB INFO line is not the plain four-space form - the reference has changed")
+check_named jobinfo-plain-on-a-pipe measured \
+  "piped \`jobinfo\` carries no escapes from either implementation" "${probs[@]}"
 
 echo
 echo "pass=$pass   failed=$failed   refdrift=$refdrift"

@@ -137,4 +137,6 @@ STRPGMEXP PGMLVL(*CURRENT) SIGNATURE('RMSC 0.4.0')
   EXPORT SYMBOL(SCQRY_job_sample)
   /* Thousands separators, for the perfinfo fields upstream separates. */
   EXPORT SYMBOL(SCOUT_thousands)
+  /* jobinfo's line for a service with no jobs - see SCOUT_D. */
+  EXPORT SYMBOL(SCOUT_no_job_info)
 ENDPGMEXP

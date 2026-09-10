@@ -358,3 +358,38 @@ Fixed in `api-silence`, `colour`, `narration`, `load-warning`, `sampletime` and
 only, which is already correct — with no INT trap the signal kills the script,
 the EXIT trap still runs, and the status is non-zero.
 
+## Two accounts on the box, two different `~/.sc/services`
+
+Found 10 September 2026 by the author of `tools/jobinfo-test.sh`, while
+confirming that two pre-existing failures had stayed put.
+
+There are two deploy trees: `/home/CLAUDE/builds/rm-sc` and
+`/home/RICHARD/builds/rm-sc`. That much is tidiness. What is not is that
+**`list`, `check` and `groups` read `$HOME/.sc/services`, and the two accounts
+hold different definitions.** CLAUDE's is empty; RICHARD's holds four
+deliberately broken ones, including a definition with no `name:` that RMSC
+lists and upstream refuses to load.
+
+So the same harness gives different answers in the two accounts, and neither
+is wrong:
+
+    colour-test.sh on CLAUDE    pass=33 failed=0
+    colour-test.sh on RICHARD   pass=31 failed=2
+
+The two failures on RICHARD are real, and on CLAUDE they **cannot occur** —
+with nothing in the user directory there is nothing for the two
+implementations to disagree about. A green run on the empty account is a
+weaker result than it looks, and looks identical to a strong one.
+
+**This is the second time this project has learned it.** `error-delivery-test.sh`
+asserted stderr was silent on success, which is a property of a clean profile
+rather than of either implementation, and it broke the day it first ran
+against a populated one. The note added then says the harness "is now run in
+both states, clean and populated, and must pass in both". That rule was about
+one harness; it is a property of every harness that reads the user directory.
+
+Practical consequence when reading a result: **say which account it was taken
+in.** A harness comparing RMSC against upstream over the real service list is
+measuring the definitions that account can see, and a difference that only
+appears with a broken definition present cannot appear without one.
+
