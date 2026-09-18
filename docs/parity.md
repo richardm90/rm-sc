@@ -113,6 +113,27 @@ Verdicts are `by design` (sanctioned below), `undecided` (listed below, awaiting
 `PASS`, or `REGRESSION`. The gate fails when something regresses **and** when something starts
 matching without the list being updated, so the classification cannot quietly go stale.
 
+**The verdict is classified per operation, not per recorded difference — and that is a gap.**
+`perfinfo` is the case that surfaced it: it carries two settled differences (the affinity lines
+and the job-block order, below), and a THIRD, unrelated difference in that operation would pass
+the gate silently, because `INTENTIONAL` sanctions the operation as a whole rather than the
+specific rows recorded here. `perfinfo` itself is deliberately kept out of the gate's
+`by design`/`INTENTIONAL` list for exactly this reason — see the job-order discussion below.
+
+**DECIDED 18 September 2026: tighten `INTENTIONAL` to per-recorded-difference.** The gate should
+match an observed difference against the specific ones catalogued in `docs/messages.md`, and fail
+on anything else in that operation rather than passing the operation wholesale. Gate-infrastructure
+work, not yet implemented.
+
+**Which account verification runs under is also unsettled, separately from the differences
+themselves.** `list`, `check` and `groups` read `$HOME/.sc/services`. `CLAUDE`'s copy is empty;
+Richard's holds four broken, unrelated definitions. A green run under `CLAUDE` is weaker than it
+looks — there is nothing there to trip over, so it cannot be told apart from a genuinely strong
+run.
+
+**DECIDED 18 September 2026: stage a dedicated fixture under `CLAUDE`'s `$HOME/.sc/services`**
+for verification runs, rather than fixing or using Richard's personal account. Not yet done.
+
 ## Differences that are intentional
 
 The first two are specified by the plan, in the plan's own words. The third was decided by
@@ -285,20 +306,24 @@ discards the descriptor, leaking one per definition per load. The same defect in
 this one is not, because closing it means restructuring a condition on the definition-loading
 path, which feeds the byte-exact operations and wants its own test rather than a drive-by change.
 
-### Three things about `loginfo` deliberately NOT changed
+### Three things about `loginfo`, two of them now decided
 
 **A stopped service whose log is still on disk.** Upstream reports no log; RMSC reports the log.
 Upstream's `loginfo` is scoped to the *running instance*, RMSC's to the *file*. Found by the test
 author while writing the cases above, and pinned by the harness — which asserts only which case
-each implementation is in, not the text — rather than asserted either way. **This needs a
-decision.** It is a scoping change rather than a wording one, and it is the change somebody
-implementing "not found goes to stderr" would reach for next without noticing it is a second
-decision.
+each implementation is in, not the text — rather than asserted either way.
+
+**DECIDED 18 September 2026: RMSC will match upstream** and scope `loginfo` to the running
+instance, not the file. Not yet implemented.
 
 **The log file naming.** Upstream writes `~/.sc/logs/<timestamp>.<svc>.log` and RMSC writes
 `~/.sc/logs/<svc>.log`, so neither finds a log written by the other. Pre-existing, recorded in
-`docs/messages.md` as a property of `SCLOG_path`, and untouched here — closing it would change
-where RMSC writes logs, which is a larger decision than this one.
+`docs/messages.md` as a property of `SCLOG_path`.
+
+**DECIDED 18 September 2026: RMSC will switch to upstream's timestamped naming.** The most
+invasive item in this decision round — it changes where RMSC writes logs on disk, not just what
+it prints — so the exact timestamp format needs measuring, and this needs its own careful pass
+rather than folding into whatever change closes the item above. Not yet implemented.
 
 **The spooled-file section.** RMSC prints `    spooled file <name> number <n> in <job>` after the
 log line. Upstream has a spooled-file path of its own (`getSpooledFiles`), and **what it prints
@@ -348,12 +373,47 @@ through `SCOUT_list_row`, which is the third place that construct appears, and
 The gate cannot see it, because it normalises job numbers to `NNNNNN`, so `tools/jobinfo-test.sh`
 compares the job **set** rather than the output, and says so.
 
+### The `sc: ` prefix and short-versus-friendly naming
+
+Two whole-surface differences, catalogued in full in `docs/messages.md`'s "two whole-surface
+differences" section — each touches many rows at once rather than being a single case, which is
+why they were tracked separately from the per-row texts.
+
+**The `sc: ` prefix.** `SCRUN` writes `'sc: ' + opts.err` on every stderr line RMSC produces.
+Measured, 3 September 2026, byte by byte: upstream's stderr is bare at column 1 in every case
+probed — the usage block, `Could not find definition for service 'x'`,
+`WARNING: No services are found in group 'x'`. Nothing in `tools/error-delivery-test.sh` pins the
+prefix either way, which is why it sat undecided rather than being caught as a defect.
+
+**DECIDED 18 September 2026: drop it.** RMSC's stderr will be bare, matching upstream. Not yet
+implemented.
+
+**Short-versus-friendly naming.** Upstream's progress line uses a service's **short** name; its
+status and error lines use the **friendly** name. RMSC uses the short name throughout. Already
+measured and closed for the narration family specifically (above) and for the per-member group
+error (`tools/error-delivery-test.sh:902`); what was still open was applying the same rule
+everywhere else it appears — the `SCEXEC` failure texts among them.
+
+**DECIDED 18 September 2026: apply it everywhere, matching upstream.** Progress lines keep the
+short name; status and error lines switch to the friendly name. The widest-touching item in this
+round of decisions — many call sites print one or the other today without distinguishing which
+kind of line they are. Not yet implemented.
+
 **`info`** — eight measured differences, listed in full in `docs/messages.md`. The two that are
 shape rather than spelling: upstream prints `Depends on the following services:` once and indents
 the list where RMSC repeats a `Depends on:` label per dependency, and upstream omits
 `Working Directory:` entirely when `dir` is unset where RMSC prints a resolved one always. RMSC
 also omits the environment block and the closing separator, prints a `Group:` line upstream does
 not, and differs in blank-line counts at three places.
+
+**DECIDED 18 September 2026: full parity, all eight.** Blank-line counts, the `Batch Mode:` line,
+the dependency header-plus-indent shape, omitting `Working Directory:` when `dir` is unset rather
+than inventing a resolved path, the environment-variables block, and the closing separator plus
+its three trailing blanks — all brought into line with the shape recorded in `docs/messages.md`.
+
+The `Group:` line is the one item here that is not a spelling or shape fix but an RMSC addition
+with no upstream counterpart at all — unlike `PGM-` above, which upstream actively rejects and
+RMSC deliberately keeps as an extension. **Decided: remove it.** Not yet implemented.
 
 **`perfinfo`** — the plan looked like it settled this and did not. It calls the operation
 *"Improved — drops upstream's optional Python 3 + `ibm_db` dependency, since embedded SQL reads
@@ -650,6 +710,10 @@ one carries that port as a criterion, and reports it under its real name with al
 definition's jobs. RMSC always treats `port:N` as ad hoc. The plan lists `port:<n>` as "Ad hoc,
 no definition needed" but does not say whether an existing definition should win.
 
+**DECIDED 18 September 2026: RMSC will match upstream.** `port:N` checks defined services for one
+carrying that port first; only when none matches does it fall back to ad hoc. Not yet
+implemented.
+
 Neither is client-affecting — the client uses short names and `group:` only — but the first is on
 the format-critical path.
 
@@ -672,6 +736,12 @@ The second is worth reading twice: the count goes *up*, because an `--ignore-gro
 config file replaces the default `system` exclusion rather than adding to it. So a `.scrc`
 nobody remembers writing changes which services a bare `check` shows — and changes it for
 upstream only. **Undecided**; the plan does not mention either mechanism.
+
+**Still undecided as of 18 September 2026, and deliberately so.** This is the one item in the
+9-18 September decision round that was not settled, because it is an input source rather than a
+formatting gap: before it can be scoped, something has to establish what a `scrc`/`SC_OPTIONS`
+implementation would actually need to read and honour on this box, which the measurement above
+does not answer by itself.
 
 **`services.dir` — a custom definition directory.** Upstream takes one from the `services.dir`
 JVM system property, searched last so it overrides everything else; confirmed on 1.7.1 by
@@ -844,13 +914,26 @@ anything that ran, which is the argument for the fixture pack rather than a foot
 
 ## Closing Verification step 8
 
-1. Decide the four undecided operations above: fix to match upstream, or record the reason not
-   to, here.
-2. Decide the two specifier differences.
+1. ~~Decide the four undecided operations above~~ — **decided, 18 September 2026.** `info`: full
+   parity on all eight points, plus removing the `Group:` line. `loginfo`: match upstream on the
+   two items it had been left deliberately open on (stopped-service scoping, log-file naming).
+   `jobinfo` and the affinity half of `perfinfo` were already matched. None of this is implemented
+   yet.
+2. ~~Decide the two specifier differences~~ — **decided.** `PGM-` stays an RMSC extension
+   (unchanged). `port:N` will match an existing definition first, falling back to ad hoc only when
+   none carries that port — **decided 18 September 2026**, not yet implemented.
 3. Widen the gate to exercise `port:` and `job:` specifiers, so the ad-hoc naming difference is
    covered by something that runs rather than by this paragraph.
 4. Remove whatever is settled from the gate's `UNDECIDED` list. It will then report step 8
-   complete, and fail if any of it silently changes afterwards.
+   complete, and fail if any of it silently changes afterwards. This also depends on tightening
+   `INTENTIONAL` to per-recorded-difference rather than per-operation — see "The gate" above —
+   since several operations carry both a settled part and one still open.
+
+Also decided 18 September 2026, not yet implemented: drop the `sc: ` stderr prefix; apply
+short-versus-friendly naming everywhere upstream does, not just in narration; stage a dedicated
+verification fixture under `CLAUDE`'s account rather than Richard's. `SC_OPTIONS`/`.scrc` was
+considered and deliberately left undecided pending further investigation — see "Beyond the
+operations — inputs RMSC does not read" above.
 
 Separately, and not part of step 8: the gate should compare `list -a` across all services, to
 hold Verification step 9's discovery parity. The two implementations agree on it today, but the
