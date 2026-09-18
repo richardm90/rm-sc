@@ -785,6 +785,10 @@ dcl-proc SCEXEC_info export;
   dcl-s line like(SCOUT_LINE_t);
   dcl-s i    like(INTEGER_t);
 
+  // TWO blanks, matching upstream - DECIDED 18 September 2026, docs/parity.md.
+  // RMSC printed one; the eight-point measurement in docs/messages.md records
+  // two both here and after the name line below.
+  SCOUT_writeln('');
   SCOUT_writeln('');
   SCOUT_writeln(SCOUT_RULE);
   // Through SCOUT_list_row rather than built here, and the point is that this
@@ -799,15 +803,19 @@ dcl-proc SCEXEC_info export;
   //
   // The rest of `info`'s colour is deliberately NOT done here: upstream also
   // colours its field labels cyan and its rule lines white 37, and `info`
-  // still carries eight measured non-colour differences, two of them shape
-  // rather than spelling. Colouring the body before its content matches would
-  // mean doing it twice.
+  // now matches on everything else, so colour is the one thing still open.
   SCOUT_writeln(SCOUT_list_row(def.short_name: def.friendly));
+  SCOUT_writeln('');
   SCOUT_writeln('');
   SCOUT_writeln('Defined in: ' + %trim(def.defined_at));
   SCOUT_writeln('');
-  SCOUT_writeln('Working Directory: ' + %trim(SCDEF_effective_dir(def)));
-  SCOUT_writeln('');
+  // OMITTED ENTIRELY when `dir` was never set, not printed with a resolved
+  // path invented for it - upstream has no line here for the common case.
+  // DECIDED 18 September 2026, docs/parity.md.
+  if %len(%trim(def.dir)) > 0;
+    SCOUT_writeln('Working Directory: ' + %trim(SCDEF_effective_dir(def)));
+    SCOUT_writeln('');
+  endif;
   SCOUT_writeln('Startup Command: ' + %trim(def.start_cmd));
   SCOUT_writeln('Startup Wait Time (s): ' + %char(def.startup_wait));
   SCOUT_writeln('');
@@ -834,21 +842,54 @@ dcl-proc SCEXEC_info export;
   endfor;
   SCOUT_writeln(line);
 
+  // The NOT-batch text is unconditional on upstream's side - DECIDED 18
+  // September 2026, docs/parity.md. RMSC used to print nothing at all here
+  // when the service was not submitted to batch.
   if def.batch_mode;
     SCOUT_writeln('Batch Mode: <submitted to batch>');
     SCOUT_writeln('    Batch Job Name: ' + %trim(SCLAUNCH_job_name(def)));
     if %len(%trim(def.sbmjob_opts)) > 0;
       SCOUT_writeln('    SBMJOB options: ' + %trim(def.sbmjob_opts));
     endif;
+  else;
+    SCOUT_writeln('Batch Mode: <not running in batch>');
+  endif;
+  SCOUT_writeln('');
+
+  // ONE HEADER, indented list beneath it - a different SHAPE, not a
+  // different spelling, from the `Depends on: <name>` label this used to
+  // repeat per dependency. DECIDED 18 September 2026, docs/parity.md.
+  if def.dep_count > 0;
+    SCOUT_writeln('Depends on the following services:');
+    for i = 1 to def.dep_count;
+      SCOUT_writeln('    ' + %trim(def.deps(i)));
+    endfor;
+    SCOUT_writeln('');
   endif;
 
-  for i = 1 to def.dep_count;
-    SCOUT_writeln('Depends on: ' + %trim(def.deps(i)));
-  endfor;
+  // `Group:` is REMOVED, not reshaped - upstream has no line here at all,
+  // unlike `PGM-` elsewhere, which upstream rejects and RMSC deliberately
+  // keeps as its own extension. DECIDED 18 September 2026, docs/parity.md.
 
-  for i = 1 to def.group_count;
-    SCOUT_writeln('Group: ' + %trim(def.groups(i)));
-  endfor;
+  if def.inherit_vars;
+    SCOUT_writeln('Inherits environment variables?: true');
+  else;
+    SCOUT_writeln('Inherits environment variables?: false');
+  endif;
+  if def.envvar_count > 0;
+    SCOUT_writeln('Custom environment variables:');
+    for i = 1 to def.envvar_count;
+      SCOUT_writeln('    ' + %trim(def.envvars(i)));
+    endfor;
+  endif;
+
+  // The closing separator and its three trailing blanks - upstream closes
+  // the block it opened; RMSC used to leave it open. DECIDED 18 September
+  // 2026, docs/parity.md.
+  SCOUT_writeln(SCOUT_RULE);
+  SCOUT_writeln('');
+  SCOUT_writeln('');
+  SCOUT_writeln('');
 
   // Unrecognised keys are reported by the loader now, on stderr, on every
   // invocation - which is what upstream does. Printing them here as well
