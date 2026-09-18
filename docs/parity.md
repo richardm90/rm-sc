@@ -62,7 +62,7 @@ that step asks for.
 | *(colour off when not a TTY)* | assertion | **pass** | — |
 | `file` | live differential | **by design** | upstream prints the definition's *path*; RMSC prints its *contents* |
 | `scrunattrs` | live differential | **by design** | upstream lists running jobs and their run attributes; RMSC prints the `SCOMMANDER_*` variables it sets |
-| `info` | live differential | **undecided** | omits the environment-variables block and the closing separator, adds a `Group:` line, and shows a resolved working directory rather than the raw one |
+| `info` | live differential | **undecided** (one item open, not this) | all eight measured differences matched 18 September 2026 — the gate's remaining `info` difference is the separate, pre-existing relative-`dir:` question, not one of the eight |
 | `jobinfo` | live differential | **pass** | matched 10 September 2026 — header, indent, not-running text, per-command blank line and colour |
 | `loginfo` | live differential | **pass** (two items open, none of them this) | matched 9 September 2026, stopped-service scoping matched 18 September 2026 — see below |
 | `perfinfo` | live differential | **by design** | two differences, both settled: three affinity lines per job that no API carries, and the order of the job blocks, which upstream draws from a hash and RMSC sorts — see below |
@@ -403,21 +403,24 @@ short name; status and error lines switch to the friendly name. The widest-touch
 round of decisions — many call sites print one or the other today without distinguishing which
 kind of line they are. Not yet implemented.
 
-**`info`** — eight measured differences, listed in full in `docs/messages.md`. The two that are
-shape rather than spelling: upstream prints `Depends on the following services:` once and indents
-the list where RMSC repeats a `Depends on:` label per dependency, and upstream omits
-`Working Directory:` entirely when `dir` is unset where RMSC prints a resolved one always. RMSC
-also omits the environment block and the closing separator, prints a `Group:` line upstream does
-not, and differs in blank-line counts at three places.
+**`info`** — eight measured differences, listed in full in `docs/messages.md`, **all fixed 18
+September 2026.** The two that were shape rather than spelling: upstream prints `Depends on the
+following services:` once and indents the list, where RMSC used to repeat a `Depends on:` label
+per dependency; and upstream omits `Working Directory:` entirely when `dir` is unset, where RMSC
+used to print a resolved one always. RMSC also now prints the environment block and the closing
+separator it used to omit, matches upstream's blank-line counts at all three places, and no longer
+prints a `Group:` line at all — the one item here that was an RMSC addition with no upstream
+counterpart, unlike `PGM-` above, which upstream actively rejects and RMSC deliberately keeps as
+an extension.
 
-**DECIDED 18 September 2026: full parity, all eight.** Blank-line counts, the `Batch Mode:` line,
-the dependency header-plus-indent shape, omitting `Working Directory:` when `dir` is unset rather
-than inventing a resolved path, the environment-variables block, and the closing separator plus
-its three trailing blanks — all brought into line with the shape recorded in `docs/messages.md`.
-
-The `Group:` line is the one item here that is not a spelling or shape fix but an RMSC addition
-with no upstream counterpart at all — unlike `PGM-` above, which upstream actively rejects and
-RMSC deliberately keeps as an extension. **Decided: remove it.** Not yet implemented.
+`tools/info-test.sh` (new) pins the shape against three staged definitions — full (two
+dependencies, a group, custom environment variables, no `dir`), minimal (nothing set), and one
+with `dir` set to an absolute path as the regression control for the direction that already
+worked. All 30 checks pass, and the fidelity gate's live differential now matches on 4 of the 5
+real services swept; the fifth, `mapepire`, still differs on `Defined in:` and a raw-versus-
+resolved `Working Directory: .` — the separate, already-documented relative-`dir:` question (see
+`tools/gate-fixtures/README.md`'s `rmscgate_info_reldir`), not one of the eight and not touched by
+this work.
 
 **`perfinfo`** — the plan looked like it settled this and did not. It calls the operation
 *"Improved — drops upstream's optional Python 3 + `ibm_db` dependency, since embedded SQL reads
@@ -709,17 +712,32 @@ it outright — `sc check PGM-QZSHSH` exits 253 with `Could not find definition 
 upstream user nothing, the plan lists `PGM-` among the criterion forms, and RMSC is expected to
 grow beyond upstream in places. Recorded here so it is not later "fixed" into a rejection.
 
-**`port:N` resolves differently.** Upstream matches the specifier to a *defined* service when
-one carries that port as a criterion, and reports it under its real name with all of that
-definition's jobs. RMSC always treats `port:N` as ad hoc. The plan lists `port:<n>` as "Ad hoc,
-no definition needed" but does not say whether an existing definition should win.
+**`port:N` resolves differently — MATCHED 18 September 2026.** Upstream matches the specifier to
+a *defined* service when one carries that port as a criterion, and reports it under its real name
+with all of that definition's jobs. RMSC used to always treat `port:N` as ad hoc. The plan lists
+`port:<n>` as "Ad hoc, no definition needed" but never said whether an existing definition should
+win.
 
-**DECIDED 18 September 2026: RMSC will match upstream.** `port:N` checks defined services for one
-carrying that port first; only when none matches does it fall back to ad hoc. Not yet
-implemented.
+**DECIDED and IMPLEMENTED 18 September 2026: RMSC now matches upstream.** `resolve_one` in
+`SCMAIN.RPGLE` checks the loaded collection for a definition carrying the requested port before
+falling back to `SCMAIN_adhoc` — usable criteria only, so an unusable one (which reads as port 0)
+cannot collide with `port:0`, this project's standing ad-hoc control.
 
-Neither is client-affecting — the client uses short names and `group:` only — but the first is on
-the format-critical path.
+**The candidate has to be VISIBLE, not merely loaded, and that took a second pass to get right.**
+The first version searched every definition `SCCOLL` had loaded, and it broke live against this
+box's real `system_sshd` definition — in the `system` group a bare `check` excludes by default —
+which claims port 22 and made `port:22` resolve to it even though upstream, measured the same run,
+still answered ad hoc. Upstream's matching respects the same group exclusion `SCEXEC_check_all`
+and `SCEXEC_list` apply, so the search now carries the same `SCCOLL_in_groups(...: ignore_groups)`
+guard. Found by `tools/adhoc-name-test.sh`'s stage 2 and `scrunattrs` cases turning up
+`system_sshd` where an ad-hoc row was expected, on a live run against the real box — not by a case
+written in advance, since nothing in this repository can name that definition to test against
+directly.
+
+`tools/adhoc-name-test.sh`'s stage 6 covers the collision (a colliding definition wins) and the
+non-collision control (an unclaimed port still falls back to ad hoc) — both pass, and the fidelity
+gate's live differential confirms it on 5 real services with no regression. Neither half is
+client-affecting — the client uses short names and `group:` only.
 
 ## Beyond the operations — inputs RMSC does not read
 
