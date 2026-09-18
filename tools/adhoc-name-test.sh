@@ -198,12 +198,15 @@
 #   for the command that named it - so there is nothing to assert.
 #
 #   WHETHER A DEFINITION NAMED `ad_hoc_port_22` SHOULD WIN over the ad-hoc
-#   reading of `port:22`. Tempting for stage 5, and left alone on purpose:
-#   docs/parity.md records that upstream resolves `port:N` to a DEFINED service
-#   carrying that port while RMSC always treats it as ad hoc, and calls that
-#   difference UNDECIDED. A case there would be asserting an answer nobody has
-#   given. Stage 5's staged definitions therefore collide with nothing - no
-#   shared name, no shared criterion.
+#   reading of `port:22` USED TO belong in this list. It no longer does:
+#   docs/parity.md now records "DECIDED 18 September 2026: RMSC will match
+#   upstream" - `port:N` checks defined services for one carrying that port
+#   FIRST, reported under that definition's own short name, falling back to
+#   ad hoc only when none matches. Not yet implemented. Stage 5's staged
+#   definitions still collide with nothing on purpose - that stage is the
+#   proof that ad-hoc naming is store-blind, and a collision would answer a
+#   different question. The collision itself, and the fallback beside it, are
+#   stage 6's.
 #
 #   THE WORDING OF ANY WARNING OR ERROR. That is the separate D2 message work.
 #
@@ -230,7 +233,8 @@
 #
 # NO SERVICE NAME FROM THIS MACHINE IS WRITTEN INTO THIS FILE. The repository
 # is public. `port:22` and `QINTER`/`QUSRWRK` are IBM-supplied; `QZSHSH` is the
-# IBM-supplied shell program; stage 5's two definition names are invented here.
+# IBM-supplied shell program; stage 5's two definition names and stage 6's one
+# colliding definition name are invented here.
 #
 # Set KEEP=1 to leave the work directory behind.
 
@@ -1115,10 +1119,20 @@ heading
 # account a run was taken in.
 #
 # NOTHING STAGED HERE COLLIDES with the specifiers under test - no shared name,
-# no criterion on port 22 - because upstream resolves `port:N` to a DEFINED
-# service carrying that port while RMSC always treats it as ad hoc, and
-# docs/parity.md calls that difference UNDECIDED. A collision case would be
-# asserting an answer nobody has given.
+# no criterion on port 22. That was deliberate while whether a definition
+# should win over `port:N` was undecided - a collision case would have been
+# asserting an answer nobody had given. docs/parity.md now records "DECIDED
+# 18 September 2026: RMSC will match upstream": `port:N` checks defined
+# services for one carrying that port first, falling back to ad hoc only when
+# none matches. Not yet implemented. This stage stays collision-free on
+# purpose - it is the proof that ad-hoc naming does not come from the
+# definition store at all, which is a different question from whether a
+# definition should be preferred when one exists. The collision question, and
+# the fallback beside it, are stage 6's, in a directory of its own: adding a
+# colliding definition to svc-full here would make THIS stage's own
+# store-blind comparison fail once port:N resolution is fixed, since port:22
+# would then read differently under svc-full than under no directory or an
+# empty one - the exact thing this stage exists to rule out.
 mkdir -p "$WORK/svc-empty" "$WORK/svc-full"
 {
   printf 'name: Zulu Ad Hoc Bystander\n'
@@ -1149,6 +1163,208 @@ for spec in 'port:22' 'job:qinter'; do
 done
 
 echo
+# ---------------------------------------------------------------------------
+echo "== stage 6: port:N against a colliding definition - DECIDED 18 September 2026"
+echo
+heading
+# ---------------------------------------------------------------------------
+#
+# STAGE 5 PROVED THE NAME IS STORE-BLIND WHEN NOTHING IN THE STORE CLAIMS THE
+# PORT. This stage is the other half, and it exists because docs/parity.md
+# now answers the question stage 5 deliberately left open: "DECIDED 18
+# September 2026: RMSC will match upstream" - `port:N` checks defined
+# services for one carrying that port FIRST, reported under THAT
+# definition's own short name, falling back to ad hoc only when none
+# matches. Not yet implemented - today RMSC always treats `port:N` as ad
+# hoc regardless of a colliding definition - so the collision case below is
+# EXPECTED TO FAIL until it is, and is expected to fail for one specific
+# reason, not any reason.
+#
+# A NEW DIRECTORY, NOT svc-full. Adding a colliding definition to svc-full
+# would break stage 5's own comparison, which asserts scr's row for port:22
+# is IDENTICAL with no services directory, an empty one, and svc-full. Once
+# port:N resolution is fixed, a definition claiming port 22 in svc-full would
+# make that row differ from the other two ON PURPOSE - exactly the outcome
+# stage 5 exists to rule out staying true. So this stage stages into
+# $WORK/svc-collide, used nowhere else in this file.
+#
+# WHY PORT 22, AND NOT A STAGED ONE. An unstaged, dead port would make both
+# implementations report NOT RUNNING whichever way resolution goes, and a
+# fixed and an unfixed RMSC would then be indistinguishable - the same trap
+# tools/gate-fixtures/README.md's rmscgate_type_port entry names, and the one
+# CLAUDE.md's own port:0 regression fell into behind a full suite that
+# passed. Port 22 is this project's standing live fixture - the session
+# arrives over SSH, so sshd is listening - and it is already this file's only
+# RUNNING case (stage 0(b)).
+#
+# THE ASSERTION KEYS ON THE NAME, NOT THE STATUS - the rule this file's
+# CLAUDE.md states in full: "a fix and the break it could have been must
+# disagree about at least one case in the suite." Both today's (wrong) RMSC
+# and a fixed RMSC report port:22 RUNNING against this directory, because
+# sshd does not stop listening on account of a YAML file - so a case that
+# only checked "RUNNING appears somewhere" would pass on both and prove
+# nothing. What differs, and what the assertion below keys on, is WHICH NAME
+# comes back: the ad-hoc reading (`ad_hoc_port_22`) or the colliding
+# definition's own short name.
+#
+# UPSTREAM'S ROW IS CAPTURED LIVE, exactly as stage 0 and stage 3 capture
+# rather than assume, even though this fixture's own short name and
+# friendly name are things this file chose and could in principle have
+# hard-coded. Capturing live is what stage 3 exists to defend against a
+# mis-transcription; the same reasoning applies to a table of one row.
+#
+# OUT OF SCOPE HERE, on purpose, matching the split the header above already
+# draws: whether `jobinfo`, `info` and the rest also switch to the colliding
+# definition's jobs is a real question and a real follow-on, but it is not
+# this file's `check`-row question, and re-running rival 4's five surfaces
+# against a definition this stage invents would be testing jobinfo-test.sh's
+# and loginfo-test.sh's territory from here instead of theirs.
+mkdir -p "$WORK/svc-collide"
+COLLIDE_FILE='rmsc_ah_collide'
+COLLIDE_FRIENDLY='RMSC Ad Hoc Collision Fixture'
+{
+  printf 'name: %s\n' "$COLLIDE_FRIENDLY"
+  printf 'start_cmd: /QOpenSys/usr/bin/sleep 30\n'
+  printf 'check_alive: 22\n'
+  printf 'startup_wait_time: 2\n'
+} > "$WORK/svc-collide/$COLLIDE_FILE.yaml"
+
+# grab_sc_dir TAG DIR arg... - upstream's services directory is a JVM
+# property, not an environment variable. JAVA_TOOL_OPTIONS is the mechanism
+# tools/gate-fixtures/README.md documents for reaching it from a shell, and
+# using it makes the JVM announce itself on stderr before sc prints anything
+# of its own - filtered here by MATCHING that line, per that README's
+# installation note 1, never by dropping stderr's first line, which would
+# just as happily eat a real message. The same filter appears in
+# tools/narration-test.sh's sc_run, tools/d2-probe.sh's sc_ and
+# tools/gate-fixtures-run.sh's sc_ - this file borrows their idiom rather
+# than inventing a fourth.
+grab_sc_dir() {  # tag dir arg...
+  local tag="$1" dir="$2"; shift 2
+  JAVA_TOOL_OPTIONS="-Dservices.dir=$dir" "$SC" "$@" \
+    > "$WORK/$tag.out" 2> "$WORK/$tag.err.raw" </dev/null
+  RC_SAVED[$tag]=$?
+  grep -v 'Picked up' "$WORK/$tag.err.raw" > "$WORK/$tag.err" 2>/dev/null
+}
+
+# port_case TAG WANT_NAME WANT_DESC LABEL - the shared shape behind both rows
+# in this stage: the ABEND check, the exit code, and the row's three fields -
+# the same shape check_case uses in stage 1, generalised because stage 1
+# always derives its expectation from adhoc_name/adhoc_desc and this stage
+# sometimes wants a DEFINITION's own name instead.
+port_case() {
+  local tag="$1" want_name="$2" want_desc="$3" label="$4"
+  local problems=() o="$WORK/$tag.out" e="$WORK/$tag.err"
+  if grep -qE "$ABEND_RE" "$o" "$e" 2>/dev/null; then
+    report FAIL "$label" "ABEND: $(grep -hE -m1 "$ABEND_RE" "$o" "$e")"
+    detail "artefacts: $tag.out $tag.err"
+    failed=$((failed+1)); return 1
+  fi
+  [ "${RC_SAVED[$tag]:-1}" -eq 0 ] || problems+=("exit ${RC_SAVED[$tag]}, wanted 0")
+  if ! parse_row "$o"; then
+    problems+=("stdout is not one parseable check row")
+    problems+=("  got: $(head -n 3 "$o" | tr '\n' '|')")
+  else
+    [ "$ROW_NAME" = "$want_name" ] || problems+=("name is '$ROW_NAME', wanted '$want_name'")
+    [ "$ROW_DESC" = "$want_desc" ] || problems+=("description is '$ROW_DESC', wanted '$want_desc'")
+  fi
+  if [ ${#problems[@]} -eq 0 ]; then
+    report PASS "$label" "$ROW_NAME ($ROW_DESC)"
+    pass=$((pass+1)); return 0
+  fi
+  report FAIL "$label" "wanted '$want_name'"
+  local p; for p in "${problems[@]}"; do detail "$p"; done
+  detail "artefacts: $tag.out $tag.err"
+  failed=$((failed+1)); return 1
+}
+
+# --- the reference: what upstream actually does about the colliding definition ---
+grab_sc_dir sc.collide "$WORK/svc-collide" check 'port:22'
+UP_COLLIDE_NAME=''
+if ! parse_row "$WORK/sc.collide.out"; then
+  report REFDRIFT collide-reference "upstream's row for the collision case does not parse"
+  detail "got: $(head -n 3 "$WORK/sc.collide.out" | tr '\n' '|')"
+  detail "the collision case below rests on this row and is skipped without it"
+  refdrift=$((refdrift+1))
+elif [ "$ROW_NAME" = "$(adhoc_name 'port:22')" ]; then
+  # Upstream itself would have to have stopped resolving port:N to a defined
+  # service for this to happen - the premise docs/parity.md's decision rests
+  # on. Flagged as drift against the reference, not as a failure of RMSC.
+  report REFDRIFT collide-reference "upstream now reports the ad hoc name '$ROW_NAME' for a colliding port:22"
+  detail "docs/parity.md's decision rests on upstream resolving port:N to a defined service first"
+  detail "re-measure before trusting the collision case below - it is skipped this run"
+  refdrift=$((refdrift+1))
+else
+  UP_COLLIDE_NAME="$ROW_NAME"
+  UP_COLLIDE_DESC="$ROW_DESC"
+  report PASS collide-reference "upstream resolves the collision to $UP_COLLIDE_NAME ($UP_COLLIDE_DESC)"
+  pass=$((pass+1))
+fi
+
+# --- the collision case: RMSC, same directory, same specifier ---
+if [ -n "$UP_COLLIDE_NAME" ]; then
+  grab_env scr.collide "SC_SERVICES_DIR=$WORK/svc-collide" "$SCR" check 'port:22'
+  co="$WORK/scr.collide.out"; ce="$WORK/scr.collide.err"
+  if grep -qE "$ABEND_RE" "$co" "$ce" 2>/dev/null; then
+    report FAIL port-collision "ABEND: $(grep -hE -m1 "$ABEND_RE" "$co" "$ce")"
+    detail "artefacts: scr.collide.out scr.collide.err"
+    failed=$((failed+1))
+  else
+    collide_problems=()
+    [ "${RC_SAVED[scr.collide]:-1}" -eq 0 ] || \
+      collide_problems+=("exit ${RC_SAVED[scr.collide]}, wanted 0")
+    if ! parse_row "$co"; then
+      collide_problems+=("stdout is not one parseable check row")
+      collide_problems+=("  got: $(head -n 3 "$co" | tr '\n' '|')")
+    else
+      if [ "$ROW_NAME" = "$(adhoc_name 'port:22')" ]; then
+        collide_problems+=("name is '$ROW_NAME' - still the ad hoc reading")
+        collide_problems+=("this is the specific, expected-today failure: RMSC does not yet consult the definition store for port:N (docs/parity.md, DECIDED 18 September 2026, not yet implemented)")
+      elif [ "$ROW_NAME" != "$UP_COLLIDE_NAME" ]; then
+        collide_problems+=("name is '$ROW_NAME', which is NEITHER the ad hoc name NOR upstream's '$UP_COLLIDE_NAME' - a different defect from the one this stage is aimed at")
+      fi
+      [ "$ROW_DESC" = "$UP_COLLIDE_DESC" ] || \
+        collide_problems+=("description is '$ROW_DESC', wanted upstream's '$UP_COLLIDE_DESC'")
+    fi
+    if [ ${#collide_problems[@]} -eq 0 ]; then
+      report PASS port-collision "$ROW_NAME ($ROW_DESC) - the definition won, as decided"
+      pass=$((pass+1))
+    else
+      report FAIL port-collision "port:22 against a colliding definition"
+      for p in "${collide_problems[@]}"; do detail "$p"; done
+      detail "artefacts: scr.collide.out scr.collide.err sc.collide.out"
+      failed=$((failed+1))
+    fi
+  fi
+fi
+
+echo
+# --- the control: same directory, a port nothing in it claims ---
+#
+# port:0 IS ALREADY THIS FILE'S NOT-RUNNING BOUNDARY (stage 0(b), stage 1), so
+# reusing it here ties the control to a case already established rather than
+# inventing another. Nothing in svc-collide claims port 0, so BOTH
+# implementations must still read it as ad hoc even with the colliding
+# directory active - proving the fallback survives, and catching an
+# implementation that, wrongly, matches ANY definition whenever a services
+# directory merely exists rather than one that actually carries the port.
+# THIS is the case where old and new RMSC behaviour must AGREE.
+grab_sc_dir sc.nocollide "$WORK/svc-collide" check 'port:0'
+grab_env scr.nocollide "SC_SERVICES_DIR=$WORK/svc-collide" "$SCR" check 'port:0'
+
+if ! parse_row "$WORK/sc.nocollide.out" || [ "$ROW_NAME" != "$(adhoc_name 'port:0')" ]; then
+  report REFDRIFT control-reference "upstream's non-colliding control is not the ad hoc reading"
+  detail "got: $(head -n 3 "$WORK/sc.nocollide.out" | tr '\n' '|')"
+  detail "re-measure - the control below asserts against the ad hoc rule, and this says upstream itself no longer agrees with it here"
+  refdrift=$((refdrift+1))
+else
+  report PASS control-reference "upstream: $(adhoc_name 'port:0') ($(adhoc_desc 'port:0')), unaffected by svc-collide"
+  pass=$((pass+1))
+fi
+
+port_case scr.nocollide "$(adhoc_name 'port:0')" "$(adhoc_desc 'port:0')" port-no-collision
+
+echo
 echo "pass=$pass   failed=$failed   pinned-changed=$changed   reference-drift=$refdrift"
 echo "artefacts: $WORK   (.out, .err and .diff per case; KEEP=1 to keep them)"
 
@@ -1170,7 +1386,9 @@ echo "artefacts: $WORK   (.out, .err and .diff per case; KEEP=1 to keep them)"
 #   `info`; if the ad-hoc header ever renders differently it would be a fourth
 #   instance of the same family and belongs beside the other three.
 #
-#   WHETHER A DEFINITION SHOULD WIN over `port:N`. Undecided - see stage 5.
+#   WHETHER A DEFINITION SHOULD WIN over `port:N` used to be undecided and
+#   belonged here. It is decided now - docs/parity.md, 18 September 2026 -
+#   and it is tested in stage 6, not left unasserted.
 # ---------------------------------------------------------------------------
 
 if [ "$failed" -ne 0 ]; then

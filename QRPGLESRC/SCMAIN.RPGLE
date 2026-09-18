@@ -466,6 +466,55 @@ dcl-proc resolve_one;
     def  likeds(SCDEF_t);
   end-pi;
 
+  dcl-s work      like(SCMAIN_SPEC_t);
+  dcl-s want_port like(INTEGER_t);
+  dcl-s norm      like(SCDEF_CRIT_t);
+  dcl-s n         like(INTEGER_t);
+  dcl-s i         like(INTEGER_t);
+  dcl-s j         like(INTEGER_t);
+  dcl-ds cand likeds(SCDEF_t) inz(*likeds);
+
+  // port:N resolves to a DEFINED service carrying that port, before it is
+  // treated as ad hoc. DECIDED 18 September 2026, docs/parity.md - upstream
+  // matches the specifier to a definition when one claims the port and
+  // reports it under that definition's own name with all of its jobs;
+  // RMSC used to treat port:N as ad hoc unconditionally.
+  //
+  // Parsed with the same SCDEF_port_text() SCMAIN_adhoc uses below, so
+  // 'usable' means the same thing on both paths. An UNUSABLE criterion is
+  // skipped rather than matched: it holds port 0 regardless of what was
+  // written, and matching it would make port:0 collide with any definition
+  // whose own check_alive happens to be unusable - the same trap port:0
+  // is this project's standing NOT-RUNNING/ad-hoc control for.
+  //
+  // ONLY A VISIBLE DEFINITION CAN WIN - the same `SCCOLL_in_groups(...:
+  // ignore_groups)` exclusion SCEXEC_check_all/SCEXEC_list apply, not every
+  // definition SCCOLL loaded. Measured live: this box carries a real
+  // `system_sshd` definition claiming port 22, in the `system` group that a
+  // bare `check` excludes by default, and upstream still answers port:22 as
+  // ad hoc against it - it does not reach into a group a plain command
+  // would not otherwise show. Found by this project's own fidelity gate
+  // sweep the moment the port:N search went in unguarded, not by a case
+  // written in advance - recorded here so it is not lost a second time.
+  work = %trim(opts.spec);
+  if %len(work) > 5 and STRING_lower(%subst(work: 1: 5)) = 'port:';
+    if SCDEF_port_text(%subst(work: 6): want_port: norm);
+      n = SCCOLL_count(coll);
+      for i = 1 to n;
+        if SCCOLL_get(coll: i: cand) and not SCCOLL_in_groups(cand: opts.ignore_groups);
+          for j = 1 to cand.criteria_count;
+            if cand.criteria(j).kind = SCDEF_CHECK_PORT
+               and SCDEF_criterion_usable(cand.criteria(j))
+               and cand.criteria(j).port = want_port;
+              def = cand;
+              return true;
+            endif;
+          endfor;
+        endif;
+      endfor;
+    endif;
+  endif;
+
   // Ad hoc specifiers do not need a definition to exist
   if SCMAIN_adhoc(opts.spec: def);
     return true;
