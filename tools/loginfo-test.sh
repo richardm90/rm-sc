@@ -162,21 +162,21 @@
 #              change arriving, in which case this script and docs/parity.md
 #              need updating together.
 #
-# THE STOPPED-SERVICE DIVERGENCE, which was not in the brief and is measured
-# here for the first time:
+# THE STOPPED-SERVICE SCOPE, which was not in the brief and was measured here
+# for the first time, on 9 September 2026:
 #
 #   With the service STOPPED and its log file still on disk, upstream reports
-#   NO LOG - the case C form, on stderr - while RMSC reports the log exactly as
-#   it does for a running service. Upstream's `loginfo` is scoped to the running
-#   instance; RMSC's is scoped to the file.
+#   NO LOG - the case C form, on stderr - while RMSC (as it stood then) reports
+#   the log exactly as it does for a running service. Upstream's `loginfo` is
+#   scoped to the running instance; RMSC's was scoped to the file.
 #
-# That is pinned rather than asserted either way, because it is a decision
-# nobody has taken. It is pinned HERE, in this file, because it is the change
-# most likely to be made by accident BY the work this harness exists to guard:
-# somebody implementing "the line goes to stderr when no log is found" can
-# reasonably also decide a stopped service has no log, and that would be a
-# second, unasked-for behaviour change arriving inside the first. The pinned row
-# says so instead of accepting it.
+# That was pinned rather than asserted either way for nine days, because it was
+# a decision nobody had taken. DECIDED 18 September 2026 (docs/parity.md's
+# "three things about loginfo, two of them now decided"): RMSC is to match
+# upstream and scope to the running instance, not the file. It is asserted
+# below, in its own stage rather than folded into stage 1's four cases,
+# because it needs the fixture stopped AFTER those cases have used it running
+# - see that stage for why.
 #
 # STAGING - and why it is done the way it is
 #
@@ -1024,31 +1024,43 @@ fi
 
 echo
 # ---------------------------------------------------------------------------
-echo "== stage 3: a known difference, pinned so a change to it is visible"
+echo "== stage 3: the stopped-service scope, matched 18 September 2026"
 echo
 heading
 # ---------------------------------------------------------------------------
 
-# PINNED - A STOPPED SERVICE WHOSE LOG IS STILL ON DISK.
+# A STOPPED SERVICE WHOSE LOG IS STILL ON DISK.
 #
 #   upstream sc:  reports NO LOG. The case C form, on stderr, with the blank
 #                 line on stdout - upstream's loginfo is scoped to the running
 #                 instance.
-#   RMSC:         reports the log exactly as it does for a running service -
+#   RMSC today:   reports the log exactly as it does for a running service -
 #                 RMSC's is scoped to the file.
 #
-# Measured 9 September 2026 and not previously recorded anywhere. Neither is
-# asserted to be right: it is a decision nobody has taken.
+# Measured 9 September 2026 and not previously recorded anywhere. It was
+# PINNED here rather than asserted either way, because it was a decision
+# nobody had taken - and pinned in THIS file specifically because it is the
+# change most likely to be made BY ACCIDENT by the work this file guards:
+# somebody implementing "the line goes to stderr when no log is found" could
+# reasonably also decide that a stopped service has no log, a second,
+# unasked-for behaviour change arriving inside the first.
 #
-# IT IS PINNED HERE because it is the change most likely to be made BY ACCIDENT
-# by the work this file guards. Somebody implementing "the line goes to stderr
-# when no log is found" may reasonably also decide that a stopped service has no
-# log - a second, unasked-for behaviour change arriving inside the first. This
-# row says so rather than letting it through.
+# DECIDED 18 September 2026 (docs/parity.md's "three things about loginfo,
+# two of them now decided"): RMSC is to match upstream and scope to the
+# running instance, not the file. So this is no longer a divergence kept
+# visible for its own sake - it is an ordinary correctness case, asserted the
+# same way as CASE C above: WANT is case C's not-found line, for $RUN rather
+# than $NONE, because a stopped service whose log is still on disk is meant
+# to answer exactly as a service with no log at all.
 #
-# THE TEXT IS NOT ASSERTED, only WHICH CASE each implementation is in. The text
-# is what the rest of this file is about and is expected to change; the case
-# each implementation is in is not.
+# THE TEXT IS NOW ASSERTED, where before only which case each implementation
+# was in was. Against RMSC as it stands today this FAILS, and it must fail
+# for the reason that matters - RMSC still finds the log on disk and reports
+# it, rather than scoping to the stopped instance - not for some unrelated
+# reason. A fix that made every loginfo case answer not-found would also pass
+# this one, which is exactly why CASE A, B and the group case above are left
+# untouched here: they still demand a FOUND answer for a running service, and
+# a fix that broke those to make this one pass would be caught immediately.
 "$SC" stop "$RUN" > "$WORK/stop.out" 2> "$WORK/stop.err" </dev/null
 stopped=""
 for i in 1 2 3 4 5 6 7 8 9 10; do
@@ -1059,25 +1071,21 @@ done
 
 if [ -z "$stopped" ]; then
   report FAIL stopped-service "FIXTURE: the service did not stop (still '$st')"
-  detail "the pinned comparison needs it down; nothing is concluded about the divergence"
+  detail "this case needs it down; nothing is concluded about the scope question"
   failed=$((failed+1))
 else
-  grab stopped.scr "$SCR" "$RUN"
-  grab stopped.sc  "$SC"  "$RUN"
-  s_scr=$(cat "$WORK/stopped.scr.out" "$WORK/stopped.scr.err" | grep -Fc -- "$SCR_LOG" || true)
-  [ -z "$s_scr" ] && s_scr=0
-  s_sc=$(grep -Fc -- 'try checking in log directory' "$WORK/stopped.sc.err" 2>/dev/null || true)
-  [ -z "$s_sc" ] && s_sc=0
-  if [ "$s_scr" -ge 1 ] && [ "$s_sc" -ge 1 ]; then
-    report PASS stopped-service "(pinned) RMSC still reports the log, upstream reports none"
-    pass=$((pass+1))
-  else
-    report CHANGED stopped-service "(pinned) scr names the log $s_scr time(s), sc reports not-found $s_sc time(s)"
-    detail "one of them has changed which case it is in for a stopped service"
-    detail "if that was intended, update this case and docs/parity.md together"
-    detail "artefacts: stopped.scr.out stopped.scr.err stopped.sc.out stopped.sc.err"
-    changed=$((changed+1))
-  fi
+  grab stopped-service "$SCR" "$RUN"
+  assert_case stopped-service measured no "$RUN" \
+    "$RUN: <unknown> (try checking in log directory $LOGDIR)"
+
+  # Upstream's own half is re-taken HERE rather than folded into stage 2:
+  # this fixture state - $RUN, stopped, its log still on disk - does not
+  # exist until this point, so stage 2 has nothing to re-verify against
+  # earlier. Re-taking it keeps this case honest the same way stage 2 keeps
+  # the four cases above honest: a REFDRIFT here means upstream's scope has
+  # moved, not that RMSC has.
+  grab sc.stopped "$SC" "$RUN"
+  sc_ref sc.stopped no "$RUN: <unknown> (try checking in log directory $LOGDIR)"
 fi
 
 echo
@@ -1128,8 +1136,8 @@ echo "artefacts: $WORK   (.out and .err captured separately for every case; KEEP
 #   grounds that the service is down.
 #
 #   What "if running" describes, as far as anything measured here shows, is
-#   upstream's SCOPE and not its precondition: see the pinned stopped-service
-#   case above, where upstream reports no log for a service that is down even
+#   upstream's SCOPE and not its precondition: see the stopped-service case
+#   above, where upstream reports no log for a service that is down even
 #   though the file is still on disk. So do not read the usage string as a rule
 #   and do not reword RMSC's to match one; the rule it looks like it states does
 #   not exist.

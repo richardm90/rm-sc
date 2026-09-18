@@ -972,7 +972,17 @@ dcl-proc SCEXEC_loginfo export;
   // The descriptor was opened and discarded here, leaking one per service -
   // and a group operation leaks one per member. Pre-existing; found by review
   // while these lines were open.
-  handle = IFS_open_file(path: IFS_OPEN_TYPE_READ);
+  //
+  // SCOPED TO THE RUNNING INSTANCE, not to the file - DECIDED 18 September
+  // 2026, docs/parity.md. A stopped service whose log is still on disk must
+  // answer exactly as one with no log at all, so the file is not even opened
+  // unless a job is running: jobs is fetched here, once, and reused below for
+  // the spooled-file loop rather than fetched twice.
+  SCEXEC_jobs(def: jobs);
+  handle = -1;
+  if jobs.count > 0;
+    handle = IFS_open_file(path: IFS_OPEN_TYPE_READ);
+  endif;
   if handle >= 0;
     IFS_close_file(handle);
     stats = IFS_stats(path);
@@ -988,7 +998,6 @@ dcl-proc SCEXEC_loginfo export;
 
   // A batch service writes to a spooled file rather than, or as well as, the
   // log - so report those too or half the output is invisible.
-  SCEXEC_jobs(def: jobs);
   for i = 1 to jobs.count;
     if SCQRY_splfs_for_job(jobs.name(i): splfs) > 0;
       for j = 1 to splfs.count;
@@ -1010,14 +1019,14 @@ dcl-proc SCEXEC_loginfo export;
   // printed two. Found by review, which noticed the placement disagreed with
   // how the neighbouring code had already solved the same problem.
   //
-  // What is NOT changed here, deliberately: upstream reports no log for a
-  // STOPPED service whose log file is still on disk - its loginfo is scoped
-  // to the running instance where RMSC's is scoped to the file. Measured by
-  // the test author while writing the cases for this change, and pinned by
-  // tools/loginfo-test.sh rather than asserted either way. It is a separate
-  // decision, recorded in docs/parity.md; changing it here would be a second
-  // behaviour change arriving inside the first, which is exactly what a
-  // reader implementing "not found goes to stderr" might reach for.
+  // What USED TO BE left deliberately unchanged: upstream reports no log for
+  // a STOPPED service whose log file is still on disk - its loginfo is
+  // scoped to the running instance. Measured by the test author while
+  // writing the cases for the stderr-vs-stdout change above, and pinned by
+  // tools/loginfo-test.sh rather than asserted either way, because it was a
+  // second, separate decision arriving inside the first one. DECIDED 18
+  // September 2026 (docs/parity.md): RMSC now matches upstream's scope, via
+  // the `jobs.count > 0` guard above.
 
 end-proc;
 

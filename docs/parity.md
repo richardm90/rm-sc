@@ -64,7 +64,7 @@ that step asks for.
 | `scrunattrs` | live differential | **by design** | upstream lists running jobs and their run attributes; RMSC prints the `SCOMMANDER_*` variables it sets |
 | `info` | live differential | **undecided** | omits the environment-variables block and the closing separator, adds a `Group:` line, and shows a resolved working directory rather than the raw one |
 | `jobinfo` | live differential | **pass** | matched 10 September 2026 — header, indent, not-running text, per-command blank line and colour |
-| `loginfo` | live differential | **pass** (three items open, none of them this) | matched 9 September 2026 — see below for what was actually different and for three things deliberately left alone |
+| `loginfo` | live differential | **pass** (two items open, none of them this) | matched 9 September 2026, stopped-service scoping matched 18 September 2026 — see below |
 | `perfinfo` | live differential | **by design** | two differences, both settled: three affinity lines per job that no API carries, and the order of the job blocks, which upstream draws from a hash and RMSC sorts — see below |
 | `start` | not gated | — | state-changing; `SCLIFE.TEST` covers the lifecycle against a service it creates and removes |
 | `stop` | not gated | — | as above |
@@ -306,15 +306,19 @@ discards the descriptor, leaking one per definition per load. The same defect in
 this one is not, because closing it means restructuring a condition on the definition-loading
 path, which feeds the byte-exact operations and wants its own test rather than a drive-by change.
 
-### Three things about `loginfo`, two of them now decided
+### Three things about `loginfo`, one of them now fixed, another decided
 
-**A stopped service whose log is still on disk.** Upstream reports no log; RMSC reports the log.
-Upstream's `loginfo` is scoped to the *running instance*, RMSC's to the *file*. Found by the test
-author while writing the cases above, and pinned by the harness — which asserts only which case
-each implementation is in, not the text — rather than asserted either way.
+**A stopped service whose log is still on disk — MATCHED 18 September 2026.** Upstream reports no
+log; RMSC used to report the log regardless. Upstream's `loginfo` is scoped to the *running
+instance*, RMSC's was scoped to the *file*.
 
-**DECIDED 18 September 2026: RMSC will match upstream** and scope `loginfo` to the running
-instance, not the file. Not yet implemented.
+**DECIDED and IMPLEMENTED 18 September 2026: RMSC now matches upstream.** `SCEXEC_loginfo` fetches
+the service's jobs once and only attempts to open the log file when at least one is running;
+otherwise it answers exactly as the no-log case does. `tools/loginfo-test.sh`'s stopped-service
+case, previously pinned as a known, undecided divergence (asserting only which case each
+implementation was in, not the text), now asserts the text and passes — the pass/failed counters
+carry it, not the pinned/changed ones. All 78 `SCEXEC` unit cases and the rest of the loginfo
+harness (15 other cases) still pass; no regression.
 
 **The log file naming.** Upstream writes `~/.sc/logs/<timestamp>.<svc>.log` and RMSC writes
 `~/.sc/logs/<svc>.log`, so neither finds a log written by the other. Pre-existing, recorded in
