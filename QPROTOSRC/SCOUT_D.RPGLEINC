@@ -459,3 +459,21 @@ end-pr;
 
 dcl-pr SCOUT_no_job_info like(SCOUT_LINE_t);
 end-pr;
+
+///
+// A stop_cmd that did not bring the service down, on STDERR:
+//
+//   WARNING: Timed out waiting for service 'RMSC gap partial' to stop. Will try harder
+//
+// No trailing blank line - unlike the ERROR family, this is a WARNING and
+// stop still goes on to succeed. Measured 19 September 2026: upstream does
+// not treat a failing or ineffective stop_cmd as final. It prints this, then
+// 'Stopping via endjob' on STDOUT, then escalates - see docs/parity.md.
+//
+// @param the service's friendly name
+// @return the line, without a trailing newline
+///
+
+dcl-pr SCOUT_stop_retry like(SCOUT_LINE_t);
+  friendly like(SCOUT_LINE_t) const;
+end-pr;

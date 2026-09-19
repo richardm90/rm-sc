@@ -679,9 +679,10 @@ column position. They do not yield three fields, so a parser that drops malforme
 unaffected - but that is a property of the consumer, not of the output, and is worth confirming
 before the lines are added.
 
-## Beyond the operations — `stop` does not escalate when its own `stop_cmd` fails
+## Beyond the operations — `stop` did not escalate when its own `stop_cmd` failed
 
-**Found 19 September 2026, by accident** — while trying to measure the exact wording of three
+**Found and FIXED 19 September 2026.** Found by accident — while trying to measure the exact
+wording of three
 `stop`-path error texts recorded as `unmeasured` (see `docs/messages.md`: `Stop command failed for
 <short>: <reason>`, `<short> did not stop within <n> seconds`, `<short> did not stop, even
 immediately`). What was measured is not a wording gap. It is a real difference in **behaviour**,
@@ -707,23 +708,35 @@ RMSC:      Performing operation 'STOP' on service 'zzsf_cmdfail'
 regardless of whether a custom stop command was configured, and succeeds. RMSC gives up
 immediately and leaves the service running.
 
-**This contradicts a premise already written into `stop_one`** (`QRPGLESRC/SCEXEC.RPGLE`, around
-the comment beginning "Escalate only where upstream does"): *"a service that supplied its own stop
-command has said how it wants to be stopped, and overriding that could cut short whatever the
-command was doing."* That reasoning is not what was measured. Upstream overrides it.
+**This contradicted a premise written into `stop_one`** (`QRPGLESRC/SCEXEC.RPGLE`, the comment
+beginning "Escalate only where upstream does"): *"a service that supplied its own stop command has
+said how it wants to be stopped, and overriding that could cut short whatever the command was
+doing."* That reasoning was not what was measured. Upstream overrides it.
 
-**Undecided, and not part of the 18/19 September decision round** — this was found while chasing
-item 4 (short-versus-friendly naming) and is a different, larger question: whether `stop` should
-change its escalation behaviour to match, not merely its wording. Fixing only the text of the
-three `unmeasured` rows above on top of the current behaviour would be polishing a message this
-project may be about to replace.
+**DECIDED and IMPLEMENTED 19 September 2026: `stop_one` now escalates to `ENDJOB` regardless of
+whether a `stop_cmd` was configured**, printing `SCOUT_stop_retry`'s warning
+(`WARNING: Timed out waiting for service '<friendly>' to stop. Will try harder`, stderr, no
+trailing blank) and `Stopping via endjob` (stdout) before falling through to the same final
+escalation the no-`stop_cmd` path already used. `stop_cmd`'s own return value is no longer acted
+on — "ran" and "worked" are the same question upstream asks only once, at the poll afterward.
 
-**The two remaining scenarios behind those three rows were not measured, on purpose.** The
+`tools/stop-escalation-test.sh` (new) covers both failure shapes — a `stop_cmd` that exits
+non-zero, and one that exits 0 and does nothing — against a real, self-bounded listener
+(`tools/gate-listen.py`), asserting the narration text/exit status *and*, separately, that the
+service is actually down afterward (so a fix that only reworded the message without truly
+escalating would still fail). A working `stop_cmd` is also tested as a **regression control**: it
+must show neither the warning nor `Stopping via endjob`, catching a fix that escalates
+unconditionally rather than only when the configured command actually failed. All 15 checks pass;
+`tools/narration-test.sh` (65 checks), the `SCEXEC` unit suite (78 cases) and the fidelity gate
+show no regression.
+
+**The two remaining, unmeasured texts stay out of scope, on purpose.** The
 "did not stop within `<n>` seconds" and "did not stop, even immediately" texts belong to the
-*no-`stop_cmd`* path (`ENDJOB` used directly, with its own `*CNTRLD`-then-`*IMMED` escalation).
-Measuring the second of those live means staging a job that resists `ENDJOB OPTION(*IMMED)` on a
-real box — a materially different risk from anything else measured today — and was deliberately
-not attempted without a decision on scope and safety first.
+*no-`stop_cmd`* path (`ENDJOB` used directly, with its own `*CNTRLD`-then-`*IMMED` escalation),
+which this fix does not touch. Measuring that path's failure/escalation wording live means staging
+a job that resists `ENDJOB OPTION(*IMMED)` on a real box — a materially different risk from
+anything measured here — and remains deliberately unattempted without its own decision on scope
+and safety.
 
 ## Beyond the operations — specifiers
 
@@ -1018,11 +1031,12 @@ anything that ran, which is the argument for the fixture pack rather than a foot
 
 Also decided 18 September 2026: the `sc: ` stderr prefix, **dropped 19 September 2026**.
 Short-versus-friendly naming, **re-checked 19 September 2026: already applied everywhere it is
-currently measurable** — see "The two whole-surface differences" above; a rare `SCEXEC` case and
-three texts blocked on the new `stop`-escalation finding remain. Still not yet implemented: stage
-a dedicated verification fixture under `CLAUDE`'s account rather than Richard's, and decide
-whether `stop` should escalate to `ENDJOB` when its own `stop_cmd` fails (new, 19 September 2026,
-see above). `SC_OPTIONS`/`.scrc` was considered and deliberately left undecided pending further
+currently measurable** — see "The two whole-surface differences" above; a rare `SCEXEC` case
+remains, unreachable in practice. The `stop`-escalation gap found while re-checking that item is
+**fixed, 19 September 2026** — see "Beyond the operations" above; its two remaining unmeasured
+texts (the no-`stop_cmd` path) stay open, deliberately, pending a safe way to measure them. Still
+not yet implemented: stage a dedicated verification fixture under `CLAUDE`'s account rather than
+Richard's. `SC_OPTIONS`/`.scrc` was considered and deliberately left undecided pending further
 investigation — see "Beyond the operations — inputs RMSC does not read" above.
 
 Separately, and not part of step 8: the gate should compare `list -a` across all services, to

@@ -656,3 +656,20 @@ dcl-proc SCOUT_no_job_info export;
   return '    ' + NO_JOB_INFO;
 
 end-proc;
+
+//==============================================================================
+// SCOUT_stop_retry
+//   WARNING: Timed out waiting for service 'X' to stop. Will try harder   STDERR
+//
+// No trailing blank line - see SCOUT_D. Measured 19 September 2026.
+//==============================================================================
+
+dcl-proc SCOUT_stop_retry export;
+  dcl-pi *n like(SCOUT_LINE_t);
+    friendly like(SCOUT_LINE_t) const;
+  end-pi;
+
+  return 'WARNING: Timed out waiting for service ''' + %trim(friendly) +
+         ''' to stop. Will try harder';
+
+end-proc;

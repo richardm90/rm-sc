@@ -139,4 +139,6 @@ STRPGMEXP PGMLVL(*CURRENT) SIGNATURE('RMSC 0.4.0')
   EXPORT SYMBOL(SCOUT_thousands)
   /* jobinfo's line for a service with no jobs - see SCOUT_D. */
   EXPORT SYMBOL(SCOUT_no_job_info)
+  /* A stop_cmd that did not bring the service down - see SCOUT_D. */
+  EXPORT SYMBOL(SCOUT_stop_retry)
 ENDPGMEXP

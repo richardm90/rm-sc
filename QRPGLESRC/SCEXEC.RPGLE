@@ -682,14 +682,17 @@ dcl-proc stop_one;
   endif;
 
   // 'kill' means skip the service's own stop command
+  //
+  // A stop_cmd that fails to launch is NOT treated as final - MEASURED 19
+  // September 2026, docs/parity.md. Upstream does not report anything about
+  // the launch itself failing; it only warns and escalates below if the
+  // service is still up once the wait has run out, exactly as it does when
+  // stop_cmd ran but did not work. Its return value is deliberately
+  // discarded here rather than acted on - "ran" and "worked" are the same
+  // question upstream asks only once, at the poll below.
   if def.has_stop_cmd and not kill;
     used_stop_cmd = true;
-    if not SCLAUNCH_run_stop_cmd(def: SCLOG_path(def): lerr);
-      err = 'Stop command failed for ' + %trim(def.short_name) +
-            ': ' + %trim(lerr);
-      narrate_error(err);
-      return false;
-    endif;
+    SCLAUNCH_run_stop_cmd(def: SCLOG_path(def): lerr);
   else;
     SCEXEC_jobs(def: jobs);
     for i = 1 to jobs.count;
@@ -712,14 +715,18 @@ dcl-proc stop_one;
     return true;
   endif;
 
-  // Escalate only where upstream does: a service that supplied its own stop
-  // command has said how it wants to be stopped, and overriding that could
-  // cut short whatever the command was doing.
+  // ESCALATE REGARDLESS OF stop_cmd - MEASURED 19 September 2026,
+  // docs/parity.md. This used to return an error here whenever a stop_cmd
+  // had been tried, on the premise that a service supplying its own stop
+  // command had said how it wants to be stopped and overriding that could
+  // cut short whatever the command was doing. That premise is not what
+  // upstream does: it warns and falls through to the SAME ENDJOB escalation
+  // below whether or not a stop_cmd exists, and succeeds. The warning is
+  // upstream's own text, printed only on this path - the plain ENDJOB path
+  // below it has never shown it to need one and is left as it was.
   if used_stop_cmd;
-    err = %trim(def.short_name) + ' did not stop within ' +
-          %char(def.stop_wait) + 's';
-    narrate_error(err);
-    return false;
+    SCOUT_warnln(SCOUT_stop_retry(def.friendly));
+    SCOUT_writeln('Stopping via endjob');
   endif;
 
   // This re-queries rather than reusing the list from the first pass, and it
