@@ -989,31 +989,165 @@ non-collision control (an unclaimed port still falls back to ad hoc) — both pa
 gate's live differential confirms it on 5 real services with no regression. Neither half is
 client-affecting — the client uses short names and `group:` only.
 
-## Beyond the operations — inputs RMSC does not read
+## Beyond the operations — inputs read before an operation starts
 
 Two more, found while correcting discovery. Neither is reachable from anything the gate runs
-today, because both are about what happens *before* an operation starts.
+today, because both are about what happens *before* an operation starts. One is implemented
+(`scrc`/`SC_OPTIONS`, below); the other (`services.dir`) already matched.
 
 **`scrc` and `SC_OPTIONS`.** Upstream reads options from `/QOpenSys/etc/sc/conf/scrc`, from
 `$HOME/.scrc`, and from the `SC_OPTIONS` environment variable, and prepends them to its argument
-list. RMSC reads none of the three. Measured against sc 1.7.1, with a bare `list` showing four
-services:
+list. **The `scr` column below is the PRE-IMPLEMENTATION measurement** — RMSC read none of the
+three at the time it was taken. It is kept as the baseline the fix closed, not as the current
+state; see "IMPLEMENTED, 19 September 2026" further down for what `scr` does today. Measured
+against sc 1.7.1, with a bare `list` showing three services (four output lines, the fourth
+blank):
 
-| | `sc` | `scr` |
+| | `sc` | `scr`, before this was implemented |
 |---|---|---|
 | `SC_OPTIONS=-a list` | 36 | 4 |
 | `list`, with `--ignore-groups=backend` in `$HOME/.scrc` | 35 | 4 |
 
 The second is worth reading twice: the count goes *up*, because an `--ignore-groups` from a
 config file replaces the default `system` exclusion rather than adding to it. So a `.scrc`
-nobody remembers writing changes which services a bare `check` shows — and changes it for
-upstream only. **Undecided**; the plan does not mention either mechanism.
+nobody remembers writing changes which services a bare `check` shows — and changed it for
+upstream only, before RMSC read it too. **Was undecided**; the plan did not mention either
+mechanism.
 
-**Still undecided as of 18 September 2026, and deliberately so.** This is the one item in the
-9-18 September decision round that was not settled, because it is an input source rather than a
-formatting gap: before it can be scoped, something has to establish what a `scrc`/`SC_OPTIONS`
-implementation would actually need to read and honour on this box, which the measurement above
-does not answer by itself.
+**Investigated further, 19 September 2026, to give the undecided item something concrete to
+decide against.** The system-wide file (`/QOpenSys/etc/sc/conf/scrc`, owned by `qsys`, affecting
+every user on the box) was read but not written to for this — it is shared, and nothing here
+justifies changing what every other user on a live box sees. Everything below was measured
+through `$HOME/.scrc` and `SC_OPTIONS`, which are safe to change back afterwards and were, every
+time.
+
+**The model is one merged argument list, not three separate mechanisms.** All evidence is
+consistent with a single rule: the system conf file's lines, then `$HOME/.scrc`'s lines, then
+`SC_OPTIONS` (split on whitespace), then the real command line, are concatenated in that order
+into one token stream, which is then parsed exactly the way a typed command line would be — same
+parser, same option semantics, no special-casing for where a token came from. Measured
+consequences, each confirmed live:
+
+- **Last occurrence wins, for anything single-valued, regardless of which source it came in
+  from.** `.scrc: --ignore-groups=backend` plus `SC_OPTIONS=--ignore-groups=webserver` excludes
+  `webserver` only (`SC_OPTIONS` is later in the stream). Adding an explicit
+  `list --ignore-groups=rm-console` on the real command line excludes `rm-console` only — the
+  real command line is latest of all. Two lines in the *same* `.scrc`, `-a` then
+  `--ignore-groups=backend`, behave exactly like two separate sources in that order: the second
+  line wins. Reversing them (`--ignore-groups=backend` then `-a`) reverses the result. `-a` is not
+  a standing "show everything" mode — it is sugar for clearing the ignore-groups value, itself
+  subject to being overridden by a *later* `--ignore-groups` in the same stream.
+- **`SC_OPTIONS` is split on whitespace only — no shell-style quoting is re-parsed.**
+  `SC_OPTIONS='--color-scheme="RUNNING:BLUE"'` passes the literal characters `"RUNNING:BLUE"`,
+  quote marks included, straight to the option's own value — confirmed by the resulting error
+  naming `["RUNNING:BLUE"]`, not `RUNNING:BLUE`. A value containing a space cannot be given
+  through `SC_OPTIONS` at all; the conf-file forms do not have this problem, since each line is
+  already one token (or is itself further split — not tested, since nothing in the shipped
+  example needs it).
+- **An unrecognised option is a non-fatal warning, on stderr, exit 0, and identical regardless of
+  source**: `WARNING: Argument '--this-is-not-a-real-option=xyz' unrecognized and will be
+  ignored`, byte-identical whether the argument came from `.scrc` or was typed directly. This is
+  not a `.scrc`-specific mechanism — it is upstream's ordinary unrecognised-argument handling,
+  reached because the merged stream is fed through the one parser.
+- **It is not scoped to `list`.** `check` honours `-a` from `.scrc` the same way (36 lines,
+  matching `list -a`). `groups` does too, and more surprisingly: with `-a` set, `groups` prints
+  two MORE group names (`host_servers`, `tcp_servers`) that a bare `groups` never shows at all —
+  they exist only among `system`-group services, so with the default exclusion in place they have
+  no visible members and do not appear as groups either. One shared filter setting, read by every
+  read-only operation measured.
+- **A bare word is not rejected as "not an option" — it can hijack the verb itself.** `.scrc`
+  containing the single line `list`, with `sc check` typed as the real command, produced `Could
+  not find definition for service 'check'`, exit 253 — the wording `check` itself gives for an
+  unresolvable name. That means the merged stream was `["list", "check"]`, `list` (arriving
+  first, from `.scrc`) was taken as the verb, and the real command word `check` was left over as
+  an ordinary positional argument that `list` then tried and failed to resolve as one. **A `.scrc`
+  or `SC_OPTIONS` value that is not a flag can silently change which command runs at all**, not
+  merely which of its options are set.
+
+**What this means for scoping RMSC's version, if there is to be one.** The flag-level behaviour
+(`-a`, `--ignore-groups`, `--sampletime`, `--color-scheme`, applied uniformly with last-wins
+precedence across `check`/`list`/`groups`/`info` alike) is what the shipped conf file's own
+comments describe and is a bounded, well-understood surface. The verb-hijacking behaviour is not
+documented anywhere upstream, is not what anyone editing `.scrc` for "10-second sampling" would
+expect or want, and reproducing it faithfully would mean a config file nobody remembers writing
+being able to silently redirect what command a user thinks they are running — a materially worse
+failure mode than the one already recorded above (a changed *service list*). Whether RMSC
+implements the bounded, documented surface, the whole surface including the hijack, or neither,
+is Richard's call — this paragraph exists so it is an informed one.
+
+**DECIDED 19 September 2026: the bounded, documented surface — not the system-wide conf file, not
+the verb-hijacking behaviour.** RMSC reads `$HOME/.scrc` and `SC_OPTIONS`, merges their contents
+ahead of the real command line (`.scrc` then `SC_OPTIONS` then the real argv, same order upstream
+uses for these two), and honours `-a`/`--all`, `--ignore-groups` and `--sampletime` with
+last-wins precedence, uniformly across `check`/`list`/`groups`/`info` — the three flag shapes
+RMSC's own parser already accepts on the command line, nothing more. The system-wide
+`/QOpenSys/etc/sc/conf/scrc` is deliberately out of scope — RMSC has no per-box config directory
+to read it from even if it wanted to, and the two per-user sources already give this a bounded,
+testable surface. A bare word, or a real upstream option RMSC does not implement, is a non-fatal
+warning, the same as any other unrecognised argument, and never changes which command runs — the
+one piece of measured upstream behaviour this deliberately does NOT reproduce, because
+reproducing it would make a config file nobody remembers writing capable of redirecting what a
+user thinks they are running.
+
+**`--color-scheme` is explicitly deferred, separately from the rest, 19 September 2026.**
+Recognising it here would mean claiming it works; RMSC has no colour-remapping mechanism at all
+today, so a `.scrc` spelling it correctly gets the same "unrecognised, ignored" warning as a
+typo, until that mechanism exists as its own piece of work. Tracked as a future item, not part of
+this one.
+
+**IMPLEMENTED, 19 September 2026.** `SCMAIN_config_prefix` (new, `QRPGLESRC/SCMAIN.RPGLE`) is the
+pure filter: given `.scrc`'s raw text and `SC_OPTIONS`'s raw text, it returns the recognised
+tokens, `.scrc`'s first, space-joined, ready to prepend to the real command line — exactly the
+asymmetry measured above, `.scrc` one argument per LINE (never split further into MULTIPLE
+tokens, even on internal whitespace), `SC_OPTIONS` one argument per whitespace-separated word.
+`scripts/scr` and `SCRUN` (the PASE entry point) read `$HOME/.scrc` via `SCDIRS_home_dir()` (the
+same home-resolution RMSC already uses elsewhere, not `$HOME` itself, which is not reliable in a
+batch job) and `SC_OPTIONS` via `ENVVAR_get`, and prepend the filtered result ahead of the typed
+command line before `SCMAIN_parse` ever sees any of it — which is what gives the recognised flags
+their measured last-wins precedence against whatever was actually typed, for free, from the
+existing parser. `SCCMD` (the native `SC` CL command) does not go through this - it calls
+`SCMAIN_parse` directly with its own parameters, has no shell environment to read `SC_OPTIONS`
+from, and upstream's own `.scrc`/`SC_OPTIONS` mechanism is specific to its shell entry point too.
+A length guard (RMSC-only; upstream's strings are unbounded) refuses to combine the two when the
+result would not fit in the 1024-character command line, rather than silently truncating one.
+
+**A candidate is recognised only if it carries no embedded space or tab, even when it matches a
+shape by prefix — found by peer review before this reached a real command line.** A `.scrc` line
+recognised and kept "whole" is handed back to `SCMAIN_parse` as plain text, which retokenises on
+whitespace with no idea any of it came from one line; keeping a spaced candidate on the strength
+of its prefix only meant it was split apart again one call later. Measured, live, as an actual
+near-miss: a `.scrc` containing the single line `--sampletime=5 list`, staged ahead of a typed
+`check`, merged into `list check` — `list` is a real operation word, so it became the verb, and
+the typed `check` became an ordinary argument to it. That is precisely the upstream
+verb-hijacking behaviour this item decided NOT to reproduce, reached through the one path meant
+to prevent it. `is_config_flag` now refuses any candidate containing a space or tab outright,
+regardless of what it starts with; a value that genuinely needs a space (upstream's own
+`--color-scheme` example has one) cannot be represented by RMSC's parser from ANY source, typed
+or not, so refusing it here is no narrower than what the command line already allows.
+
+**`SC_OPTIONS` also splits on a TAB, not only the space character** — measured live the same way
+the `.scrc` trim needed one for tabs; `SCMAIN_config_prefix` translates a tab to a space before
+tokenising `SC_OPTIONS`, rather than widening `next_token`'s own separator, which every other
+caller of it still uses only for a real, already-typed command line.
+
+A separate, blind test author (given only the measured rule and `SCMAIN_config_prefix`'s
+prototype, not the implementation) wrote the first 15 `iRPGUnit` cases for the pure filter,
+including the two-sources asymmetry as a "must disagree" pair. One ambiguity it flagged and
+declined to guess at — whether the leading/trailing whitespace trimmed from a `.scrc` line
+reaches tabs, not just spaces — was resolved by a further live measurement (a leading tab before
+`-a` is still recognised; RPGLE's own `%TRIM` only strips the space character, so a dedicated
+trim was needed). A peer review then found the prefix-matching gap above, that the original
+"must disagree" pair did not actually exercise it (both its cases happened to agree, since `-a`
+is checked by exact equality, not by prefix), and that nothing in the suite held the fix already
+made for a `.scrc` file ending in a trailing newline abending (`RNX0100`, a previously-documented
+trap in this codebase) — the ordinary shape of a text file, and the shape a `.scrc` written with
+`echo` actually takes. Cases for all three were added directly (mechanically pinning already
+-measured, already-decided facts, not new interpretation) rather than restarting the blind-review
+round trip. `qtestsrc/SCMAIN.TEST.RPGLE`: 54 test cases, 299 assertions, 0 failures. Confirmed
+end to end, live, against every scenario measured above — the three-source precedence chain, the
+exact `.scrc`-versus-`SC_OPTIONS` whitespace-splitting asymmetry (both the simple case and the
+corrected prefix-matching one), the exact warning text, the verb-hijack near-miss now refused,
+and the trailing-newline fix — with no regression to the rest of the suite.
 
 **`services.dir` — a custom definition directory.** Upstream takes one from the `services.dir`
 JVM system property, searched last so it overrides everything else; confirmed on 1.7.1 by
@@ -1215,8 +1349,9 @@ issue; `CPF9E18` is harmless noise, confirmed against Richard's own successful c
 decision to stage a dedicated verification fixture under `CLAUDE`'s account rather than Richard's
 is **implemented, 19 September 2026** — see "Beyond the operations — a definition with no `name:`
 was silently accepted" above for both the fixture and the parity defect that gave it real
-substance. `SC_OPTIONS`/`.scrc` was considered and deliberately left undecided pending further
-investigation — see "Beyond the operations — inputs RMSC does not read" above.
+substance. `SC_OPTIONS`/`.scrc` is **implemented, 19 September 2026** — see "Beyond the
+operations — inputs read before an operation starts" above for the measured model, the decision,
+and the fix; the gate granularity item (below) also closed the same day.
 
 Separately, and not part of step 8: the gate should compare `list -a` across all services, to
 hold Verification step 9's discovery parity. The two implementations agree on it today, but the

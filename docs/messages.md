@@ -53,13 +53,15 @@ RMSC's text comes from `SCMAIN_parse` and `SCMAIN_run` (`opts.err`), delivered o
 | unknown service | `Unknown service x` | `Could not find definition for service 'x'` — stderr, exit 253 | measured |
 | unknown operation | `Unknown operation x` | `Usage: sc  [options] <operation> <service>` | measured |
 | no operation | `No operation given` | the usage block | measured |
-| unknown option | `Unknown option --badflag`, and refuses | `WARNING: Argument '--badflag' unrecognized and…`, then carries on with exit 0 | measured |
+| unknown option, typed on the command line | `Unknown option --badflag`, and refuses | `WARNING: Argument '--badflag' unrecognized and…`, then carries on with exit 0 | measured |
+| unknown option, from `.scrc`/`SC_OPTIONS` | `WARNING: Argument '--badflag' unrecognized and will be ignored`, exit 0 — matches upstream's own wording exactly, since item 8 (`SCMAIN_config_prefix`) reuses it | same | measured, implemented 19 September 2026 |
 | operation needs a service | `Operation info needs a service` | the usage block | measured |
 | unexpected argument | `Unexpected argument x` | — | unmeasured |
 | bad ad-hoc port | `Invalid data for port number or job name criteria for service 'x'` (`SCOUT_invalid_criteria`) | same text | measured |
 | path that does not load | `Cannot load <path>: <reason>` | `Invalid configuration for service 'null' from file […]` | measured |
 | `--version` | `Unknown option --version`, exit 255 | `Version: 1.7.1` and `Build time: 2023-08-16 02:42:28 (GMT)` on **stdout**, exit 0 | measured |
 | `reload` | `Unknown operation reload` | `Performing operation 'RELOAD' on service '<name>'` on stdout, then `ERROR: reload operation requires a cluster with at least two workers defined.` / `Maybe you meant to do a 'restart'?` on stderr | measured |
+| `.scrc`/`SC_OPTIONS` too long to combine with the typed command line | `WARNING: options from .scrc/SC_OPTIONS are too long to apply together with this command line and were ignored`, exit continues normally | no equivalent — upstream's strings are unbounded | RMSC-only, by design |
 
 **RMSC has no usage block at all.** Nothing in `QRPGLESRC/` prints one; three of the rows above
 want one, and `-h` (D3) wants it too. Writing it is the largest single item in D2.

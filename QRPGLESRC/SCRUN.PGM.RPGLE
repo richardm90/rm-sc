@@ -43,7 +43,10 @@ ctl-opt bnddir('RMSCPGM':'RMSCDEPS':'QC2LE');
 
 /include 'SCMAIN_D.rpgleinc'
 /include 'SCOUT_D.rpgleinc'
+/include 'SCDIRS_D.rpgleinc'
 /include 'include/RMTOOLS_D.rpgleinc'
+/include 'include/RMENVVAR_D.rpgleinc'
+/include 'include/RMIFS_D.rpgleinc'
 
 // Ends the activation group with a status. Never returns.
 dcl-pr c_exit extproc('exit');
@@ -58,6 +61,46 @@ dcl-proc SCRUN;
   dcl-ds opts   likeds(SCMAIN_OPTS_t) inz(*likeds);
   dcl-s  status like(INTEGER_t);
 
+  dcl-s  home     like(STMF_t);
+  dcl-s  scrc_txt like(STRING_t) ccsid(*utf8);
+  dcl-s  prefix   like(SCMAIN_ARGS_t);
+  dcl-s  cli_args like(SCMAIN_ARGS_t);
+  dcl-s  full_args like(SCMAIN_ARGS_t);
+
+  // .scrc/SC_OPTIONS - DECIDED 19 September 2026, docs/parity.md, "scrc and
+  // SC_OPTIONS". Read before anything else, so the tokens they contribute
+  // reach SCMAIN_parse exactly as if they had been typed first on the real
+  // command line - which is what gives the documented flags (-a,
+  // --ignore-groups, --sampletime) their measured last-wins precedence
+  // against whatever the caller actually typed.
+  //
+  // Blank when the file does not exist - IFS_read itself is silent about a
+  // missing file, and .scrc is optional for every user, so that silence is
+  // correct here and not worth a check of its own.
+  home = SCDIRS_home_dir();
+  if %len(%trim(home)) > 0;
+    scrc_txt = IFS_read(%trim(home) + '/.scrc');
+  endif;
+
+  prefix = SCMAIN_config_prefix(scrc_txt: ENVVAR_get('SC_OPTIONS'));
+
+  // Upstream has no equivalent limit - its strings are unbounded - so this
+  // is an RMSC-only guard, the same shape as the ones already in
+  // SCMAIN_parse for an oversized --ignore-groups or --sampletime value:
+  // refuse to guess rather than silently truncate a combined line nobody
+  // asked to have cut. Combined length only, checked before the
+  // concatenation that would otherwise do the truncating.
+  cli_args = %trimr(p_args);
+  if %len(%trimr(prefix)) = 0;
+    full_args = cli_args;
+  elseif %len(%trimr(prefix)) + 1 + %len(cli_args) > SCMAIN_ARGS_SIZE;
+    SCOUT_warnln('WARNING: options from .scrc/SC_OPTIONS are too long to ' +
+                 'apply together with this command line and were ignored');
+    full_args = cli_args;
+  else;
+    full_args = %trimr(prefix) + ' ' + cli_args;
+  endif;
+
   // Two independent questions, and neither is inferred from the other: the
   // status says what to exit with, opts.err says what still needs saying.
   // A status of 0 carrying a message is a warning; a non-zero status with no
@@ -67,7 +110,7 @@ dcl-proc SCRUN;
   // prefix of any kind. The prefix was a survival from the escape-message
   // era, when the line arrived as `CPF9897: sc: ...` and 'sc:' was doing the
   // work of naming the program; it outlived the message it was named for.
-  status = SCMAIN_parse(%trimr(p_args): opts);
+  status = SCMAIN_parse(full_args: opts);
   if opts.err <> '';
     SCOUT_warnln(%trim(opts.err));
   endif;

@@ -1266,3 +1266,447 @@ dcl-proc test_sampletime_short_values_unaffected export;
   aEqualV('2.5': opts.sampletime: 'sampletime 2.5');
 
 end-proc;
+
+//==============================================================================
+// SCMAIN_config_prefix - merging .scrc and SC_OPTIONS ahead of the real
+// command line
+//
+// Originally written before SCMAIN_config_prefix existed, as a failing
+// spec; the procedure is implemented now. Extended after a peer review, 19
+// September 2026, found a real bug this suite's ORIGINAL "must disagree"
+// pair did not actually pin (see the case immediately above that pair,
+// below) and two gaps that would have let the fix causing it, or the
+// trailing-newline fix already made once, come back unnoticed.
+//
+// Two of upstream sc's three option sources are in scope: $HOME/.scrc and
+// SC_OPTIONS. A system-wide config file is not. The function decides, per
+// candidate token, whether it matches one of RMSC's three recognised flag
+// shapes today - -a/--all, --ignore-groups=..., --sampletime=... - and
+// returns the survivors space-joined, .scrc's tokens first and SC_OPTIONS's
+// tokens after.
+//
+// It also calls a warning procedure once per unrecognised token, as a
+// documented side effect. That is NOT asserted on here: there is no
+// established convention in this codebase's suites for capturing a warning
+// procedure's actual output, and this suite asserts only on
+// SCMAIN_config_prefix's return value, per the brief for this work.
+//
+// THE ASYMMETRY IS THE POINT. .scrc is parsed one argument PER LINE, never
+// split further on internal whitespace: a single .scrc line holding two
+// space-separated flags is ONE malformed token, not two, and is entirely
+// unrecognised. SC_OPTIONS is parsed by splitting on whitespace into as many
+// tokens as are found. So the same two flags, written the same way, are kept
+// whole (and dropped whole) through one source and kept as two separate
+// flags through the other. test_config_prefix_scrc_line_with_embedded_space
+// _is_one_token and test_config_prefix_options_text_splits_on_whitespace
+// are that pair, and they MUST disagree - see the banner directly above
+// them.
+//==============================================================================
+
+///
+// t_newline - a single line-feed character, for building multi-line .scrc
+// fixtures.
+//
+// Derived from CRLF, which is already used the same way by SCYAML's own
+// suite (SCYAML.TEST.RPGLE): CRLF is CR followed by LF, so its second
+// character is exactly the newline byte wanted here, without hard-coding a
+// hex literal whose value would depend on source CCSID.
+///
+dcl-proc t_newline;
+  dcl-pi *n varchar(1);
+  end-pi;
+
+  return %subst(CRLF: 2: 1);
+
+end-proc;
+
+//==============================================================================
+// Both sources empty: nothing to keep
+//==============================================================================
+
+dcl-proc test_config_prefix_both_empty export;
+
+  aEqualV('': SCMAIN_config_prefix('': ''): 'both sources empty');
+
+end-proc;
+
+//==============================================================================
+// Each recognised shape, alone, kept whole - from .scrc
+//
+// One call per shape rather than combining them onto one line, because a
+// real .scrc has exactly one option per line - that is the plain case this
+// rule describes.
+//==============================================================================
+
+dcl-proc test_config_prefix_recognised_shapes_from_scrc export;
+
+  aEqualV('-a': SCMAIN_config_prefix('-a': ''): '-a alone from .scrc');
+
+  aEqualV('--all': SCMAIN_config_prefix('--all': ''):
+          '--all alone from .scrc');
+
+  aEqualV('--ignore-groups=backend':
+          SCMAIN_config_prefix('--ignore-groups=backend': ''):
+          '--ignore-groups= alone from .scrc');
+
+  aEqualV('--sampletime=5': SCMAIN_config_prefix('--sampletime=5': ''):
+          '--sampletime= alone from .scrc');
+
+end-proc;
+
+//==============================================================================
+// Each recognised shape, alone, kept whole - from SC_OPTIONS
+//==============================================================================
+
+dcl-proc test_config_prefix_recognised_shapes_from_options_text export;
+
+  aEqualV('-a': SCMAIN_config_prefix('': '-a'): '-a alone from SC_OPTIONS');
+
+  aEqualV('--all': SCMAIN_config_prefix('': '--all'):
+          '--all alone from SC_OPTIONS');
+
+  aEqualV('--ignore-groups=backend':
+          SCMAIN_config_prefix('': '--ignore-groups=backend'):
+          '--ignore-groups= alone from SC_OPTIONS');
+
+  aEqualV('--sampletime=5': SCMAIN_config_prefix('': '--sampletime=5'):
+          '--sampletime= alone from SC_OPTIONS');
+
+end-proc;
+
+//==============================================================================
+// .scrc: the same two flags on TWO lines are two recognised tokens
+//
+// The control for the pair below: split across lines, both survive, in the
+// order their lines appeared.
+//==============================================================================
+
+dcl-proc test_config_prefix_scrc_two_lines_both_kept_in_order export;
+
+  aEqualV('-a --ignore-groups=backend':
+          SCMAIN_config_prefix('-a' + t_newline() +
+                                '--ignore-groups=backend': ''):
+          '-a then --ignore-groups=backend on separate .scrc lines');
+
+end-proc;
+
+//==============================================================================
+// THE MOST IMPORTANT PAIR IN THIS SUITE
+//
+// The measured asymmetry between the two sources, stated as two tests that
+// must disagree. Both start from what looks like "the same input" - the
+// text `-a --ignore-groups=backend` - and must produce OPPOSITE results:
+//
+//   through .scrc   (one line, an embedded space)   -> ''  (one bad token)
+//   through SC_OPTIONS (split on whitespace)         -> both kept
+//
+// A suite that cannot tell these two apart has not tested the asymmetry
+// described in the brief at all - it has tested two cases that merely look
+// alike and asserted the same thing about both.
+//
+// CORRECTED 19 September 2026, by peer review, BEFORE this ever reached a
+// real command line. `-a --ignore-groups=backend` does not actually
+// discriminate anything: `-a` is checked by EXACT equality, so the whole
+// string fails that check regardless of whether embedded whitespace is
+// rejected - a version of is_config_flag that (wrongly) kept a
+// prefix-matching candidate WHOLE, spaces and all, would ALSO return ''
+// here, for the same reason it fails '-a' by itself. The pair below uses
+// `--ignore-groups=backend --sampletime=5` instead - it DOES match a
+// recognised shape by PREFIX, so it is the case that actually separates
+// "reject anything with a space" from "keep it whole because it starts
+// right" - and that second behaviour is a real bug that reached this file
+// once: kept whole, merged onto a typed command line, and re-split by
+// SCMAIN_parse's own tokeniser into TWO tokens one call later, which can
+// hand the verb itself to whatever a .scrc file happened to write next.
+//==============================================================================
+
+dcl-proc test_config_prefix_scrc_line_with_embedded_space_is_one_token
+    export;
+
+  // One .scrc line, not two: the whole line, spaces and all, is a single
+  // candidate token. It does not equal '-a' or '--all', so this case alone
+  // does not test whether a PREFIX match is also rejected - see the
+  // dedicated case and the "must disagree" pair below for that.
+  aEqualV('': SCMAIN_config_prefix('-a --ignore-groups=backend': ''):
+          'one .scrc line holding two space-separated flags is one token');
+
+end-proc;
+
+dcl-proc test_config_prefix_scrc_line_prefix_match_with_space_is_rejected
+    export;
+
+  // This is the case the pair below actually turns on: the candidate
+  // BEGINS with a recognised shape ('--ignore-groups=') but is not
+  // recognised, because it carries an embedded space and can never be
+  // handed back to SCMAIN_parse as one token. A version of is_config_flag
+  // that matched by prefix alone would wrongly return this whole string.
+  aEqualV('': SCMAIN_config_prefix(
+                '--ignore-groups=backend --sampletime=5': ''):
+          'a .scrc line starting with a recognised prefix, but carrying ' +
+          'an embedded space, is still one unrecognised token');
+
+  // The same shape, but the space is inside the VALUE rather than between
+  // two flags - a plausible typo (a space after a comma in a group list),
+  // not two flags mashed together. Still one token, still rejected: this
+  // function has no way to tell "one argument with a space in it" from
+  // "two arguments run together" once it has already decided to keep
+  // something whole, so it must refuse both rather than guess.
+  aEqualV('': SCMAIN_config_prefix('--ignore-groups=backend, frontend': ''):
+          'a plausible single value containing a space is still rejected ' +
+          'whole, not guessed at');
+
+end-proc;
+
+dcl-proc test_config_prefix_options_text_splits_on_whitespace export;
+
+  // The identical text, but arriving as SC_OPTIONS: split on whitespace into
+  // two tokens, both of which match a recognised shape, and both kept.
+  aEqualV('-a --ignore-groups=backend':
+          SCMAIN_config_prefix('': '-a --ignore-groups=backend'):
+          'the same text via SC_OPTIONS is two recognised tokens');
+
+  // THE PAIR THAT ACTUALLY DISCRIMINATES (see the banner above
+  // test_config_prefix_scrc_line_prefix_match_with_space_is_rejected).
+  // Same text, prefix-matching this time: through .scrc it is one
+  // unrecognised token (asserted there); through SC_OPTIONS it is two
+  // recognised ones. A implementation that kept a prefix-matching .scrc
+  // line whole would make these two cases agree with each other instead
+  // of with the spec.
+  aEqualV('--ignore-groups=backend --sampletime=5':
+          SCMAIN_config_prefix('': '--ignore-groups=backend --sampletime=5'):
+          'the prefix-matching pair, via SC_OPTIONS: both flags kept');
+
+end-proc;
+
+//==============================================================================
+// Comment lines and blank lines are invisible, not unrecognised
+//
+// Skipped silently: they contribute nothing to the output and, per the
+// brief, do not trigger the unrecognised-token warning either, unlike a
+// genuinely unrecognised token.
+//==============================================================================
+
+dcl-proc test_config_prefix_scrc_comment_line_skipped export;
+
+  aEqualV('--ignore-groups=backend':
+          SCMAIN_config_prefix('# a comment' + t_newline() +
+                                '--ignore-groups=backend': ''):
+          'a leading comment line contributes nothing');
+
+  // A file that is nothing but a comment.
+  aEqualV('': SCMAIN_config_prefix('# only a comment': ''):
+          'a comment-only .scrc yields nothing');
+
+end-proc;
+
+dcl-proc test_config_prefix_scrc_blank_line_skipped export;
+
+  aEqualV('': SCMAIN_config_prefix('': ''): 'an empty .scrc yields nothing');
+
+  aEqualV('': SCMAIN_config_prefix('   ': ''):
+          'a whitespace-only .scrc yields nothing');
+
+  // A blank line between two real ones does not break the ones either side
+  // of it, and does not appear as a gap or an extra separator in the output.
+  aEqualV('-a --ignore-groups=backend':
+          SCMAIN_config_prefix('-a' + t_newline() + '   ' + t_newline() +
+                                '--ignore-groups=backend': ''):
+          'a blank line between two real lines is skipped, not kept');
+
+  // A GENUINELY empty line - not three spaces, nothing at all between two
+  // newlines - is the commonest real shape (a leading blank line, or two
+  // consecutive newlines anywhere in a hand-edited file) and is a
+  // different code path from the whitespace-only case above: the
+  // substring taken for the line is zero-length rather than merely
+  // trimming to zero. Confirmed live, 19 September 2026, that this does
+  // not abend (unlike the trailing-newline case below, before it was
+  // fixed).
+  aEqualV('-a': SCMAIN_config_prefix(t_newline() + '-a': ''):
+          'a leading blank line (nothing before the first newline) is skipped');
+
+  aEqualV('-a --all':
+          SCMAIN_config_prefix('-a' + t_newline() + t_newline() + '--all':
+                                ''):
+          'two consecutive newlines - a genuinely empty line - between ' +
+          'two real ones is skipped, not kept');
+
+end-proc;
+
+//==============================================================================
+// A .scrc file ending in a newline - the ordinary shape of a text file -
+// must not abend
+//
+// SCMAIN_config_prefix splits scrc_text on newline by scanning for the
+// next one and taking a substring past it; when the newline found is the
+// LAST character, the naive "past it" position is one beyond the end of
+// the string, which this RPG dialect abends on (RNX0100) rather than
+// treating as an empty remainder - the same trap docs/testing-notes.md
+// already names for this exact shape. Found live, 19 September 2026,
+// running `scr` against a `.scrc` written with `echo`, which appends
+// exactly this trailing newline; fixed in SCMAIN_config_prefix, and
+// PINNED HERE so the fix cannot silently regress - before this case
+// existed, removing the fix left all other cases in this suite green.
+//==============================================================================
+
+dcl-proc test_config_prefix_scrc_trailing_newline_does_not_abend export;
+
+  aEqualV('-a': SCMAIN_config_prefix('-a' + t_newline(): ''):
+          'a single .scrc line ending in a newline is still recognised, ' +
+          'and does not abend');
+
+  aEqualV('-a --ignore-groups=backend':
+          SCMAIN_config_prefix('-a' + t_newline() +
+                                '--ignore-groups=backend' + t_newline(): ''):
+          'two .scrc lines, the file ending in a newline, both survive');
+
+end-proc;
+
+//==============================================================================
+// Leading and trailing whitespace on a single .scrc line is trimmed
+//
+// RESOLVED 19 September 2026: whitespace here reaches a TAB, not only the
+// plain space character. Measured live against upstream (a leading tab
+// before a recognised flag is still recognised), which is why
+// SCMAIN_config_prefix does not rely on RPGLE's own %TRIM - it strips only
+// the space character - and trims tab and CR explicitly instead.
+//==============================================================================
+
+dcl-proc test_config_prefix_scrc_line_whitespace_trimmed export;
+
+  dcl-c T_HT const(x'05');
+  dcl-c T_CR const(x'0D');
+
+  aEqualV('-a': SCMAIN_config_prefix('   -a   ': ''):
+          'surrounding spaces are trimmed before matching');
+
+  aEqualV('-a': SCMAIN_config_prefix(T_HT + '-a': ''):
+          'a leading TAB is trimmed before matching, not just a space');
+
+  aEqualV('-a': SCMAIN_config_prefix('-a' + T_CR: ''):
+          'a trailing CR is trimmed before matching');
+
+end-proc;
+
+//==============================================================================
+// An unrecognised token contributes nothing, whichever source it comes from
+//
+// --bogus=x is not one of the three recognised shapes. Nor is
+// --color-scheme=..., a real upstream option RMSC has not implemented - this
+// function knows only the three shapes RMSC's own parser accepts today, not
+// everything upstream accepts. A bare word that is not a flag at all is
+// unrecognised the same way.
+//==============================================================================
+
+dcl-proc test_config_prefix_bogus_option_dropped export;
+
+  aEqualV('': SCMAIN_config_prefix('--bogus=x': ''):
+          'an unrecognised long option from .scrc is dropped');
+
+  aEqualV('': SCMAIN_config_prefix('': '--bogus=x'):
+          'an unrecognised long option from SC_OPTIONS is dropped');
+
+  aEqualV('': SCMAIN_config_prefix('--color-scheme=dark': ''):
+          '--color-scheme= is unimplemented in RMSC and so unrecognised');
+
+  aEqualV('': SCMAIN_config_prefix('list': ''):
+          'a bare word from .scrc is dropped, not treated as a specifier');
+
+  aEqualV('': SCMAIN_config_prefix('': 'check'):
+          'a bare word from SC_OPTIONS is dropped the same way');
+
+end-proc;
+
+//==============================================================================
+// Mixed recognised and unrecognised tokens from the same source
+//
+// Order is preserved among the survivors, and the dropped token does not
+// appear anywhere in the output - not as itself, and not as a fragment
+// concatenated into a kept neighbour.
+//==============================================================================
+
+dcl-proc test_config_prefix_scrc_mixed_recognised_and_unrecognised export;
+
+  aEqualV('--ignore-groups=backend':
+          SCMAIN_config_prefix('--ignore-groups=backend' + t_newline() +
+                                '--bogus=x': ''):
+          'recognised then unrecognised - only the recognised one survives');
+
+  // Two survivors either side of a dropped line, so this actually exercises
+  // order among more than one kept token, not just a single-survivor case.
+  aEqualV('--ignore-groups=backend --sampletime=5':
+          SCMAIN_config_prefix('--bogus=x' + t_newline() +
+                                '--ignore-groups=backend' + t_newline() +
+                                '--sampletime=5': ''):
+          'the leading unrecognised line is dropped; the two recognised ' +
+          'lines survive in the order they appeared');
+
+end-proc;
+
+dcl-proc test_config_prefix_options_text_mixed_recognised_and_unrecognised
+    export;
+
+  aEqualV('-a --sampletime=5':
+          SCMAIN_config_prefix('': 'check -a --bogus=x --sampletime=5 list'):
+          'bare words and a bad flag dropped, order kept among survivors');
+
+end-proc;
+
+//==============================================================================
+// Both sources at once: .scrc's tokens first, SC_OPTIONS's tokens after
+//==============================================================================
+
+dcl-proc test_config_prefix_both_sources_scrc_first export;
+
+  aEqualV('-a --ignore-groups=backend --sampletime=5 --all':
+          SCMAIN_config_prefix('-a' + t_newline() +
+                                '--ignore-groups=backend':
+                                '--sampletime=5 --all'):
+          '.scrc tokens precede SC_OPTIONS tokens, each group keeping its ' +
+          'own internal order');
+
+end-proc;
+
+//==============================================================================
+// SC_OPTIONS splits on WHITESPACE, not only the space character
+//
+// Measured live, 19 September 2026: a TAB between two flags in SC_OPTIONS
+// splits them apart exactly as a space does - the same trap the .scrc
+// trim above already names, on the other side of this function.
+//==============================================================================
+
+dcl-proc test_config_prefix_options_text_tab_separated export;
+
+  dcl-c T_HT const(x'05');
+
+  aEqualV('-a --ignore-groups=backend':
+          SCMAIN_config_prefix('': '-a' + T_HT + '--ignore-groups=backend'):
+          'a TAB between two SC_OPTIONS flags splits them, like a space');
+
+end-proc;
+
+//==============================================================================
+// A recognised-by-prefix .scrc line can never hand the verb to a word it
+// carries - the defect a peer review caught before this reached a real
+// command line
+//
+// '--sampletime=5 list', staged as ONE .scrc line ahead of a typed 'check',
+// used to merge into 'list check' - list' is a real operation word, so
+// is_operation would accept it, and the typed 'check' became an ordinary
+// argument to it. This is exactly the upstream verb-hijacking behaviour
+// docs/parity.md records RMSC as NOT reproducing. Asserted here on
+// SCMAIN_config_prefix's return value alone (it must be '', so nothing
+// from this line ever reaches SCMAIN_parse to be re-split); the end-to-end
+// shape of the defect - two words arriving as one merged command line - is
+// exactly what the embedded-space rejection above exists to prevent, since
+// SCMAIN_config_prefix has no way to see the SECOND word that will follow
+// it on the real command line and must simply never keep anything with a
+// space in it whole.
+//==============================================================================
+
+dcl-proc test_config_prefix_scrc_cannot_hand_over_the_verb export;
+
+  aEqualV('': SCMAIN_config_prefix('--sampletime=5 list': ''):
+          'a recognised-by-prefix .scrc line carrying a trailing verb ' +
+          'word is rejected whole, not split apart later');
+
+end-proc;

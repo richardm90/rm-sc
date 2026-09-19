@@ -145,4 +145,7 @@ STRPGMEXP PGMLVL(*CURRENT) SIGNATURE('RMSC 0.4.0')
      SCLOG_path itself is unchanged in signature; only its meaning moved,
      from the one deterministic file to the most recent one on disk. */
   EXPORT SYMBOL(SCLOG_new_path)
+  /* Filters .scrc/SC_OPTIONS content to the tokens RMSC's parser
+     recognises - see SCMAIN_D. Appended, never inserted. */
+  EXPORT SYMBOL(SCMAIN_config_prefix)
 ENDPGMEXP

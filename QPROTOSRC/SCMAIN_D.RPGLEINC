@@ -114,3 +114,40 @@ end-pr;
 dcl-pr SCMAIN_run like(INTEGER_t);
   opts likeds(SCMAIN_OPTS_t);
 end-pr;
+
+///
+// Filters $HOME/.scrc and SC_OPTIONS content down to the tokens RMSC's own
+// parser recognises, in the order they should be applied ahead of the real
+// command line - docs/parity.md, "scrc and SC_OPTIONS", DECIDED 19
+// September 2026, has the full measured rule this follows.
+//
+// scrc_text is one argument per LINE - never split further, even on
+// internal whitespace within a line. A blank line, or one whose first
+// non-blank character is '#', is silently skipped. options_text is the
+// opposite: one argument per WHITESPACE-separated word. This asymmetry
+// between the two sources is measured and deliberate, not a bug to fix.
+//
+// A token is recognised, and kept, only if it is exactly one of the three
+// shapes DECIDED for this - -a/--all, --ignore-groups=, or --sampletime= -
+// and carries no embedded space or tab, since a recognised token is handed
+// back as TEXT to be re-tokenised by SCMAIN_parse's own whitespace
+// splitter, which has no idea any of it came from one .scrc line; keeping
+// a spaced candidate "whole" here would only have it split apart again one
+// call later, which can hand the verb itself to a word a config file
+// wrote - see is_config_flag's own comment. Anything else - including a
+// real upstream option RMSC does not implement yet (--color-scheme,
+// deliberately out of scope for now), a flag RMSC's own parser DOES accept
+// but this does not (-v, -q, --ignore-globals and the colour flags -
+// scope, not an oversight), and a bare word - contributes nothing to the
+// return value and is warned about once, with upstream's own wording,
+// rather than silently dropped or allowed to change which command runs.
+//
+// @return the recognised tokens, space-joined, scrc_text's before
+//   options_text's - ready to prepend, with a following space, to the
+//   real command line before SCMAIN_parse sees any of it
+///
+
+dcl-pr SCMAIN_config_prefix like(SCMAIN_ARGS_t);
+  scrc_text    like(STRING_t) const ccsid(*utf8);
+  options_text like(SCMAIN_ARGS_t) const;
+end-pr;

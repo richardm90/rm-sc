@@ -30,8 +30,24 @@ ctl-opt text('RMSC: Command line');
 // when it reports that the operation matched nothing.
 dcl-c SCMAIN_GROUP_ALL const('all');
 
+// Leading/trailing space, tab and CR - trimmed from a single .scrc line
+// before it is checked against a recognised shape or for '#'. See
+// trim_ws below. x'05' is HT in every EBCDIC CCSID including this job's -
+// the same assumption SCYAML.RPGLE's own HT already makes, not x'09',
+// which is HT only in ASCII.
+dcl-c CONFIG_HT const(x'05');
+dcl-c CONFIG_CR const(x'0D');
+
 dcl-pr next_token like(SCMAIN_ARGS_t);
   rest like(SCMAIN_ARGS_t);
+end-pr;
+
+dcl-pr trim_ws like(SCMAIN_ARGS_t);
+  text like(SCMAIN_ARGS_t) const;
+end-pr;
+
+dcl-pr is_config_flag like(BOOLEAN_t);
+  word like(SCMAIN_ARGS_t) const;
 end-pr;
 
 dcl-pr warn_if_empty;
@@ -254,6 +270,184 @@ dcl-proc next_token;
   endif;
 
   return word;
+
+end-proc;
+
+//==============================================================================
+// trim_ws
+//   Leading/trailing space, tab and CR - %TRIM only strips space, and
+//   upstream (Java's String.trim()) strips anything up to and including
+//   U+0020. Measured live, 19 September 2026: a leading TAB before a
+//   recognised .scrc flag does not stop it being recognised.
+//==============================================================================
+
+dcl-proc trim_ws;
+  dcl-pi *n like(SCMAIN_ARGS_t);
+    text like(SCMAIN_ARGS_t) const;
+  end-pi;
+
+  dcl-s ws like(SCMAIN_ARGS_t);
+  dcl-s s  like(INTEGER_t);
+  dcl-s e  like(INTEGER_t);
+
+  if %len(text) = 0;
+    return '';
+  endif;
+
+  ws = ' ' + CONFIG_HT + CONFIG_CR;
+
+  s = %check(ws: text);
+  if s = 0;
+    return '';
+  endif;
+  e = %checkr(ws: text);
+
+  return %subst(text: s: e - s + 1);
+
+end-proc;
+
+//==============================================================================
+// is_config_flag
+//   The three flag shapes DECIDED for .scrc/SC_OPTIONS - docs/parity.md,
+//   "DECIDED 19 September 2026". NOT the whole of what SCMAIN_parse itself
+//   accepts on a typed command line - -v, -q, --splf, --ignore-globals,
+//   --colors/--colours and --disable-colors/--disable-colours are real,
+//   already-working flags this deliberately leaves unrecognised from these
+//   two sources, because the scope decided for this item named exactly
+//   these three. Widening it is a separate decision, not an oversight to
+//   fix by adding a case here.
+//==============================================================================
+
+dcl-proc is_config_flag;
+  dcl-pi *n like(BOOLEAN_t);
+    word like(SCMAIN_ARGS_t) const;
+  end-pi;
+
+  // A candidate carrying an embedded space or tab can never be safely kept
+  // whole: it goes back onto the command line as TEXT, and SCMAIN_parse's
+  // own tokeniser (next_token) splits on blanks with no idea any of it came
+  // from one .scrc line. Recognising it here anyway would let a single
+  // '.scrc' line reassemble into TWO tokens once merged - one of which
+  // could be an operation word, handing the verb itself to something a
+  // config file wrote, which is exactly the upstream behaviour DECIDED NOT
+  // to reproduce (docs/parity.md). Found by review, 19 September 2026,
+  // before this reached a real command line: '--sampletime=5 list' as one
+  // .scrc line, merged ahead of a typed 'check', ran 'list check' instead.
+  // Rejecting the whole candidate here is also correct for a value that
+  // legitimately needs a space (upstream's own --color-scheme example has
+  // one) - RMSC's parser cannot represent an argument containing a space
+  // from ANY source, typed or not, so refusing it is no narrower than what
+  // the command line itself already allows.
+  if %scan(' ': word) > 0 or %scan(CONFIG_HT: word) > 0
+      or %scan(CONFIG_CR: word) > 0;
+    return false;
+  endif;
+
+  if word = '-a' or word = '--all';
+    return true;
+  endif;
+  if %len(word) >= 16 and %subst(word: 1: 16) = '--ignore-groups=';
+    return true;
+  endif;
+  if %len(word) >= 13 and %subst(word: 1: 13) = '--sampletime=';
+    return true;
+  endif;
+
+  return false;
+
+end-proc;
+
+//==============================================================================
+// SCMAIN_config_prefix
+//   See SCMAIN_D for the full measured rule. Two independent tokenisers -
+//   scrc_text one argument per LINE, options_text one argument per
+//   WHITESPACE-separated word - feeding the SAME recognise-or-warn check,
+//   so the only difference in outcome between the two sources is where a
+//   token boundary falls, never which shapes are accepted.
+//==============================================================================
+
+dcl-proc SCMAIN_config_prefix export;
+  dcl-pi *n like(SCMAIN_ARGS_t);
+    scrc_text    like(STRING_t) const ccsid(*utf8);
+    options_text like(SCMAIN_ARGS_t) const;
+  end-pi;
+
+  dcl-s kept   like(SCMAIN_ARGS_t) inz('');
+  dcl-s rest_s like(STRING_t) ccsid(*utf8);
+  dcl-s line   like(SCMAIN_ARGS_t);
+  dcl-s nlpos  like(INTEGER_t);
+  dcl-s rest_o like(SCMAIN_ARGS_t);
+  dcl-s word   like(SCMAIN_ARGS_t);
+
+  rest_s = scrc_text;
+  dow %len(rest_s) > 0;
+    nlpos = %scan(x'0A': rest_s);
+    // nlpos = %len(rest_s) is its own case, not the 'else' below: %SUBST
+    // rejects a start position one past the end of the string rather than
+    // returning an empty result there - the same trap SCMAIN_parse's own
+    // --ignore-groups= handling already guards against (031b524) - and a
+    // trailing newline, the ordinary shape of a text file, puts the
+    // newline in exactly that last position.
+    if nlpos = 0;
+      line = %subst(rest_s: 1: %len(rest_s));
+      rest_s = '';
+    elseif nlpos = %len(rest_s);
+      line = %subst(rest_s: 1: nlpos - 1);
+      rest_s = '';
+    else;
+      line = %subst(rest_s: 1: nlpos - 1);
+      rest_s = %subst(rest_s: nlpos + 1);
+    endif;
+    line = trim_ws(line);
+    // Blank, or a comment - both silent. Neither is "unrecognised": an
+    // empty .scrc, or one that is all comments, must not warn about
+    // anything at all.
+    if %len(line) = 0 or %subst(line: 1: 1) = '#';
+      iter;
+    endif;
+    if is_config_flag(line);
+      if %len(kept) = 0;
+        kept = line;
+      else;
+        kept = %trimr(kept) + ' ' + line;
+      endif;
+    else;
+      SCOUT_warnln('WARNING: Argument ''' + %trim(line) +
+                   ''' unrecognized and will be ignored');
+    endif;
+  enddo;
+
+  // SC_OPTIONS - one argument per whitespace-separated word, the opposite
+  // rule to .scrc's above. Measured, live: the SAME two flags that are one
+  // unrecognised token on a single .scrc line are two recognised tokens
+  // here.
+  //
+  // WHITESPACE, not just the space character - measured live, 19 September
+  // 2026: a tab between two flags in SC_OPTIONS splits them apart exactly
+  // as a space does. next_token itself only scans for ' ', because every
+  // OTHER caller feeds it a real command line, where a tab separator has
+  // never been measured or needed - so the translation happens here,
+  // before next_token ever sees it, rather than widening what every other
+  // caller of next_token accepts.
+  rest_o = %trim(%xlate(CONFIG_HT: ' ': options_text));
+  dow %len(rest_o) > 0;
+    word = next_token(rest_o);
+    if %len(word) = 0;
+      leave;
+    endif;
+    if is_config_flag(word);
+      if %len(kept) = 0;
+        kept = word;
+      else;
+        kept = %trimr(kept) + ' ' + word;
+      endif;
+    else;
+      SCOUT_warnln('WARNING: Argument ''' + %trim(word) +
+                   ''' unrecognized and will be ignored');
+    endif;
+  enddo;
+
+  return kept;
 
 end-proc;
 

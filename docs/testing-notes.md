@@ -259,6 +259,19 @@ note attached to the one procedure that already got it right protects nothing.
 Twice in one file in one day, from opposite sides of the wall, with the
 warning already present both times.
 
+**Fifth instance, 19 September 2026, in `SCMAIN_config_prefix` (item 8,
+`scrc`/`SC_OPTIONS`).** Same shape as the others - `out` for the filtered
+token string being accumulated - and the same two symptoms: `RNF5008 Factor 1
+operand is not valid` pointing at the assignment, and `RNF7560 Varying length
+field OUT is not allowed with this operation` / `RNF7260 The Factor 2 operand
+%TRIMR is not valid` a line below it, naming neither the word nor the real
+cause. Found by elimination - the surrounding structure (`if`/`else`/`endif`
+around a plain `eval`) is used successfully elsewhere in the very same file -
+rather than by recognising the pattern from this note, which is the same gap
+the fourth instance already named: **the note has to be where someone is
+about to choose the name, not filed under a different procedure that already
+survived it.** Renamed to `kept`; the module compiled clean immediately after.
+
 ## iRPGUnit truncates your failure message at 64 characters
 
 `iEqual`, `nEqual` and `aEqual` declare `fieldName varchar(64)` with **no
@@ -444,4 +457,24 @@ better than a process count for exactly this reason, and every other wait in
 this project already uses one:
 
     until grep -q BUILD_DONE "$log"; do sleep 15; done
+
+## `SCAPI`'s staged-directory cases fail on their own, unrelated to whatever else you're doing
+
+Found 19 September 2026 while regression-testing item 8 (`scrc`/`SC_OPTIONS`), which never
+touches `SCAPI`, `SCDIRS`, or anything in the custom-services-directory path. Recorded so the
+next person to see it does not spend time looking at their own unrelated change first.
+
+`tools/verify.sh suites` reports three `SCAPI` failures, all downstream of one cause:
+`TEST_STAGED_WIDTH_SERVICES_ARE_VISIBLE` says outright, in its own failure text, "SCDIRS did not
+read /tmp/rmsc-scapi-test-CLAUDE" — the test's own staged fixture directory
+(`SCAPI.TEST.RPGLE`'s `g_api_dir`, set via `ENVVAR_put(SCDIRS_CUSTOM_ENV: g_api_dir)`) is not
+there by the time the assertions run, and the other two failures are the wholeness cases falling
+over for the same reason rather than their own.
+
+**Confirmed pre-existing, not a regression from item 8's work**: reverted `SCMAIN.RPGLE`,
+`SCRUN.PGM.RPGLE`, `SCMAIN_D.rpgleinc` and `RMSC.BND` to the committed `HEAD` versions, rebuilt,
+and reran `SCAPI` alone - identical three failures, identical message. Not flaky either: reran
+twice more with no changes at all, same result both times. Not investigated further, because it
+is orthogonal to whatever brought you here; if you're the one who eventually looks at it, start
+from why the directory `ENVVAR_put` names is not there afterwards, not from whatever you changed.
 
