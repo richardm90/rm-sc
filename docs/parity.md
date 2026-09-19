@@ -326,8 +326,44 @@ harness (15 other cases) still pass; no regression.
 
 **DECIDED 18 September 2026: RMSC will switch to upstream's timestamped naming.** The most
 invasive item in this decision round — it changes where RMSC writes logs on disk, not just what
-it prints — so the exact timestamp format needs measuring, and this needs its own careful pass
-rather than folding into whatever change closes the item above. Not yet implemented.
+it prints.
+
+**MEASURED 19 September 2026, live, on the box.** Three things, none of them obvious from the name
+alone:
+
+1. **The exact stamp.** A fresh start's `For details, see log file at:` line and the file actually
+   on disk both read `2026-09-19-12.26.22.<short_name>.log` — a fixed 19-character prefix,
+   `YYYY-MM-DD-HH.MM.SS`, then a dot, the short name, and `.log`. This is RPG's own `%CHAR(ts:
+   *ISO)` shape (`YYYY-MM-DD-HH.MM.SS.uuuuuu`) with the trailing 7-character microseconds cut off —
+   convenient, not coincidental: DB2's ISO timestamp format and upstream's own stamp agree on every
+   separator.
+2. **One file per start, not one file reused.** Stopping and starting the same service twice left
+   **two** files on disk, timestamped `12.27.27...` and `12.27.34...`. Nothing deletes the older
+   one.
+3. **`loginfo` finds the file by scanning, not by remembering.** `sc loginfo`, run as a separate
+   process seconds after `sc start`, reported the exact file that start had just created — and
+   after the second start above, reported the *newer* of the two files on disk. So there is no
+   per-instance state to recover across process invocations: the rule is "the greatest filename
+   matching `*.<short_name>.log` in the log directory", full stop. The fixed-width stamp sorts
+   lexicographically by time, so "greatest" and "newest" are the same question.
+
+**This makes `SCLOG_path` two different questions wearing one name, and it has to become two
+procedures.** A caller *starting* a service needs a fresh path nothing on disk has yet — computed
+once per start and threaded through everywhere that attempt needs it (the redirect target, and any
+same-attempt re-check, such as the log-detail-on-timeout line). A caller *reading about* a service
+(`loginfo`, `stop`'s escalation warning path, `scrunattrs`) needs the latest existing file, or none.
+Conflating them either invents a file that started clean has never written, or reads back a
+filename the write side never used.
+
+**IMPLEMENTED 19 September 2026: split into `SCLOG_new_path` (fresh, timestamped, one call per
+start) and a redefined `SCLOG_path` (scans `SCLOG_dir(def)` for the greatest name matching
+`*.<short_name>.log`, returns `''` if none).** `SCLOG_path`'s signature is unchanged — same
+parameter, same return type — only its meaning moved, so no `RMSC.BND` signature bump was needed;
+`SCLOG_new_path` is appended as a new export. `SCEXEC_start` now computes the path once via
+`SCLOG_new_path` and reuses the same local variable for the post-timeout log-detail check, which
+used to re-call the old, deterministic `SCLOG_path` and would otherwise now silently re-resolve to
+whatever the directory scan finds — usually the very file just written, but the wrong thing to
+rely on there.
 
 **The spooled-file section.** RMSC prints `    spooled file <name> number <n> in <job>` after the
 log line. Upstream has a spooled-file path of its own (`getSpooledFiles`), and **what it prints
