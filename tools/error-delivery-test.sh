@@ -350,6 +350,24 @@ assert_case() {
       [ -z "$nonwarn" ] && nonwarn=0
       [ "$nonwarn" -eq 0 ] || problems+=("$nonwarn non-warning line(s) on stderr for a command that succeeded: $(grep -vE '^[[:space:]]*$' "$e" | grep -m1 -vE '^WARNING')")
 
+      # NO 'sc: ' CHECK ON THIS BRANCH, AND THAT IS A DECISION, NOT AN
+      # OMISSION. The once|warn branch above asserts that stderr carries no
+      # 'sc: ' prefix, because `SCRUN` writes `'sc: ' + opts.err` for every
+      # parse or run failure it delivers. `sanctioned` is the SUCCESS policy -
+      # list-succeeds and check-service both call it only for exit 0 - and
+      # `opts.err` is empty by construction on that path: there is no parse or
+      # run failure for it to carry. Everything that CAN appear here instead is
+      # a load warning from an entirely different mechanism (SCCOLL's directory
+      # walk during list/check, not SCMAIN's error return), and the (a) check
+      # immediately above already holds every such line to a bare 'WARNING'
+      # prefix and nothing else - so a stray 'sc: ' would already fail (a) as a
+      # non-warning line before any dedicated check could fire.
+      #
+      # Adding the same assertion here anyway would be exactly the shape this
+      # project's CLAUDE.md warns about elsewhere: a check that cannot fail,
+      # because nothing on this path is ever built from `opts.err` in the first
+      # place. Left out deliberately rather than added as decoration.
+
       # (b) Differential. If upstream had nothing to say on this machine, RMSC
       # saying anything is RMSC's own doing and not the profile's.
       if [ "$sc_n" -eq 0 ] && [ "$n_err" -ne 0 ]; then
@@ -371,6 +389,40 @@ assert_case() {
       else
         local ids; ids=$(grep -cE '^[A-Z]{2,4}[0-9]{4}:' "$e")
         [ "$ids" -eq 0 ] || problems+=("$ids stderr line(s) carry a message-id prefix: $(grep -m1 -oE '^[A-Z]{2,4}[0-9]{4}:' "$e")")
+
+        # RMSC'S OWN PREFIX, NOT A MESSAGE ID. `SCRUN` writes `'sc: ' + opts.err`
+        # on every stderr line it delivers, and the message-id check above does
+        # not catch it - `sc:` does not match `^[A-Z]{2,4}[0-9]{4}:`. That gap is
+        # exactly why docs/messages.md says this script "does not pin it: it
+        # forbids a message-id prefix ... and 'sc: ' is not one", and why
+        # docs/parity.md records the decision separately under "The `sc: `
+        # prefix and short-versus-friendly naming":
+        #
+        #   DECIDED 18 September 2026: drop it. RMSC's stderr will be bare,
+        #   matching upstream. Not yet implemented.
+        #
+        # So this is EXPECTED TO FAIL today, on every case below that reaches
+        # this branch - `opts.err` is the whole delivery mechanism this file
+        # tests, so the prefix is on essentially all of them - and to start
+        # passing only once the prefix is actually dropped.
+        #
+        # Anchored to column 1 and matched on the literal prefix, not a loose
+        # substring search: a message that happens to mention "sc:" partway
+        # through a line (a path, a quoted argument) is not this defect, and
+        # this project's own rule is to assert precisely rather than loosely.
+        # Checked as two mutually exclusive patterns, not one combined regex,
+        # so a failure can say WHICH spelling occurred: the RPG source keeps
+        # 'sc: ' with a trailing space, but a check that only ever looked for
+        # that exact string would fall silent if the space were dropped and the
+        # bare colon kept - which is not the same thing as the prefix being
+        # removed, and would be exactly the kind of change this test exists to
+        # catch rather than miss.
+        local scpfx_sp; scpfx_sp=$(grep -cE '^sc: ' "$e" 2>/dev/null || true)
+        local scpfx_bare; scpfx_bare=$(grep -cE '^sc:([^ ]|$)' "$e" 2>/dev/null || true)
+        [ -z "$scpfx_sp" ] && scpfx_sp=0
+        [ -z "$scpfx_bare" ] && scpfx_bare=0
+        [ "$scpfx_sp" -eq 0 ] || problems+=("$scpfx_sp stderr line(s) carry RMSC's 'sc: ' prefix (with trailing space): $(grep -m1 -E '^sc: ' "$e")")
+        [ "$scpfx_bare" -eq 0 ] || problems+=("$scpfx_bare stderr line(s) carry a bare 'sc:' prefix (no trailing space): $(grep -m1 -E '^sc:([^ ]|$)' "$e")")
 
         local msg; msg=$(stderr_payload "$e")
         if [ -n "$msg" ]; then
@@ -436,6 +488,14 @@ sweep_no_service() {
     if [ -s "$o" ]; then why="$why stdout=$(count_lines "$o")line(s)"; fi
     if [ ! -s "$e" ]; then why="$why nothing-on-stderr"; fi
     if grep -qE '^[A-Z]{2,4}[0-9]{4}:' "$e" 2>/dev/null; then why="$why message-id-prefix"; fi
+    # RMSC'S OWN 'sc: ' PREFIX, same reasoning and same two-pattern check as
+    # assert_case's once|warn branch above: "Operation <op> needs a service"
+    # is built into opts.err and delivered by the same SCRUN call sites, so it
+    # carries the same prefix today and is expected to fail here for the same
+    # reason until the prefix is dropped. See that branch's comment for why
+    # this checks both the space and bare-colon spellings.
+    if grep -qE '^sc: ' "$e" 2>/dev/null; then why="$why sc-prefix(with space)"; fi
+    if grep -qE '^sc:([^ ]|$)' "$e" 2>/dev/null; then why="$why sc-prefix(bare)"; fi
 
     msg=$(stderr_payload "$e")
     if [ -n "$msg" ]; then

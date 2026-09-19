@@ -62,9 +62,14 @@ dcl-proc SCRUN;
   // status says what to exit with, opts.err says what still needs saying.
   // A status of 0 carrying a message is a warning; a non-zero status with no
   // message is a failure that has already reported itself.
+  // BARE, no 'sc: ' prefix - DECIDED 18 September 2026, docs/parity.md.
+  // Measured: upstream's stderr starts at column 1 in every case, with no
+  // prefix of any kind. The prefix was a survival from the escape-message
+  // era, when the line arrived as `CPF9897: sc: ...` and 'sc:' was doing the
+  // work of naming the program; it outlived the message it was named for.
   status = SCMAIN_parse(%trimr(p_args): opts);
   if opts.err <> '';
-    SCOUT_warnln('sc: ' + %trim(opts.err));
+    SCOUT_warnln(%trim(opts.err));
   endif;
   if status <> SCMAIN_EXIT_OK;
     c_exit(status);
@@ -72,7 +77,7 @@ dcl-proc SCRUN;
 
   status = SCMAIN_run(opts);
   if opts.err <> '';
-    SCOUT_warnln('sc: ' + %trim(opts.err));
+    SCOUT_warnln(%trim(opts.err));
   endif;
   if status <> SCMAIN_EXIT_OK;
     c_exit(status);

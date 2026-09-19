@@ -383,14 +383,19 @@ Two whole-surface differences, catalogued in full in `docs/messages.md`'s "two w
 differences" section — each touches many rows at once rather than being a single case, which is
 why they were tracked separately from the per-row texts.
 
-**The `sc: ` prefix.** `SCRUN` writes `'sc: ' + opts.err` on every stderr line RMSC produces.
-Measured, 3 September 2026, byte by byte: upstream's stderr is bare at column 1 in every case
-probed — the usage block, `Could not find definition for service 'x'`,
-`WARNING: No services are found in group 'x'`. Nothing in `tools/error-delivery-test.sh` pins the
-prefix either way, which is why it sat undecided rather than being caught as a defect.
+**The `sc: ` prefix — MATCHED 19 September 2026.** `SCRUN` used to write `'sc: ' + opts.err` on
+every stderr line RMSC produced. Measured, 3 September 2026, byte by byte: upstream's stderr is
+bare at column 1 in every case probed — the usage block, `Could not find definition for service
+'x'`, `WARNING: No services are found in group 'x'`. `tools/error-delivery-test.sh` did not pin
+the prefix either way, which is why it sat undecided rather than being caught as a defect.
 
-**DECIDED 18 September 2026: drop it.** RMSC's stderr will be bare, matching upstream. Not yet
-implemented.
+**DECIDED 18 September 2026, IMPLEMENTED 19 September 2026: dropped.** Both `SCRUN` call sites now
+write `opts.err` bare. `tools/error-delivery-test.sh` asserts it directly — two anchored patterns
+(`^sc: ` and the bare-colon spelling `^sc:([^ ]|$)`), checked separately so a failure names which
+one occurred — inside `assert_case`'s `once`/`warn` branch, which covers every measured usage and
+operational failure case, and inside `sweep_no_service`, which covers the five "needs a service"
+usage errors on the same delivery path. All 33 cases in the harness pass; the fidelity gate shows
+no regression.
 
 **Short-versus-friendly naming.** Upstream's progress line uses a service's **short** name; its
 status and error lines use the **friendly** name. RMSC uses the short name throughout. Already
@@ -951,10 +956,11 @@ anything that ran, which is the argument for the fixture pack rather than a foot
    `INTENTIONAL` to per-recorded-difference rather than per-operation — see "The gate" above —
    since several operations carry both a settled part and one still open.
 
-Also decided 18 September 2026, not yet implemented: drop the `sc: ` stderr prefix; apply
-short-versus-friendly naming everywhere upstream does, not just in narration; stage a dedicated
-verification fixture under `CLAUDE`'s account rather than Richard's. `SC_OPTIONS`/`.scrc` was
-considered and deliberately left undecided pending further investigation — see "Beyond the
+Also decided 18 September 2026: the `sc: ` stderr prefix, **dropped 19 September 2026**. Still not
+yet implemented: apply short-versus-friendly naming everywhere upstream does, not just in
+narration; stage a dedicated verification fixture under `CLAUDE`'s account rather than Richard's.
+`SC_OPTIONS`/`.scrc` was considered and deliberately left undecided pending further investigation
+— see "Beyond the
 operations — inputs RMSC does not read" above.
 
 Separately, and not part of step 8: the gate should compare `list -a` across all services, to
