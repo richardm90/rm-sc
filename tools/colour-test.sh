@@ -312,6 +312,34 @@ mk "$UP"   "$UP_F"   "$PORT_UP"
 mk "$HALF" "$HALF_F" "$PORT_HALF, $BADJOB"
 mk "$DOWN" "$DOWN_F" "$PORT_DOWN"
 
+# A DEFINITION WITH NO name:, DELIBERATE AND OWNED - verification step 9.
+#
+# docs/testing-notes.md records that the bare `list`/`groups` sweep two
+# paragraphs below behaves differently on Richard's personal account (four
+# broken definitions, undocumented) than on CLAUDE's (empty): "the two
+# failures on RICHARD are real... a green run on the empty account is a
+# weaker result than it looks". One of those four was eventually identified
+# as exactly this shape - a definition with no name: - and closed as its own
+# parity fix (docs/parity.md, "Beyond the operations - a definition with no
+# name: was silently accepted", 19 September 2026): upstream refuses it
+# outright and it never appears in list, check or groups; RMSC used to
+# accept it silently.
+#
+# DECIDED 18/19 September 2026: rather than depend on anyone's personal,
+# undocumented account for this coverage, stage the fixture per run, the
+# same way every other definition in this file is - in $SVCDIR, which
+# SC_SERVICES_DIR/-Dservices.dir ADD rather than replace (docs/parity.md),
+# so this reaches the bare list/groups sweep below exactly as a real
+# account's debris would, and is gone the moment this script exits.
+#
+# NOT PUT IN $GROUP. A conflicting definition would leave the group's own
+# membership assertions elsewhere in this file answering a different
+# question than they were written to ask.
+{
+  printf 'start_cmd: /QOpenSys/usr/bin/true\n'
+  printf 'check_alive: ZZNONAMECOLOURJOB\n'
+} > "$SVCDIR/zzc_noname.yaml"
+
 cleanup() {
   local p
   for p in $(ps -ef 2>/dev/null | grep -E "$WORK/listen\.py" | grep -v grep | awk '{print $2}'); do
@@ -610,6 +638,23 @@ for op in "check group:$GROUP" "list" "groups"; do
   check_named "no-colour-$(echo "$op" | tr ' :' '__')" measured \
     "piped \`$op\`: zero escapes, byte-identical to upstream" "${probs[@]}"
 done
+
+# THE FIXTURE PROVES ITSELF - verification step 9. Reuses the `list` capture
+# just taken above rather than running anything again: if the byte-diff loop
+# just passed, this makes explicit WHY - not merely that the two sides agree,
+# but that the agreement is upstream's answer (exclude it) and not RMSC's
+# old one (include it). A regression of the 19 September name: fix would
+# fail this with RMSC's side naming zzc_noname where upstream's does not,
+# even on an otherwise byte-identical account.
+noname_probs=()
+if grep -q 'zzc_noname' "$WORK/sc.pipe.list.out" 2>/dev/null; then
+  noname_probs+=("upstream's own list names zzc_noname - it should refuse a definition with no name: outright")
+fi
+if grep -q 'zzc_noname' "$WORK/scr.pipe.list.out" 2>/dev/null; then
+  noname_probs+=("RMSC's list names zzc_noname - a definition with no name: must be refused, not defaulted")
+fi
+check_named "noname-excluded-from-both" measured \
+  "a definition with no name: appears in neither implementation's list" "${noname_probs[@]}"
 
 # THE SAME OUTPUT, TWO GATES. The rows a terminal sees must be the rows a pipe
 # sees with escapes added and NOTHING else - no re-padding, no moved bar, no

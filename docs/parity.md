@@ -810,6 +810,72 @@ a job that resists `ENDJOB OPTION(*IMMED)` on a real box — a materially differ
 anything measured here — and remains deliberately unattempted without its own decision on scope
 and safety.
 
+## Beyond the operations — a definition with no `name:` was silently accepted
+
+**Found and FIXED 19 September 2026**, while designing a deliberate fixture for verification step
+9 (which account bare `list`/`check`/`groups` should be verified against). `tools/colour-test.sh`
+diffs bare `list` and `groups` — no scope filter — against upstream, and `docs/testing-notes.md`
+already recorded that this diff behaves differently on Richard's personal account (which carries
+four broken definitions) than on `CLAUDE`'s (empty): "the two failures on RICHARD are real". One
+of those four was never identified beyond "a definition with no `name:` that RMSC lists and
+upstream refuses to load" — closing item 9 meant finding out exactly what that difference is,
+since a fixture built to reproduce it needs the real behaviour, not a guess.
+
+**Measured, with a definition carrying a valid `start_cmd` and `check_alive` but no `name:` key at
+all:**
+
+```
+upstream:  Invalid configuration for service 'zznn_broken' from file [.../zznn_broken.yaml]:
+           Required attribute 'name' not specified
+           WARNING: Ignoring file due to load errors: .../zznn_broken.yaml
+           - never appears in list, check, or groups
+
+RMSC:      zznn_broken (zznn_broken)
+           - appears in every listing, friendly name defaulted to the short name
+```
+
+**This is the same class of gap already closed for the other two required keys.** `SCDEF_from_doc`
+already refuses a definition with no `start_cmd` or no `check_alive` — `def.err = 'Service ' +
+short_name + ' has no start_cmd'` / `' has no check_alive'`, reported on stderr, absent from every
+listing. `name` was never given the same treatment; the code that read it defaulted an empty
+value to the short name instead of asking whether it should have been there at all.
+
+**DECIDED and IMPLEMENTED 19 September 2026: `name` is now required, checked immediately after it
+is read** (alongside the `cluster` check, both ahead of the two existing required-key checks at
+the end of `SCDEF_from_doc`) **and refused the same way.** The old fallback — defaulting
+`def.friendly` to `def.short_name` when empty — is removed as dead code: nothing can reach it once
+an empty `name:` is refused up front. `docs/messages.md`'s exact wording for the upstream message
+is not matched here — that is D2 wording work, out of scope, same as the two sibling checks were
+left when they were first added.
+
+This closes the specific, previously-unidentified difference behind `docs/testing-notes.md`'s "two
+failures on RICHARD are real", and gives verification step 9 a fixture whose value does not depend
+on anyone's personal, undocumented account: any harness that needs a populated-account scenario
+can stage this exact definition, per run, with the same staging-and-cleanup discipline this
+project's other harnesses already use.
+
+**IMPLEMENTED, verification step 9 closed 19 September 2026.** `tools/colour-test.sh` now stages
+this exact definition (`zzc_noname.yaml`, no `name:`, `start_cmd`/`check_alive` both present) in
+its own temporary `SC_SERVICES_DIR`/`-Dservices.dir` fixture directory, alongside its other
+invented services — additive, not a replacement for `$HOME/.sc/services`, so it reaches the bare
+`list`/`groups` sweep the account's own definitions would, without writing anything into a real
+account or needing it to persist between runs. A dedicated `noname-excluded-from-both` assertion
+confirms neither implementation lists it, reusing the run's own capture rather than a second live
+call. Confirmed to fail for the specific, correct reason against the pre-fix build (RMSC's `list`
+names it, upstream's does not) and to pass against the fix — the "must disagree" case CLAUDE.md
+asks for.
+
+**Closing this required fixing the required-`name:` check's own collateral damage first.** Making
+`name` required broke 89 of `SCDEF.TEST.RPGLE`'s 123 cases outright, and a further ~90 across
+`SCCOLL.TEST.RPGLE`, `SCEXEC.TEST.RPGLE` and `SCLAUNCH.TEST.RPGLE` — nearly every fixture in this
+project's test suites was written before `name:` was required and omitted it for brevity, since
+nothing before this fix cared. Closed by adding a `name:` line to every affected fixture (mechanical
+repair, not new test judgment — the fixtures' actual assertions are unchanged) except
+`test_short_and_friendly_name`, which specifically asserted the now-removed fallback and was
+rewritten to test what it actually still can: filename case-folding, independent of naming. All
+five affected suites (`SCDEF` 123, `SCEXEC` 81, `SCCOLL` 87, `SCLAUNCH` 15, plus `SCLIFE`'s 7,
+confirmed unaffected after one transient, unrelated failure was retried clean) pass in full.
+
 ## Beyond the operations — specifiers
 
 Two differences the gate cannot currently see, because it only exercises defined services.
@@ -1108,11 +1174,14 @@ remains, unreachable in practice. The `stop`-escalation gap found while re-check
 **fixed, 19 September 2026** — see "Beyond the operations" above; its two remaining unmeasured
 texts (the no-`stop_cmd` path) stay open, deliberately, pending a safe way to measure them. The
 log-filename scheme is **fixed, 19 September 2026** — see "Three things about `loginfo`" above;
-its four new unit tests are written but not yet compiled, blocked on a `RUCRTRPG` licensing
-constraint this account cannot resolve. Still not yet implemented: stage a dedicated verification
-fixture under `CLAUDE`'s account rather than Richard's. `SC_OPTIONS`/`.scrc` was considered and
-deliberately left undecided pending further investigation — see "Beyond the operations — inputs
-RMSC does not read" above.
+its four new unit tests **are compiled and pass in full** — the earlier `RUCRTRPG` failure was
+traced to a missing `cd` into the deploy directory before a relative `INCDIR`, not a licensing
+issue; `CPF9E18` is harmless noise, confirmed against Richard's own successful compiles. The
+decision to stage a dedicated verification fixture under `CLAUDE`'s account rather than Richard's
+is **implemented, 19 September 2026** — see "Beyond the operations — a definition with no `name:`
+was silently accepted" above for both the fixture and the parity defect that gave it real
+substance. `SC_OPTIONS`/`.scrc` was considered and deliberately left undecided pending further
+investigation — see "Beyond the operations — inputs RMSC does not read" above.
 
 Separately, and not part of step 8: the gate should compare `list -a` across all services, to
 hold Verification step 9's discovery parity. The two implementations agree on it today, but the
