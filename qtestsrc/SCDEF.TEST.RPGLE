@@ -231,6 +231,7 @@ dcl-proc test_defaults export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('webproxy.yaml':
+    'name: webproxy' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF: def): 'load');
 
@@ -243,8 +244,18 @@ dcl-proc test_defaults export;
 end-proc;
 
 //==============================================================================
-// The short name comes from the file name, and the friendly name falls back
-// to it so 'check' always has something to print
+// The short name comes from the file name, lower-cased, independent of the
+// friendly name given alongside it
+//
+// UPDATED 19 September 2026 (docs/parity.md, "Beyond the operations - a
+// definition with no name: was silently accepted"): this used to load with
+// NO name: at all and assert that the friendly name fell back to the short
+// one. That fallback is gone - a missing name: is now refused, exactly like
+// a missing start_cmd or check_alive, and is what test_name_required covers.
+// What this test actually pins - the MIXED-CASE filename folding to a
+// lower-case short name - has nothing to do with the friendly name, so it
+// keeps its own fixture with an explicit name: rather than being merged into
+// test_friendly_name_given, which never exercises filename casing at all.
 //==============================================================================
 
 dcl-proc test_short_and_friendly_name export;
@@ -252,11 +263,12 @@ dcl-proc test_short_and_friendly_name export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('WebProxy.yaml':
+    'name: Web Proxy' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF: def): 'load');
 
   aEqual('webproxy': def.short_name: 'short name from file, lower-cased');
-  aEqual('webproxy': def.friendly: 'friendly falls back to short name');
+  aEqual('Web Proxy': def.friendly: 'friendly name still comes from name:');
 
 end-proc;
 
@@ -282,6 +294,7 @@ dcl-proc test_explicit_values export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('explicit.yaml':
+    'name: explicit' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'stop_cmd: /usr/bin/webproxy -s stop' + LF +
     'check_alive: 8080' + LF +
@@ -312,6 +325,7 @@ dcl-proc test_null_stop_cmd export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('nullstop.yaml':
+    'name: nullstop' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'stop_cmd: null' + LF +
     'check_alive: 8080' + LF: def): 'load');
@@ -329,6 +343,7 @@ dcl-proc test_check_alive_port export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('port.yaml':
+    'name: port' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF: def): 'load');
 
@@ -343,6 +358,7 @@ dcl-proc test_check_alive_job export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('job.yaml':
+    'name: job' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: webproxy' + LF: def): 'load');
 
@@ -357,6 +373,7 @@ dcl-proc test_check_alive_subsystem_job export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('sbsjob.yaml':
+    'name: sbsjob' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: QUSRWRK/WEBPROXY' + LF: def): 'load');
 
@@ -371,6 +388,7 @@ dcl-proc test_check_alive_program export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('pgm.yaml':
+    'name: pgm' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: PGM-WEBPROXY' + LF: def): 'load');
 
@@ -429,6 +447,7 @@ dcl-proc test_direct_small_number_is_a_port export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('dir22.yaml':
+    'name: dir22' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 22' + LF: def): 'load');
 
@@ -456,6 +475,7 @@ dcl-proc test_direct_int_max_is_a_port export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('dirmax.yaml':
+    'name: dirmax' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 2147483647' + LF: def): 'load');
 
@@ -488,6 +508,7 @@ dcl-proc test_direct_over_int_max_is_a_job_name export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('dirover.yaml':
+    'name: dirover' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 4294967296' + LF: def): 'load');
 
@@ -514,6 +535,7 @@ dcl-proc test_direct_long_digits_are_a_job_name export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('dirlong.yaml':
+    'name: dirlong' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 99999999999999' + LF: def): 'load');
 
@@ -550,6 +572,7 @@ dcl-proc test_companion_over_int_max_is_still_a_port export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('compover.yaml':
+    'name: compover' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: port' + LF +
     'check_alive_criteria: 4294967296' + LF: def): 'load');
@@ -574,6 +597,7 @@ dcl-proc test_check_alive_comma_separated export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('multi.yaml':
+    'name: multi' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: webproxy,8080' + LF: def): 'load');
 
@@ -594,6 +618,7 @@ dcl-proc test_check_alive_sequence export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('seq.yaml':
+    'name: seq' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive:' + LF +
     '- webproxy' + LF +
@@ -629,6 +654,7 @@ dcl-proc test_check_alive_trailing_comma export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('trailcomma.yaml':
+    'name: trailcomma' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: rmscrevq1,' + LF: def): 'load');
 
@@ -667,6 +693,7 @@ dcl-proc test_criteria_companion_port export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('companion_port.yaml':
+    'name: companion_port' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: port' + LF +
     'check_alive_criteria: 8080' + LF: def): 'load');
@@ -682,6 +709,7 @@ dcl-proc test_criteria_companion_jobname export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('companion_job.yaml':
+    'name: companion_job' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: jobname' + LF +
     'check_alive_criteria: MYJOB' + LF: def): 'load');
@@ -705,6 +733,7 @@ dcl-proc test_criteria_companion_type_beats_shape export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('companion_numjob.yaml':
+    'name: companion_numjob' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: jobname' + LF +
     'check_alive_criteria: 12345' + LF: def): 'load');
@@ -724,12 +753,14 @@ dcl-proc test_criteria_companion_type_case export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('companion_upper.yaml':
+    'name: companion_upper' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: PORT' + LF +
     'check_alive_criteria: 8080' + LF: def): 'load');
   aEqualV(SCDEF_CHECK_PORT: def.criteria(1).kind: 'PORT');
 
   assert(load_fixture('companion_mixed.yaml':
+    'name: companion_mixed' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: Port' + LF +
     'check_alive_criteria: 8080' + LF: def): 'load');
@@ -749,6 +780,7 @@ dcl-proc test_criteria_companion_absent export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('companion_none.yaml':
+    'name: companion_none' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: port' + LF: def): 'load');
 
@@ -767,6 +799,7 @@ dcl-proc test_criteria_companion_not_a_type export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('companion_value.yaml':
+    'name: companion_value' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'check_alive_criteria: 9999' + LF: def): 'load');
@@ -790,6 +823,7 @@ dcl-proc test_criteria_companion_alone_is_invalid export;
   dcl-ds def likeds(SCDEF_t);
 
   nEqual(false: load_fixture('companion_alone.yaml':
+    'name: companion_alone' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive_criteria: 8080' + LF: def):
     'a file with no check_alive does not load');
@@ -808,6 +842,7 @@ dcl-proc test_sequences export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('seqs.yaml':
+    'name: seqs' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'environment_vars:' + LF +
@@ -837,6 +872,7 @@ dcl-proc test_group_membership export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('groups.yaml':
+    'name: groups' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'groups:' + LF +
@@ -860,6 +896,7 @@ dcl-proc test_unknown_key_is_not_fatal export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('unknown.yaml':
+    'name: unknown' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'some_future_key: 42' + LF: def): 'load succeeds');
@@ -881,6 +918,7 @@ dcl-proc test_cluster_is_rejected export;
   dcl-ds def likeds(SCDEF_t);
 
   nEqual(false: load_fixture('cluster.yaml':
+    'name: cluster' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'cluster: 8081,8082' + LF: def): 'load fails');
@@ -899,6 +937,7 @@ dcl-proc test_start_cmd_required export;
   dcl-ds def likeds(SCDEF_t);
 
   nEqual(false: load_fixture('nostart.yaml':
+    'name: nostart' + LF +
     'check_alive: 8080' + LF: def): 'load fails');
   assert((%scan('start_cmd': def.err) > 0): 'error names start_cmd');
 
@@ -909,8 +948,83 @@ dcl-proc test_check_alive_required export;
   dcl-ds def likeds(SCDEF_t);
 
   nEqual(false: load_fixture('nocheck.yaml':
+    'name: nocheck' + LF +
     'start_cmd: /usr/bin/webproxy' + LF: def): 'load fails');
   assert((%scan('check_alive': def.err) > 0): 'error names check_alive');
+
+end-proc;
+
+//==============================================================================
+// name: is required too, and refused the same way as the two keys above
+//
+// MEASURED 19 September 2026 (docs/parity.md, "Beyond the operations - a
+// definition with no name: was silently accepted"): a definition with a
+// valid start_cmd and check_alive but no name: key at all loads under RMSC
+// and lists as <short> (<short>); upstream refuses it outright -
+// "Required attribute 'name' not specified" - and it never appears in list,
+// check or groups. DECIDED there: name is checked immediately after it is
+// read, alongside the two existing required-key checks, and refused the
+// same way - def.err = 'Service ' + short_name + ' has no name'.
+//
+// The fixture's short name deliberately avoids the substring "name" itself
+// (nokey, not e.g. noname) so the two assertions below stay independent -
+// one confirms the missing KEY is named in the error, the other that the
+// SERVICE is, and neither can pass by accident because of the other.
+//==============================================================================
+
+dcl-proc test_name_required export;
+
+  dcl-ds def likeds(SCDEF_t);
+
+  nEqual(false: load_fixture('nokey.yaml':
+    'start_cmd: /usr/bin/webproxy' + LF +
+    'check_alive: 8080' + LF: def): 'load fails');
+  assert((%scan('name': def.err) > 0): 'error names name');
+  assert((%scan('nokey': def.err) > 0): 'and the short name too');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// THE CONTROL - name: present and non-empty still loads, and the friendly
+// name is taken from it. This is test_friendly_name_given, above
+// (wp2.yaml, 'name: Web Proxy'): it asserts load succeeds and def.friendly
+// comes from the key. Not duplicated here - the point is only that it and
+// test_name_required disagree, as CLAUDE.md's rule requires: one expects
+// load_fixture to return false, the other true, for the one field this
+// block is about. A fix that broke acceptance of a VALID name (rejecting a
+// service that supplied one) would fail test_friendly_name_given without
+// touching test_name_required, so the two together cover both directions.
+//------------------------------------------------------------------------------
+
+//==============================================================================
+// name: '' - present but blank - is refused too, not treated as "specified"
+//
+// docs/parity.md is explicit that the check is on the VALUE, not on whether
+// the key merely appears: "The old fallback - defaulting def.friendly to
+// def.short_name when empty - is removed as dead code: nothing can reach it
+// once an empty name: is refused up front." An absent key and a present-
+// but-blank one both read back as '' (SCYAML.TEST's test_absent_key pins
+// this for SCYAML_value generally), so "absent" and "blank" are expected to
+// collapse to the same refusal by construction, not because of a second
+// check written specially for this case.
+//
+// FLAGGED, not asserted with full confidence: docs/parity.md's 19 September
+// finding measured the key being missing outright, not this exact spelling
+// (name: '' or a bare 'name:' with nothing after it). This case is written
+// on the reasoning above, and belongs in the handback as something to
+// confirm - not something taken as separately measured.
+//==============================================================================
+
+dcl-proc test_name_empty_string_is_required export;
+
+  dcl-ds def likeds(SCDEF_t);
+
+  nEqual(false: load_fixture('zzblank.yaml':
+    'name: ' + APOS + APOS + LF +
+    'start_cmd: /usr/bin/webproxy' + LF +
+    'check_alive: 8080' + LF: def): 'load fails');
+  assert((%scan('name': def.err) > 0): 'error names name');
+  assert((%scan('zzblank': def.err) > 0): 'and the short name too');
 
 end-proc;
 
@@ -923,6 +1037,7 @@ dcl-proc test_effective_dir_absolute export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('dirabs.yaml':
+    'name: dirabs' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'dir: /QOpenSys/opt/webproxy' + LF: def): 'load');
@@ -936,6 +1051,7 @@ dcl-proc test_effective_dir_relative export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('dirrel.yaml':
+    'name: dirrel' + LF +
     'start_cmd: ../../bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'dir: .' + LF: def): 'load');
@@ -950,6 +1066,7 @@ dcl-proc test_effective_dir_absent export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('dirnone.yaml':
+    'name: dirnone' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF: def): 'load');
 
@@ -1054,6 +1171,7 @@ dcl-proc test_criterion_text_port export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(pt_load_def('ptport.yaml':
+    'name: ptport' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: 55999' + LF: def): 'load');
 
@@ -1074,6 +1192,7 @@ dcl-proc test_criterion_text_job_name export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(pt_load_def('ptjob.yaml':
+    'name: ptjob' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: NOSUCHJOB1' + LF: def): 'load');
 
@@ -1099,6 +1218,7 @@ dcl-proc test_criterion_text_sbs_job export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(pt_load_def('ptsbs.yaml':
+    'name: ptsbs' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: QUSRWRK/NOSUCHJOB2' + LF: def): 'load');
 
@@ -1125,6 +1245,7 @@ dcl-proc test_criterion_text_pgm_prefix export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(pt_load_def('ptpgm.yaml':
+    'name: ptpgm' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: PGM-NOSUCHPGM' + LF: def): 'load');
 
@@ -1151,6 +1272,7 @@ dcl-proc test_criterion_text_each_of_several export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(pt_load_def('ptmulti.yaml':
+    'name: ptmulti' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: 55997,55998,NOSUCHJOB3' + LF: def): 'load');
 
@@ -1184,6 +1306,7 @@ dcl-proc test_criterion_text_upper_cases_job export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(pt_load_def('ptcase.yaml':
+    'name: ptcase' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: PGM-nosuchpgm' + LF: def): 'load');
 
@@ -1241,6 +1364,7 @@ dcl-proc test_criterion_text_companion_job_as_written export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(pt_load_def('ptcompjob.yaml':
+    'name: ptcompjob' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: jobname' + LF +
     'check_alive_criteria: rmscdefcompjob' + LF: def): 'load');
@@ -1255,6 +1379,7 @@ dcl-proc test_criterion_text_companion_job_as_written export;
   // caught as well. Nothing here would tell the two apart with an all-lower
   // fixture, and "fold the other way" is the cheapest wrong fix there is.
   assert(pt_load_def('ptcompmix.yaml':
+    'name: ptcompmix' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: jobname' + LF +
     'check_alive_criteria: RmScDeFmIxEd' + LF: def): 'load');
@@ -1304,6 +1429,7 @@ dcl-proc test_criterion_text_direct_port_normalises export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(pt_load_def('ptdirzero.yaml':
+    'name: ptdirzero' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: 08080' + LF: def): 'load');
 
@@ -1320,6 +1446,7 @@ dcl-proc test_criterion_text_direct_port_normalises export;
   // a value arrived through, and a reader of either should not have to find
   // the other to see the contrast.
   assert(pt_load_def('ptcompzero.yaml':
+    'name: ptcompzero' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: port' + LF +
     'check_alive_criteria: 08080' + LF: def): 'load');
@@ -1346,6 +1473,7 @@ dcl-proc test_criterion_text_direct_job_still_folds export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(pt_load_def('ptdirjob.yaml':
+    'name: ptdirjob' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: rmscdefdirjob' + LF: def): 'load');
 
@@ -1353,6 +1481,7 @@ dcl-proc test_criterion_text_direct_job_still_folds export;
          'MEASURED - a job name written into check_alive is still folded');
 
   assert(pt_load_def('ptdirmix.yaml':
+    'name: ptdirmix' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: RmScDeFdIrEcT' + LF: def): 'load');
 
@@ -1389,6 +1518,7 @@ dcl-proc test_criterion_text_companion_job_shapes export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(pt_load_def('ptcompsbs.yaml':
+    'name: ptcompsbs' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: jobname' + LF +
     'check_alive_criteria: qusrwrk/rmscdefsbsjob' + LF: def): 'load');
@@ -1400,6 +1530,7 @@ dcl-proc test_criterion_text_companion_job_shapes export;
          'slash');
 
   assert(pt_load_def('ptcomppgm.yaml':
+    'name: ptcomppgm' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: jobname' + LF +
     'check_alive_criteria: pgm-rmscdefpgm' + LF: def): 'load');
@@ -1410,6 +1541,7 @@ dcl-proc test_criterion_text_companion_job_shapes export;
          'either');
 
   assert(pt_load_def('ptcompcomma.yaml':
+    'name: ptcompcomma' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: jobname' + LF +
     'check_alive_criteria: rmscdefseqa,rmscdefseqb' + LF: def): 'load');
@@ -1504,6 +1636,7 @@ dcl-proc test_criterion_text_job_not_truncated export;
   iEqual(80: %len(j80): 'and the value past it really is 80');
 
   assert(pt_load_def('ptlong64.yaml':
+    'name: ptlong64' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: ' + j64 + LF: def): 'load');
 
@@ -1512,6 +1645,7 @@ dcl-proc test_criterion_text_job_not_truncated export;
          '64-wide result could still hold');
 
   assert(pt_load_def('ptlong80.yaml':
+    'name: ptlong80' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: ' + j80 + LF: def): 'load');
 
@@ -1520,6 +1654,7 @@ dcl-proc test_criterion_text_job_not_truncated export;
          '72-wide result can hold');
 
   assert(pt_load_def('ptlong80c.yaml':
+    'name: ptlong80c' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: jobname' + LF +
     'check_alive_criteria: ' + j80 + LF: def): 'load');
@@ -1534,6 +1669,7 @@ dcl-proc test_criterion_text_job_not_truncated export;
   iEqual(128: %len(j128): 'the edge value really is 128 characters');
 
   assert(pt_load_def('ptlong128.yaml':
+    'name: ptlong128' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: ' + j128 + LF: def): 'load');
 
@@ -1633,6 +1769,7 @@ dcl-proc test_criterion_text_unusable_port export;
   dcl-ds def likeds(SCDEF_t);
 
   assert(load_fixture('badporttext.yaml':
+    'name: badporttext' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: port' + LF +
     'check_alive_criteria: abc' + LF: def): 'load');
@@ -1640,6 +1777,7 @@ dcl-proc test_criterion_text_unusable_port export;
          'an unusable port renders its text - there is no number to render');
 
   assert(load_fixture('goodporttext.yaml':
+    'name: goodporttext' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: port' + LF +
     'check_alive_criteria: 55999' + LF: def): 'load');
@@ -1647,6 +1785,7 @@ dcl-proc test_criterion_text_unusable_port export;
          'a usable one is unchanged - this is the captured form');
 
   assert(load_fixture('zeroporttext.yaml':
+    'name: zeroporttext' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: port' + LF +
     'check_alive_criteria: 08080' + LF: def): 'load');
@@ -1655,6 +1794,7 @@ dcl-proc test_criterion_text_unusable_port export;
          'rendered and not the parsed number');
 
   assert(load_fixture('negporttext.yaml':
+    'name: negporttext' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: port' + LF +
     'check_alive_criteria: -1' + LF: def): 'load');
@@ -1662,6 +1802,7 @@ dcl-proc test_criterion_text_unusable_port export;
          'MEASURED - and the sign survives too');
 
   assert(load_fixture('spaceporttext.yaml':
+    'name: spaceporttext' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: port' + LF +
     'check_alive_criteria:  8080' + LF: def): 'load');
@@ -1804,6 +1945,7 @@ dcl-proc test_direct_19_digits_over_the_maximum_is_a_job_name export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(load_fixture('dir19hi.yaml':
+    'name: dir19hi' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 9999999999999999999' + LF: def):
     'the definition loads - 19 digits is not a reason to refuse a file');
@@ -1840,6 +1982,7 @@ dcl-proc test_direct_19_digits_negative_over_the_maximum_is_a_job_name export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(load_fixture('dir19neg.yaml':
+    'name: dir19neg' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: -9999999999999999999' + LF: def): 'load');
 
@@ -1871,6 +2014,7 @@ dcl-proc test_direct_19_digits_one_over_the_maximum_is_a_job_name export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(load_fixture('dir19p1.yaml':
+    'name: dir19p1' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 9223372036854775808' + LF: def): 'load');
 
@@ -1900,6 +2044,7 @@ dcl-proc test_direct_19_digits_at_the_maximum_is_a_job_name export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(load_fixture('dir19max.yaml':
+    'name: dir19max' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 9223372036854775807' + LF: def): 'load');
 
@@ -1923,6 +2068,7 @@ dcl-proc test_direct_18_digits_is_a_job_name export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(load_fixture('dir18.yaml':
+    'name: dir18' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 999999999999999999' + LF: def): 'load');
 
@@ -2012,6 +2158,7 @@ dcl-proc test_startup_wait_at_32bit_maximum_is_accepted export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(load_fixture('wtmax.yaml':
+    'name: wtmax' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'startup_wait_time: 2147483647' + LF: def):
@@ -2027,6 +2174,7 @@ dcl-proc test_startup_wait_one_past_32bit_maximum_is_rejected export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   nEqual(false: load_fixture('wtmaxp1.yaml':
+    'name: wtmaxp1' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'startup_wait_time: 2147483648' + LF: def):
@@ -2073,6 +2221,7 @@ dcl-proc test_startup_wait_at_32bit_minimum_is_accepted export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(load_fixture('wtmin.yaml':
+    'name: wtmin' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'startup_wait_time: -2147483648' + LF: def):
@@ -2087,6 +2236,7 @@ dcl-proc test_startup_wait_one_past_32bit_minimum_is_rejected export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   nEqual(false: load_fixture('wtminm1.yaml':
+    'name: wtminm1' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'startup_wait_time: -2147483649' + LF: def):
@@ -2110,6 +2260,7 @@ dcl-proc test_startup_wait_beyond_32_bits_is_rejected export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   nEqual(false: load_fixture('wt4g.yaml':
+    'name: wt4g' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'startup_wait_time: 4294967296' + LF: def):
@@ -2126,6 +2277,7 @@ dcl-proc test_startup_wait_far_beyond_32_bits_is_rejected export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   nEqual(false: load_fixture('wt14d.yaml':
+    'name: wt14d' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'startup_wait_time: 99999999999999' + LF: def):
@@ -2148,6 +2300,7 @@ dcl-proc test_stop_wait_beyond_32_bits_is_rejected export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   nEqual(false: load_fixture('wtstop4g.yaml':
+    'name: wtstop4g' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'stop_wait_time: 4294967296' + LF: def):
@@ -2175,6 +2328,7 @@ dcl-proc test_startup_wait_not_a_number_is_rejected export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   nEqual(false: load_fixture('wtnan.yaml':
+    'name: wtnan' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'startup_wait_time: abc' + LF: def):
@@ -2191,6 +2345,7 @@ dcl-proc test_stop_wait_not_a_number_is_rejected export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   nEqual(false: load_fixture('wtstopnan.yaml':
+    'name: wtstopnan' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'stop_wait_time: abc' + LF: def):
@@ -2214,6 +2369,7 @@ dcl-proc test_wait_times_ordinary_values_still_work export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(load_fixture('wtok.yaml':
+    'name: wtok' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'startup_wait_time: 30' + LF +
@@ -2239,6 +2395,7 @@ dcl-proc test_wait_times_zero_is_not_missing export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(load_fixture('wtzero.yaml':
+    'name: wtzero' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'startup_wait_time: 0' + LF +
@@ -2263,6 +2420,7 @@ dcl-proc test_wait_times_negative_in_range_is_kept export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(load_fixture('wtneg.yaml':
+    'name: wtneg' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'startup_wait_time: -5' + LF +
@@ -2289,6 +2447,7 @@ dcl-proc test_wait_times_absent_take_the_defaults export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(load_fixture('wtabsent.yaml':
+    'name: wtabsent' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF: def): 'load');
 
@@ -2465,6 +2624,7 @@ dcl-proc test_scalar_check_alive_1031_is_rejected export;
   iEqual(1031: %len(ca): 'eight 128-character values, comma separated');
 
   nEqual(false: load_fixture('sl1031ca.yaml':
+    'name: sl1031ca' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: ' + ca + LF: def):
     'a scalar of 1031 does not fit 1024, so the definition is refused - ' +
@@ -2492,6 +2652,7 @@ dcl-proc test_scalar_start_cmd_1031_is_rejected export;
   iEqual(1031: %len(cmd): 'a command line of 1031 characters');
 
   nEqual(false: load_fixture('sl1031sc.yaml':
+    'name: sl1031sc' + LF +
     'start_cmd: ' + cmd + LF +
     'check_alive: 8080' + LF: def):
     'a command RMSC cannot hold whole refuses the definition rather ' +
@@ -2542,6 +2703,7 @@ dcl-proc test_scalar_check_alive_at_1024_is_accepted_whole export;
   iEqual(121: %len(v8): 'the eighth value really is 121 characters');
 
   assert(load_fixture('sl1024ca.yaml':
+    'name: sl1024ca' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: ' + ca + LF: def):
     'exactly 1024 fits, so the definition still loads');
@@ -2573,6 +2735,7 @@ dcl-proc test_scalar_check_alive_at_1025_is_rejected export;
   iEqual(1025: %len(ca): 'one character more than the case above');
 
   nEqual(false: load_fixture('sl1025ca.yaml':
+    'name: sl1025ca' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: ' + ca + LF: def):
     'one past 1024 does not fit, so the definition is refused');
@@ -2592,6 +2755,7 @@ dcl-proc test_scalar_start_cmd_at_1024_is_accepted_whole export;
   iEqual(1024: %len(cmd): 'a command line of exactly 1024 characters');
 
   assert(load_fixture('sl1024sc.yaml':
+    'name: sl1024sc' + LF +
     'start_cmd: ' + cmd + LF +
     'check_alive: 8080' + LF: def):
     'exactly 1024 fits, so the definition still loads');
@@ -2610,6 +2774,7 @@ dcl-proc test_scalar_start_cmd_at_1025_is_rejected export;
   iEqual(1025: %len(cmd): 'one character more than the case above');
 
   nEqual(false: load_fixture('sl1025sc.yaml':
+    'name: sl1025sc' + LF +
     'start_cmd: ' + cmd + LF +
     'check_alive: 8080' + LF: def):
     'one past 1024 does not fit, so the definition is refused');
@@ -2647,6 +2812,7 @@ dcl-proc test_scalar_long_but_within_the_cap_still_loads export;
   iEqual(201: %len(v1) + 1 + %len(v2): 'and a 201-character check_alive');
 
   assert(load_fixture('sl200ok.yaml':
+    'name: sl200ok' + LF +
     'start_cmd: ' + cmd + LF +
     'check_alive: ' + v1 + ',' + v2 + LF: def):
     'a long definition well inside the cap still loads');
@@ -2768,6 +2934,7 @@ dcl-proc test_seq_item_block_at_512_is_accepted_whole export;
   iEqual(512: %len(it): 'a block sequence item of exactly 512 characters');
 
   assert(load_fixture('si512b.yaml':
+    'name: si512b' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'environment_vars:' + LF +
@@ -2791,6 +2958,7 @@ dcl-proc test_seq_item_block_at_513_is_rejected export;
   iEqual(513: %len(it): 'one character more than the case above');
 
   if load_fixture('si513b.yaml':
+    'name: si513b' + LF +
        'start_cmd: /usr/bin/webproxy' + LF +
        'check_alive: 8080' + LF +
        'environment_vars:' + LF +
@@ -2837,6 +3005,7 @@ dcl-proc test_seq_item_flow_at_512_is_accepted_whole export;
   iEqual(512: %len(it): 'a flow sequence item of exactly 512 characters');
 
   assert(load_fixture('si512f.yaml':
+    'name: si512f' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'environment_vars: [' + it + ']' + LF: def):
@@ -2859,6 +3028,7 @@ dcl-proc test_seq_item_flow_at_513_is_rejected export;
   iEqual(513: %len(it): 'one character more than the case above');
 
   if load_fixture('si513f.yaml':
+    'name: si513f' + LF +
        'start_cmd: /usr/bin/webproxy' + LF +
        'check_alive: 8080' + LF +
        'environment_vars: [' + it + ']' + LF: def);
@@ -2905,6 +3075,7 @@ dcl-proc test_seq_item_block_at_1000_is_rejected export;
   iEqual(1000: %len(it): 'under the scalar limit of 1024, over the item 512');
 
   if load_fixture('si1000b.yaml':
+    'name: si1000b' + LF +
        'start_cmd: /usr/bin/webproxy' + LF +
        'check_alive: 8080' + LF +
        'environment_vars:' + LF +
@@ -2938,6 +3109,7 @@ dcl-proc test_seq_item_flow_at_1000_is_rejected export;
   // The whole value is 1002 characters, still inside the 1024 the key line
   // holds, so a refusal here can only have come from the item limit.
   if load_fixture('si1000f.yaml':
+    'name: si1000f' + LF +
        'start_cmd: /usr/bin/webproxy' + LF +
        'check_alive: 8080' + LF +
        'environment_vars: [' + it + ']' + LF: def);
@@ -2979,6 +3151,7 @@ dcl-proc test_seq_item_groups_block_at_513_is_rejected export;
   iEqual(513: %len(it): 'one past the item limit, on a different key');
 
   nEqual(false: load_fixture('si513g.yaml':
+    'name: si513g' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'groups:' + LF +
@@ -3010,6 +3183,7 @@ dcl-proc test_seq_short_items_both_forms_load_whole export;
   dcl-s  got varchar(2048);
 
   assert(load_fixture('sishort.yaml':
+    'name: sishort' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'environment_vars:' + LF +
@@ -3194,6 +3368,7 @@ dcl-proc test_quoted_short_scalar_loads_unquoted export;
   iEqual(200: %len(cmd): 'a 200-character command, far inside every limit');
 
   assert(load_fixture('qshortd.yaml':
+    'name: qshortd' + LF +
     'start_cmd: "' + cmd + '"' + LF +
     'check_alive: 8080' + LF: def):
     'a double-quoted command loads');
@@ -3205,6 +3380,7 @@ dcl-proc test_quoted_short_scalar_loads_unquoted export;
   clear def;
 
   assert(load_fixture('qshorts.yaml':
+    'name: qshorts' + LF +
     'start_cmd: ''' + cmd + '''' + LF +
     'check_alive: 8080' + LF: def):
     'and so does a single-quoted one');
@@ -3230,6 +3406,7 @@ dcl-proc test_quoted_short_seq_items_load_unquoted export;
   dcl-s  got varchar(2048);
 
   assert(load_fixture('qishortb.yaml':
+    'name: qishortb' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'environment_vars:' + LF +
@@ -3246,6 +3423,7 @@ dcl-proc test_quoted_short_seq_items_load_unquoted export;
   clear def;
 
   assert(load_fixture('qishortf.yaml':
+    'name: qishortf' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'environment_vars: ["PATH=/QOpenSys/pkgs/bin", ''LOGLEVEL=debug'']' + LF:
@@ -3278,6 +3456,7 @@ dcl-proc test_scalar_double_quoted_at_1024_is_accepted_whole export;
   iEqual(1024: %len(cmd): 'exactly 1024 characters INSIDE the quotes');
 
   assert(load_fixture('qd1024.yaml':
+    'name: qd1024' + LF +
     'start_cmd: "' + cmd + '"' + LF +
     'check_alive: 8080' + LF: def):
     'the stored value is 1024, which fits, so the definition must load - ' +
@@ -3306,6 +3485,7 @@ dcl-proc test_scalar_double_quoted_at_1025_is_rejected export;
   iEqual(1025: %len(cmd): 'one character more than the case above');
 
   nEqual(false: load_fixture('qd1025.yaml':
+    'name: qd1025' + LF +
     'start_cmd: "' + cmd + '"' + LF +
     'check_alive: 8080' + LF: def):
     'quoting does not raise the limit - what is stored is 1025 and 1025 ' +
@@ -3334,6 +3514,7 @@ dcl-proc test_scalar_single_quoted_at_1024_is_accepted_whole export;
   iEqual(1024: %len(cmd): 'exactly 1024 characters INSIDE the quotes');
 
   assert(load_fixture('qs1024.yaml':
+    'name: qs1024' + LF +
     'start_cmd: ''' + cmd + '''' + LF +
     'check_alive: 8080' + LF: def):
     'single quotes are not part of the value either');
@@ -3351,6 +3532,7 @@ dcl-proc test_scalar_single_quoted_at_1025_is_rejected export;
   iEqual(1025: %len(cmd): 'one character more than the case above');
 
   nEqual(false: load_fixture('qs1025.yaml':
+    'name: qs1025' + LF +
     'start_cmd: ''' + cmd + '''' + LF +
     'check_alive: 8080' + LF: def):
     'what is stored is 1025, and 1025 does not fit');
@@ -3401,6 +3583,7 @@ dcl-proc test_scalar_apostrophe_stored_1024_is_accepted_whole export;
          'written between the quotes it is 1025 - the apostrophe is doubled');
 
   assert(load_fixture('qa1024.yaml':
+    'name: qa1024' + LF +
     'start_cmd: ''' + onwire + '''' + LF +
     'check_alive: 8080' + LF: def):
     'what is stored is 1024 and 1024 fits, so this must load - a rule of ' +
@@ -3430,6 +3613,7 @@ dcl-proc test_seq_item_block_double_quoted_at_512_is_accepted_whole export;
   iEqual(512: %len(it): 'exactly 512 characters inside the quotes');
 
   assert(load_fixture('qb512.yaml':
+    'name: qb512' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'environment_vars:' + LF +
@@ -3452,6 +3636,7 @@ dcl-proc test_seq_item_block_double_quoted_at_513_is_rejected export;
   iEqual(513: %len(it): 'one character more than the case above');
 
   if load_fixture('qb513.yaml':
+    'name: qb513' + LF +
        'start_cmd: /usr/bin/webproxy' + LF +
        'check_alive: 8080' + LF +
        'environment_vars:' + LF +
@@ -3486,6 +3671,7 @@ dcl-proc test_seq_item_block_single_quoted_at_512_is_accepted_whole export;
   iEqual(512: %len(it): 'exactly 512 characters inside the quotes');
 
   assert(load_fixture('qbs512.yaml':
+    'name: qbs512' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'environment_vars:' + LF +
@@ -3517,6 +3703,7 @@ dcl-proc test_seq_item_flow_double_quoted_at_512_is_accepted_whole export;
   iEqual(512: %len(it): 'exactly 512 characters inside the quotes');
 
   assert(load_fixture('qf512.yaml':
+    'name: qf512' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'environment_vars: ["' + it + '"]' + LF: def):
@@ -3538,6 +3725,7 @@ dcl-proc test_seq_item_flow_single_quoted_at_512_is_accepted_whole export;
   iEqual(512: %len(it): 'exactly 512 characters inside the quotes');
 
   assert(load_fixture('qfs512.yaml':
+    'name: qfs512' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'environment_vars: [''' + it + ''']' + LF: def):
@@ -3559,6 +3747,7 @@ dcl-proc test_seq_item_flow_double_quoted_at_513_is_rejected export;
   iEqual(513: %len(it): 'one character more than the case above');
 
   if load_fixture('qf513.yaml':
+    'name: qf513' + LF +
        'start_cmd: /usr/bin/webproxy' + LF +
        'check_alive: 8080' + LF +
        'environment_vars: ["' + it + '"]' + LF: def);
@@ -3604,6 +3793,7 @@ dcl-proc test_seq_item_apostrophe_stored_512_is_accepted_whole export;
          'written between the quotes it is 513 - the apostrophe is doubled');
 
   assert(load_fixture('qa512.yaml':
+    'name: qa512' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'environment_vars:' + LF +
@@ -4231,6 +4421,7 @@ dcl-proc test_group_at_64_is_whole export;
   iEqual(64: %len(gv): 'a group of exactly 64 characters');
 
   assert(load_fixture('utgr64.yaml':
+    'name: utgr64' + LF +
     'start_cmd: /usr/bin/rmscut' + LF +
     'check_alive: 8080' + LF +
     'groups:' + LF +
@@ -4253,6 +4444,7 @@ dcl-proc test_group_at_65_is_whole export;
   iEqual(65: %len(gv): 'one character more than the case above');
 
   assert(load_fixture('utgr65.yaml':
+    'name: utgr65' + LF +
     'start_cmd: /usr/bin/rmscut' + LF +
     'check_alive: 8080' + LF +
     'groups:' + LF +
@@ -4279,6 +4471,7 @@ dcl-proc test_group_at_500_is_whole export;
   iEqual(500: %len(gv): 'inside the 512 a sequence item holds, far past 64');
 
   assert(load_fixture('utgr500.yaml':
+    'name: utgr500' + LF +
     'start_cmd: /usr/bin/rmscut' + LF +
     'check_alive: 8080' + LF +
     'groups:' + LF +
@@ -4300,6 +4493,7 @@ dcl-proc test_group_ordinary_is_whole export;
   dcl-s  got varchar(2048);
 
   assert(load_fixture('utgrshort.yaml':
+    'name: utgrshort' + LF +
     'start_cmd: /usr/bin/rmscut' + LF +
     'check_alive: 8080' + LF +
     'groups:' + LF +
@@ -4336,6 +4530,7 @@ dcl-proc test_dep_at_64_is_whole export;
   iEqual(64: %len(dv): 'a dependency of exactly 64 characters');
 
   assert(load_fixture('utdp64.yaml':
+    'name: utdp64' + LF +
     'start_cmd: /usr/bin/rmscut' + LF +
     'check_alive: 8080' + LF +
     'service_dependencies:' + LF +
@@ -4358,6 +4553,7 @@ dcl-proc test_dep_at_65_is_whole export;
   iEqual(65: %len(dv): 'one character more than the case above');
 
   assert(load_fixture('utdp65.yaml':
+    'name: utdp65' + LF +
     'start_cmd: /usr/bin/rmscut' + LF +
     'check_alive: 8080' + LF +
     'service_dependencies:' + LF +
@@ -4382,6 +4578,7 @@ dcl-proc test_dep_at_500_is_whole export;
   iEqual(500: %len(dv): 'inside the 512 a sequence item holds, far past 64');
 
   assert(load_fixture('utdp500.yaml':
+    'name: utdp500' + LF +
     'start_cmd: /usr/bin/rmscut' + LF +
     'check_alive: 8080' + LF +
     'service_dependencies:' + LF +
@@ -4401,6 +4598,7 @@ dcl-proc test_dep_ordinary_is_whole export;
   dcl-s  got varchar(2048);
 
   assert(load_fixture('utdpshort.yaml':
+    'name: utdpshort' + LF +
     'start_cmd: /usr/bin/rmscut' + LF +
     'check_alive: 8080' + LF +
     'service_dependencies:' + LF +
@@ -4467,6 +4665,7 @@ dcl-proc test_sbmjob_jobname_at_10_is_accepted_whole export;
   iEqual(10: %len(jn): 'exactly the length an IBM i job name may be');
 
   assert(load_fixture('utjn10.yaml':
+    'name: utjn10' + LF +
     'start_cmd: /usr/bin/rmscut' + LF +
     'check_alive: 8080' + LF +
     'sbmjob_jobname: ' + jn + LF: def):
@@ -4490,6 +4689,7 @@ dcl-proc test_sbmjob_jobname_at_11_is_rejected export;
   iEqual(11: %len(jn): 'one character more than a job name may be');
 
   if load_fixture('utjn11.yaml':
+    'name: utjn11' + LF +
        'start_cmd: /usr/bin/rmscut' + LF +
        'check_alive: 8080' + LF +
        'sbmjob_jobname: ' + jn + LF: def);
@@ -4519,6 +4719,7 @@ dcl-proc test_sbmjob_jobname_at_20_is_rejected export;
   iEqual(20: %len(jn): 'the length measured against upstream');
 
   if load_fixture('utjn20.yaml':
+    'name: utjn20' + LF +
        'start_cmd: /usr/bin/rmscut' + LF +
        'check_alive: 8080' + LF +
        'sbmjob_jobname: ' + jn + LF: def);
@@ -4544,6 +4745,7 @@ dcl-proc test_sbmjob_jobname_absent_long_name_still_loads export;
   iEqual(100: %len(nm): 'a service name ten times longer than a job name');
 
   assert(load_fixture(nm + '.yaml':
+    'name: ' + nm + LF +
     'start_cmd: /usr/bin/rmscut' + LF +
     'check_alive: 8080' + LF: def):
     'THE CONTROL - no sbmjob_jobname, so the job name is DERIVED and the ' +
@@ -4637,6 +4839,7 @@ dcl-proc test_quoted_value_keeps_its_leading_blanks export;
   dcl-s  got varchar(2048);
 
   assert(load_fixture('utqblank.yaml':
+    'name: utqblank' + LF +
     'start_cmd: "  /usr/bin/rmscut"' + LF +
     'check_alive: 8080' + LF: def):
     'a double-quoted command with two leading blanks loads');
@@ -4666,6 +4869,7 @@ dcl-proc test_sbmjob_jobname_quoted_12_stored_10_trimmed_is_rejected export;
   dcl-s  got varchar(2048);
 
   if load_fixture('utjnq12.yaml':
+    'name: utjnq12' + LF +
        'start_cmd: /usr/bin/rmscut' + LF +
        'check_alive: 8080' + LF +
        'sbmjob_jobname: "  ABCDEFGHIJ"' + LF: def);
@@ -4705,6 +4909,7 @@ dcl-proc test_sbmjob_jobname_quoted_10_stored_8_trimmed_is_accepted export;
   dcl-s  got varchar(2048);
 
   assert(load_fixture('utjnq10.yaml':
+    'name: utjnq10' + LF +
     'start_cmd: /usr/bin/rmscut' + LF +
     'check_alive: 8080' + LF +
     'sbmjob_jobname: "  ABCDEFGH"' + LF: def):
@@ -4800,6 +5005,7 @@ dcl-proc test_long_key_is_recorded_not_fatal export;
          'and well inside the 1024 a scalar line may hold');
 
   assert(load_fixture('utlongkey.yaml':
+    'name: utlongkey' + LF +
     'start_cmd: /usr/bin/rmscut' + LF +
     'check_alive: 8080' + LF +
     %trim(key) + ': 42' + LF: def):

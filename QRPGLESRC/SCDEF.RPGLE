@@ -172,6 +172,22 @@ dcl-proc SCDEF_from_doc export;
   endif;
 
   def.friendly    = SCYAML_value(doc: 'name');
+
+  // The third key upstream requires, found live 19 September 2026: a
+  // definition with no 'name:' is refused outright - 'Required attribute
+  // ''name'' not specified' - and never appears in list, check or groups.
+  // RMSC used to accept it and default the friendly name to the short one,
+  // which is the RIGHT fallback for a name given as an EMPTY string but the
+  // wrong one for a name never given at all - upstream draws that line and
+  // RMSC had not. Checked here, immediately, the same way the two other
+  // required keys are checked below and 'cluster' is checked above: fail
+  // fast, before anything downstream builds on a value that should not
+  // exist.
+  if %len(%trim(def.friendly)) = 0;
+    def.err = 'Service ' + %trim(def.short_name) + ' has no name';
+    return false;
+  endif;
+
   def.dir         = SCYAML_value(doc: 'dir');
   def.start_cmd   = SCYAML_value(doc: 'start_cmd');
   def.log_dir     = SCYAML_value(doc: 'log_dir');
@@ -260,12 +276,6 @@ dcl-proc SCDEF_from_doc export;
   def.inherit_vars = to_boolean(
       SCYAML_value(doc: 'environment_is_inheriting_vars'): true);
 
-  // Friendly name defaults to the short name, so 'check' always has something
-  // to print in its description column
-  if %len(%trim(def.friendly)) = 0;
-    def.friendly = def.short_name;
-  endif;
-
   if not load_criteria(doc: def);
     return false;
   endif;
@@ -313,7 +323,8 @@ dcl-proc SCDEF_from_doc export;
     endif;
   endfor;
 
-  // The two keys upstream requires
+  // The other two keys upstream requires - 'name' is checked immediately
+  // after it is read, above, alongside 'cluster'
   if %len(%trim(def.start_cmd)) = 0;
     def.err = 'Service ' + %trim(def.short_name) + ' has no start_cmd';
     return false;
