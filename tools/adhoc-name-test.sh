@@ -901,16 +901,28 @@ else
   failed=$((failed+1))
 fi
 
-# THE LOG FILE PATH, which is derived from the name and is the one consequence
-# of this change that touches the file system. Before it, RMSC's ad-hoc log
-# file is `<dir>/port:22.log` - a colon in a file name.
-if grep -Eq "SCOMMANDER_LOGFILE=.*/${RUN_NAME}\.log$" "$A"; then
-  report PASS scrunattrs-logfile "the log file is named for the service: $RUN_NAME.log"
+# THE LOG FILE PATH. Before 19 September 2026 RMSC's ad-hoc log file was
+# `<dir>/port:22.log` - a colon in a file name - computed deterministically
+# whether or not anything had ever written it.
+#
+# RESOLVED 19 September 2026, live, per docs/parity.md's "The log file
+# naming": SCLOG_path no longer computes a path, it SCANS the log directory
+# for an existing file and returns '' when there is none. port:22 is an
+# ad-hoc probe of a job (sshd) RMSC never started, so there has never been a
+# log file for it on disk - and running this case against the fixed build
+# confirmed the flag this comment used to carry: SCOMMANDER_LOGFILE now
+# comes back EMPTY, not differently shaped. That is not a defect to widen a
+# regex around; it is the correct answer to "what did RMSC start this with"
+# for a service RMSC never started. The old, deterministic value was the
+# fiction - a path that looked real and had never been written.
+if grep -Eq 'SCOMMANDER_LOGFILE=$' "$A"; then
+  report PASS scrunattrs-logfile "empty - RMSC never started this service, so it never wrote a log for it"
   pass=$((pass+1))
 else
-  report FAIL scrunattrs-logfile "the log file is not named '$RUN_NAME.log'"
+  report FAIL scrunattrs-logfile "SCOMMANDER_LOGFILE is not empty for a service RMSC never started"
   detail "got: $(grep -F 'SCOMMANDER_LOGFILE=' "$A" | head -n 1)"
   detail "derived, not measured against upstream - see the header"
+  detail "RESOLVED 19 September 2026: this should be empty - see the comment above this case"
   failed=$((failed+1))
 fi
 

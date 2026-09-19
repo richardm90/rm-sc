@@ -64,7 +64,7 @@ that step asks for.
 | `scrunattrs` | live differential | **by design** | upstream lists running jobs and their run attributes; RMSC prints the `SCOMMANDER_*` variables it sets |
 | `info` | live differential | **undecided** (one item open, not this) | all eight measured differences matched 18 September 2026 — the gate's remaining `info` difference is the separate, pre-existing relative-`dir:` question, not one of the eight |
 | `jobinfo` | live differential | **pass** | matched 10 September 2026 — header, indent, not-running text, per-command blank line and colour |
-| `loginfo` | live differential | **pass** (two items open, none of them this) | matched 9 September 2026, stopped-service scoping matched 18 September 2026 — see below |
+| `loginfo` | live differential | **pass** (one item open, not this) | matched 9 September 2026, stopped-service scoping matched 18 September 2026, log-filename scheme matched 19 September 2026 — see below |
 | `perfinfo` | live differential | **by design** | two differences, both settled: three affinity lines per job that no API carries, and the order of the job blocks, which upstream draws from a hash and RMSC sorts — see below |
 | `start` | not gated | — | state-changing; `SCLIFE.TEST` covers the lifecycle against a service it creates and removes |
 | `stop` | not gated | — | as above |
@@ -306,7 +306,7 @@ discards the descriptor, leaking one per definition per load. The same defect in
 this one is not, because closing it means restructuring a condition on the definition-loading
 path, which feeds the byte-exact operations and wants its own test rather than a drive-by change.
 
-### Three things about `loginfo`, one of them now fixed, another decided
+### Three things about `loginfo`, two of them now fixed
 
 **A stopped service whose log is still on disk — MATCHED 18 September 2026.** Upstream reports no
 log; RMSC used to report the log regardless. Upstream's `loginfo` is scoped to the *running
@@ -364,6 +364,37 @@ parameter, same return type — only its meaning moved, so no `RMSC.BND` signatu
 used to re-call the old, deterministic `SCLOG_path` and would otherwise now silently re-resolve to
 whatever the directory scan finds — usually the very file just written, but the wrong thing to
 rely on there.
+
+**One side effect, found live and judged correct rather than fixed.** `scrunattrs` (the RMSC-only
+extension showing the `SCOMMANDER_*` variables a start would set) now reports an **empty**
+`SCOMMANDER_LOGFILE` for a service RMSC has never started — an ad-hoc probe of `sshd`
+(`port:22`) among them — because `SCLOG_path` correctly finds nothing on disk. The old,
+deterministic path was never more than a plausible-looking fiction for a file that had never been
+written; empty is the honest answer to "what did RMSC start this with" for a service RMSC did not
+start. `tools/adhoc-name-test.sh`'s `scrunattrs-logfile` case now asserts the empty value.
+
+**Coverage.** `tools/loginfo-test.sh` gained two stages testing the write side directly (a fresh
+`scr start` names a correctly-shaped file; a separate `scr loginfo` finds it; stop-then-restart
+leaves two files and the newer is reported) and had its own staging simplified — since both
+implementations now discover logs the same way, one staged file serves both sides instead of two.
+`tools/narration-test.sh` and `tools/fidelity-gate.sh` needed comment corrections only (both
+already matched by SHAPE, not by the static name, once checked closely) except for
+`log_reset`/`log_bytes`, two helpers that hardcoded the old static path and would have silently
+read 0 bytes for every case built on log growth — found by actually running the suite after the
+fix landed, not anticipated in advance. `qtestsrc/SCEXEC.TEST.RPGLE` gained four unit tests
+covering `SCLOG_new_path`'s shape and `SCLOG_path`'s empty/newest-wins/exact-suffix-match
+behaviour directly, isolated from any live differential.
+
+**Not yet verified: the four new `SCEXEC.TEST.RPGLE` unit tests.** `RUCRTRPG` on this box currently
+fails with `CPF9E18: Attempt made to exceed usage limit for product 5770WDS` — a licensing/usage
+constraint on the RPGUnit test-compile path specifically (`makei build`'s own `CRTRPGMOD` calls for
+the production modules are unaffected and succeeded throughout this work), and checking or
+resetting it needs authority this account does not have (`WRKLICINF` answers `CPD0032: Not
+authorized`). The **existing, already-compiled** `RMSCT/SCEXEC` test program was run against the
+new build regardless: 76 of 78 cases pass, and the two failures are exactly `test_log_path_default`
+and `test_log_path_explicit` — the two tests the new source already rewrites to call
+`SCLOG_new_path` instead — with no other regression. Recompile and confirm all 82 cases pass once
+the licensing issue is resolved.
 
 **The spooled-file section.** RMSC prints `    spooled file <name> number <n> in <job>` after the
 log line. Upstream has a spooled-file path of its own (`getSpooledFiles`), and **what it prints
@@ -1070,10 +1101,13 @@ Short-versus-friendly naming, **re-checked 19 September 2026: already applied ev
 currently measurable** — see "The two whole-surface differences" above; a rare `SCEXEC` case
 remains, unreachable in practice. The `stop`-escalation gap found while re-checking that item is
 **fixed, 19 September 2026** — see "Beyond the operations" above; its two remaining unmeasured
-texts (the no-`stop_cmd` path) stay open, deliberately, pending a safe way to measure them. Still
-not yet implemented: stage a dedicated verification fixture under `CLAUDE`'s account rather than
-Richard's. `SC_OPTIONS`/`.scrc` was considered and deliberately left undecided pending further
-investigation — see "Beyond the operations — inputs RMSC does not read" above.
+texts (the no-`stop_cmd` path) stay open, deliberately, pending a safe way to measure them. The
+log-filename scheme is **fixed, 19 September 2026** — see "Three things about `loginfo`" above;
+its four new unit tests are written but not yet compiled, blocked on a `RUCRTRPG` licensing
+constraint this account cannot resolve. Still not yet implemented: stage a dedicated verification
+fixture under `CLAUDE`'s account rather than Richard's. `SC_OPTIONS`/`.scrc` was considered and
+deliberately left undecided pending further investigation — see "Beyond the operations — inputs
+RMSC does not read" above.
 
 Separately, and not part of step 8: the gate should compare `list -a` across all services, to
 hold Verification step 9's discovery parity. The two implementations agree on it today, but the

@@ -467,7 +467,16 @@ dcl-proc SCEXEC_start export;
 
     SCLOG_ensure_dir(def);
 
-    if not SCLAUNCH_start(def: SCLOG_path(def): lerr);
+    // Computed ONCE per start and threaded through everywhere this attempt
+    // needs it (the redirect target below, and the same instance's log
+    // re-checked further down on a timeout) - MEASURED 19 September 2026,
+    // docs/parity.md: upstream timestamps the filename at the moment it
+    // starts, so calling SCLOG_path (which now finds the LATEST existing
+    // file) a second time here would silently drift onto a different
+    // instance's log, or find none at all for the very first start.
+    log_path = SCLOG_new_path(def);
+
+    if not SCLAUNCH_start(def: log_path: lerr);
       err = 'Could not start ' + %trim(def.short_name) + ': ' + %trim(lerr);
       narrate_error(err);
       return false;
@@ -529,10 +538,11 @@ dcl-proc SCEXEC_start export;
     //   never running, start cmd prints    log 40 bytes  LINE
     //   partial,       start cmd silent    log 0 bytes   no line
     //
-    // The path RMSC names is its own and carries no timestamp where upstream's
-    // does; docs/parity.md records that, and it is a property of SCLOG_path
-    // rather than of this line.
-    log_path  = SCLOG_path(def);
+    // log_path is what THIS start wrote to, already computed above - not
+    // re-read via SCLOG_path, which now finds whatever the latest file
+    // happens to be and would still find THIS one immediately after a
+    // failed start, but is the wrong call to make here on principle: this
+    // line is about the attempt just made, not about a fresh lookup.
     log_stats = IFS_stats(log_path);
     if log_stats.st_size > 0;
       SCOUT_writeln(SCOUT_log_detail(log_path));

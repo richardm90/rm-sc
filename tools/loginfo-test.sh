@@ -180,24 +180,27 @@
 #
 # STAGING - and why it is done the way it is
 #
-# The two implementations NAME LOG FILES DIFFERENTLY. Upstream writes
-# `<timestamp>.<name>.log`; RMSC writes `<name>.log`. Both in the same
-# directory. Measured: upstream ignores the untimestamped file and RMSC ignores
-# the timestamped one, so a service started by one implementation leaves the
-# OTHER in case C.
+# MEASURED and IMPLEMENTED 19 September 2026 (docs/parity.md, "The log file
+# naming"): both implementations now name log files the SAME way -
+# `<timestamp>.<short_name>.log`, discovered by scanning the log directory for
+# the greatest (i.e. newest) matching name, not by remembering anything from a
+# start. Before that date this section described the opposite: upstream wrote
+# `<timestamp>.<name>.log` and RMSC wrote a static `<name>.log`, so a service
+# started by one implementation left the OTHER unable to find any log at all -
+# and staging RMSC's file directly, at its own then-different name, was the
+# only way to put both implementations in the same case at once. That
+# asymmetry is gone, and so is the separate fixture it required: cases A-D and
+# stage 3 below now stage exactly ONE real log file - the one upstream's own
+# `sc start` writes below - and both `sc loginfo` and `scr loginfo` read it,
+# because both now scan the same directory for the same pattern.
 #
-# That is the trap in staging this at all, and it is silent: a run that started
-# the service with `scr` would leave BOTH implementations reporting no log, and
-# the comparison would pass having tested nothing. Two things are done about it:
-#
-#   - the service is STARTED WITH `sc`, never with `scr`, so a broken RMSC start
-#     cannot be what puts upstream in case C;
-#   - RMSC's log file is STAGED DIRECTLY, so RMSC's case is not a consequence of
-#     RMSC's own start either. The fixture stage then PROVES the staging took by
-#     requiring `scr loginfo` to name the staged path - and it accepts that on
-#     EITHER STREAM, because which stream it lands on is the thing under test.
-#     A fixture proof that depended on behaviour the fix will change is the trap
-#     error-delivery-test.sh's staged-definitions block documents at length.
+# The service is still STARTED WITH `sc`, never `scr`, for these read-side
+# cases - but the reason has narrowed. It used to also be needed because a
+# service started by `scr` left upstream in case C regardless of whether RMSC
+# was working; now it is needed only to keep this file's question (does
+# loginfo report the right thing about an EXISTING log?) separate from
+# SCLOG_new_path - the WRITE side, which nothing here touches until stage 4,
+# below, on its own, disposable fixture.
 #
 # NO SERVICE NAME OR PATH FROM THIS MACHINE IS WRITTEN INTO THIS FILE. The
 # repository is public. Both fixture services are INVENTED here, carry this
@@ -319,12 +322,30 @@ SVCDIR="$HOME/.sc/services"
   "place both look. SC_SERVICES_DIR is RMSC's own mechanism and upstream would" \
   "not see a definition staged through it."
 
+[ -f "$HERE/gate-listen.py" ] || setup_fail \
+  "tools/gate-listen.py not found beside this script at: $HERE/gate-listen.py" \
+  "" \
+  "Stage 4/5's write-side fixture is started with scr, never sc, so it is not" \
+  "captured into a log the way RUN and NONE's fixture is - it uses the" \
+  "project's sanctioned self-bounded listener instead. See" \
+  "tools/gate-fixtures/README.md."
+
 mkdir -p "$WORK" || setup_fail "cannot create work directory $WORK"
 
 # The two invented services. The PID is in the name so two runs cannot collide,
 # and so debris from a killed run can be attributed and reaped.
 RUN="rmsc_lg_run_$$"     # started, log staged, cases A and B
 NONE="rmsc_lg_none_$$"   # never started, no log at all, case C
+
+# A THIRD, for stage 4/5 - the WRITE side (SCLOG_new_path), started with
+# `scr` and never with `sc`. Kept out of $SVCDIR / $GROUP entirely: RUN and
+# NONE exist to be read about by BOTH implementations, and this one exists to
+# be WRITTEN by RMSC alone, so it lives in its own private services
+# directory - see stage 4's own header for why that is safe here in a way it
+# is not for RUN and NONE.
+WR="rmsc_lg_wr_$$"
+WRDIR="$WORK/wr-services"
+PORT_WR=59493
 
 # THE OWNERSHIP MARKER, and why a name is not enough.
 #
@@ -383,9 +404,17 @@ teardown() {
   pkill -f "$WORK/listen.py" >/dev/null 2>&1
   rm -f "$SVCDIR/$RUN.yaml" "$SVCDIR/$NONE.yaml"
   if [ -n "$LOGDIR" ] && [ -d "$LOGDIR" ]; then
-    rm -f "$LOGDIR/$RUN.log" "$LOGDIR/$NONE.log"
-    rm -f "$LOGDIR"/*."$RUN".log "$LOGDIR"/*."$NONE".log
+    # Only the current, timestamped naming is ever written now - see STAGING
+    # above. Both fixtures' logs are RMSC's own doing at this point (case B
+    # writes into the shared file, stage 4/5 writes its own via scr), so a
+    # wildcard sweep by short name is what actually needs removing.
+    rm -f "$LOGDIR"/*."$RUN".log "$LOGDIR"/*."$NONE".log "$LOGDIR"/*."$WR".log
   fi
+  # stage 4/5's write-side fixture: its own private services directory (never
+  # the shared one above) and its self-bounded listener, by the port that is
+  # unique to this run.
+  SC_SERVICES_DIR="$WRDIR" "$SCR" kill "$WR" >/dev/null 2>&1 </dev/null
+  pkill -f "gate-listen.py.*$PORT_WR" >/dev/null 2>&1
   [ -n "${KEEP:-}" ] || rm -rf "$WORK"
 
   # TEARDOWN PROVES ITSELF, AND THE REASON IS THREE STAGES AWAY.
@@ -755,10 +784,15 @@ pass=$((pass+1))
 
 # (c) START IT, WITH `sc`.
 #
-# Never with scr. Upstream reports a log only for a service it started - it
-# reads the timestamped file it wrote itself, and ignores RMSC's untimestamped
-# one - so a service started by scr would leave upstream in case C and the
-# comparison would pass having tested nothing.
+# Deliberately not `scr`. This section is about loginfo - the READ side of
+# the log-naming decision - and starting with sc keeps that separate from
+# SCLOG_new_path, the WRITE side, which stage 4 below tests on its own
+# fixture. Before 19 September 2026 there was a second, sharper reason too:
+# the two implementations named log files differently, so a service started
+# by scr left upstream unable to find a log at all and the comparison would
+# have passed having tested nothing. Both now use the same
+# <timestamp>.<short_name>.log naming, discovered by the same directory scan,
+# so that reason no longer applies - but isolating read from write still does.
 "$SC" start "$RUN" > "$WORK/start.out" 2> "$WORK/start.err" </dev/null
 start_rc=$?
 
@@ -781,40 +815,46 @@ fi
 report PASS fixture-start "started by sc, RUNNING after ${waited}s"
 pass=$((pass+1))
 
-# (d) UPSTREAM'S OWN LOG EXISTS AND IS EMPTY, and RMSC's is staged empty beside
-# it. Case A is "log found, EMPTY" for BOTH implementations, and an upstream log
-# with content in it would silently make the upstream half of case A into case B.
-SC_LOG=$(ls -1t "$LOGDIR"/*."$RUN".log 2>/dev/null | head -n 1)
-SCR_LOG="$LOGDIR/$RUN.log"
-: > "$SCR_LOG"
+# (d) THE ONE LOG FILE EXISTS AND IS EMPTY.
+#
+# Just one now - see STAGING above. Case A is "log found, EMPTY" for BOTH
+# implementations, and content in it would silently make case A into case B
+# for both at once, which is exactly what non-empty-log below needs to be a
+# different case from this one.
+LOG=$(ls -1t "$LOGDIR"/*."$RUN".log 2>/dev/null | head -n 1)
 
-if [ -z "$SC_LOG" ]; then
+if [ -z "$LOG" ]; then
   report FAIL fixture-logs "sc started the service and wrote no log file for it"
   detail "looked for $LOGDIR/*.$RUN.log"
   failed=$((failed+1))
-elif [ -s "$SC_LOG" ]; then
-  report FAIL fixture-logs "upstream's log is not empty ($(wc -c < "$SC_LOG") bytes) - case A would not be the empty case"
+elif [ -s "$LOG" ]; then
+  report FAIL fixture-logs "upstream's log is not empty ($(wc -c < "$LOG") bytes) - case A would not be the empty case"
   detail "the start command must be SILENT; sc captures a service's output into its log"
-  detail "it said: $(head -n 1 "$SC_LOG")"
+  detail "it said: $(head -n 1 "$LOG")"
   failed=$((failed+1))
 else
-  report PASS fixture-logs "upstream's log is empty, RMSC's staged empty beside it"
+  report PASS fixture-logs "the one log file both implementations will read is empty"
   pass=$((pass+1))
 fi
 
-# (e) THE STAGING TOOK - RMSC IS IN CASE A AND NOT IN CASE C.
+# (e) RMSC FINDS THE SAME FILE UPSTREAM WROTE.
 #
-# Accepted on EITHER STREAM: which stream the line lands on is the thing under
-# test, so a proof that required stdout would stop working the day the fix
-# lands, and would then report a working fixture as an absent one.
+# This used to prove that a SEPARATELY STAGED, RMSC-shaped file had taken;
+# now there is nothing separate to stage, so this proves the thing the whole
+# naming decision rests on instead - that SCLOG_path's directory scan finds a
+# log neither RMSC nor this script wrote, because it was never told which
+# file to look for, only how to recognise one. Accepted on EITHER STREAM:
+# which stream the line lands on is the thing under test, so a proof that
+# required stdout would stop working the day the fix lands, and would then
+# report a working fixture as an absent one.
 "$SCR" loginfo "$RUN" > "$WORK/proof.out" 2> "$WORK/proof.err" </dev/null
-if cat "$WORK/proof.out" "$WORK/proof.err" | grep -Fq -- "$SCR_LOG"; then
-  report PASS fixture-staging "scr names the staged log - it is in the found case, not the not-found one"
+if cat "$WORK/proof.out" "$WORK/proof.err" | grep -Fq -- "$LOG"; then
+  report PASS fixture-staging "scr's directory scan finds sc's own log - it is in the found case, not the not-found one"
   pass=$((pass+1))
 else
-  report FAIL fixture-staging "FIXTURE DID NOT TAKE: scr does not name $SCR_LOG"
+  report FAIL fixture-staging "FIXTURE DID NOT TAKE: scr does not name $LOG"
   detail "it said: $(cat "$WORK/proof.out" "$WORK/proof.err" | grep -F -- "$RUN" | head -n 1)"
-  detail "RMSC's log naming has changed, or it looks somewhere else - restage before believing anything below"
+  detail "RMSC's log naming or discovery has changed - restage before believing anything below"
   detail "every case below would be measuring the NOT-FOUND path while claiming to measure the found one"
   failed=$((failed+1))
 fi
@@ -859,25 +899,24 @@ heading
 # non-empty-log below exists and asserts the opposite thing.
 grab empty-log "$SCR" "$RUN"
 grab sc.empty-log "$SC" "$RUN"
-assert_case empty-log measured yes "$RUN" "$RUN: $SCR_LOG (no data)"
+assert_case empty-log measured yes "$RUN" "$RUN: $LOG (no data)"
 
 # CASE B - LOG FOUND, WITH CONTENT. NOTHING after the path.
 #
 # The other half of rival 1, and the case a "fix the suffix" change is most
 # likely to miss: upstream does not print a size here at all, so the suffix is
-# not corrected, it is removed. Written into BOTH log files so both
-# implementations are in the same case - upstream reads its own timestamped
-# file and would otherwise still be in case A.
-printf 'hello from log\n' > "$SCR_LOG"
-printf 'hello from log\n' > "$SC_LOG"
-if [ ! -s "$SCR_LOG" ] || [ ! -s "$SC_LOG" ]; then
-  report FAIL non-empty-log "FIXTURE: could not put content in both log files"
+# not corrected, it is removed. Written into the one shared log file, which
+# puts both implementations in this case at once - there is only one file for
+# either of them to read, since 19 September 2026 (see STAGING above).
+printf 'hello from log\n' > "$LOG"
+if [ ! -s "$LOG" ]; then
+  report FAIL non-empty-log "FIXTURE: could not put content in the log file"
   detail "case B would be case A, and would demand a suffix upstream does not print"
   failed=$((failed+1))
 else
   grab non-empty-log "$SCR" "$RUN"
   grab sc.non-empty-log "$SC" "$RUN"
-  assert_case non-empty-log measured yes "$RUN" "$RUN: $SCR_LOG"
+  assert_case non-empty-log measured yes "$RUN" "$RUN: $LOG"
 fi
 
 # CASE C - NO LOG AT ALL. The line moves to STDERR and stdout keeps the blank
@@ -919,7 +958,7 @@ grab sc.group "$SC" "group:$GROUP"
 
 gprob=()
 while IFS= read -r p; do [ -n "$p" ] && gprob+=("$p"); done \
-  < <(check_stdout_shape "$WORK/group.out" "$RUN: $SCR_LOG")
+  < <(check_stdout_shape "$WORK/group.out" "$RUN: $LOG")
 [ "${RC_SAVED[group]:-1}" -eq 0 ] || gprob+=("exit ${RC_SAVED[group]}, wanted 0")
 
 g_run_out=$(mentions "$WORK/group.out" "$RUN");   [ -z "$g_run_out" ] && g_run_out=0
@@ -1089,6 +1128,202 @@ else
 fi
 
 echo
+# ---------------------------------------------------------------------------
+echo "== stage 4: the WRITE side - a fresh scr start names a fresh, timestamped file"
+echo
+heading
+# ---------------------------------------------------------------------------
+
+# EVERYTHING ABOVE TESTS loginfo - THE READ SIDE, against a log upstream
+# wrote. Nothing above tests whether RMSC ITSELF writes a log that looks the
+# way docs/parity.md says it must (docs/parity.md, "The log file naming",
+# MEASURED and IMPLEMENTED 19 September 2026: SCLOG_new_path, one call per
+# start). This is the only stage in this file that starts a service WITH
+# scr, and it is given its OWN service in its OWN private services
+# directory ($WRDIR, never $SVCDIR) rather than added to RUN/NONE's group:
+# upstream plays no part in this stage, so there is nothing to gain from
+# putting it where upstream would see it, and a failure here cannot then be
+# misread as having disturbed the fixtures stages 0-3 depend on.
+wr_ok=""
+mkdir -p "$WRDIR"
+cat > "$WRDIR/$WR.yaml" <<EOF
+$MARKER
+name: RMSC loginfo write-side fixture $WR
+start_cmd: $PY $HERE/gate-listen.py --seconds 60 $PORT_WR
+check_alive: $PORT_WR
+startup_wait_time: 20
+stop_wait_time: 5
+EOF
+
+SC_SERVICES_DIR="$WRDIR" "$SCR" start "$WR" > "$WORK/wr.start.out" 2> "$WORK/wr.start.err" </dev/null
+wr_started=""
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+  st=$(SC_SERVICES_DIR="$WRDIR" "$SCR" check "$WR" 2>/dev/null </dev/null \
+         | grep -F -- "$WR" | sed 's/ *|.*//; s/^ *//')
+  [ "$st" = RUNNING ] && { wr_started=yes; break; }
+  sleep 1
+done
+
+if [ -z "$wr_started" ]; then
+  report FAIL fixture-wr "scr start did not bring $WR up (last state '$st')"
+  detail "nothing in stage 4 or 5 is evidence for anything"
+  detail "it said: $(head -n 1 "$WORK/wr.start.err" 2>/dev/null)"
+  failed=$((failed+1))
+else
+  report PASS fixture-wr "scr started $WR in its own private services directory"
+  pass=$((pass+1))
+
+  wr_files=$(ls -1 "$LOGDIR"/*."$WR".log 2>/dev/null)
+  wr_count=$(printf '%s\n' "$wr_files" | grep -c . || true); [ -z "$wr_count" ] && wr_count=0
+
+  if [ "$wr_count" -ne 1 ]; then
+    report FAIL wr-single-file "scr start left $wr_count file(s) matching *.$WR.log, wanted 1"
+    detail "files: $wr_files"
+    failed=$((failed+1))
+  else
+    wr_file="$wr_files"
+    wr_ok=yes
+    wr_base="${wr_file##*/}"
+
+    # The shape MEASURED live: 19 characters, YYYY-MM-DD-HH.MM.SS, then a dot,
+    # the short name, then .log. qtestsrc/SCEXEC.TEST.RPGLE's
+    # pt_stamp_shape_ok pins the same shape from inside the ILE job; this pins
+    # it on the actual file SCLOG_new_path wrote, outside it.
+    if [[ "$wr_base" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.${WR}\.log$ ]]; then
+      report PASS wr-shape "SCLOG_new_path wrote $wr_base"
+      pass=$((pass+1))
+    else
+      report FAIL wr-shape "SCLOG_new_path wrote '$wr_base', which does not match <19-char stamp>.$WR.log"
+      failed=$((failed+1))
+    fi
+
+    # THE READ BACK IS A SEPARATE PROCESS, which is the whole point measured
+    # live: loginfo finds the file by SCANNING, not by anything sc start left
+    # behind for it to remember.
+    SC_SERVICES_DIR="$WRDIR" "$SCR" loginfo "$WR" \
+      > "$WORK/wr.loginfo.out" 2> "$WORK/wr.loginfo.err" </dev/null
+    wr_rc=$?
+    if [ "$wr_rc" -ne 0 ]; then
+      report FAIL wr-read-back "scr loginfo exited $wr_rc, wanted 0"
+      failed=$((failed+1))
+    elif grep -Fq -- "$wr_file" "$WORK/wr.loginfo.out" "$WORK/wr.loginfo.err" 2>/dev/null; then
+      report PASS wr-read-back "a separate scr loginfo process finds the exact file scr start just wrote"
+      pass=$((pass+1))
+    else
+      report FAIL wr-read-back "scr loginfo does not name $wr_file"
+      detail "it said: $(grep -F -- "$WR" "$WORK/wr.loginfo.out" "$WORK/wr.loginfo.err" 2>/dev/null | head -n 1)"
+      failed=$((failed+1))
+    fi
+  fi
+fi
+
+echo
+# ---------------------------------------------------------------------------
+echo "== stage 5: stop, start again - two files on disk, the newer one reported"
+echo
+heading
+# ---------------------------------------------------------------------------
+
+# MEASURED 19 September 2026, live (docs/parity.md, "The log file naming"):
+# stopping and restarting the same service left TWO files on disk - and
+# loginfo, run as a separate process, reported the NEWER of the two. Nothing
+# above can see this: every case above starts a service exactly once. This
+# reuses stage 4's fixture and its file as the "older" one, so the two names
+# compared below are genuinely two different starts of the same service, not
+# two invented strings standing in for them.
+#
+# THIS IS THE "MUST DISAGREE" CASE, CLAUDE.md's rule: a fix that returned the
+# FIRST match, an arbitrary match, or the OLDEST rather than the greatest,
+# would still pass every case in stages 0-4 - each of those ever has at most
+# one file on disk at a time. Only two files whose right answers differ can
+# catch it.
+if [ -z "$wr_ok" ]; then
+  report FAIL wr-restart "SKIPPED - stage 4's fixture did not come up cleanly"
+  failed=$((failed+1))
+else
+  SC_SERVICES_DIR="$WRDIR" "$SCR" stop "$WR" \
+    > "$WORK/wr.stop.out" 2> "$WORK/wr.stop.err" </dev/null
+  wr_stopped=""
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    st=$(SC_SERVICES_DIR="$WRDIR" "$SCR" check "$WR" 2>/dev/null </dev/null \
+           | grep -F -- "$WR" | sed 's/ *|.*//; s/^ *//')
+    [ "$st" = 'NOT RUNNING' ] && { wr_stopped=yes; break; }
+    sleep 1
+  done
+
+  if [ -z "$wr_stopped" ]; then
+    report FAIL wr-restart "FIXTURE: $WR did not stop (still '$st')"
+    failed=$((failed+1))
+  else
+    # THE STAMP'S RESOLUTION IS WHOLE SECONDS. Without this pause, a
+    # stop-then-start inside the same wall-clock second would write the SAME
+    # filename twice rather than two different ones, and this stage would
+    # then be asserting nothing - there would be only one file on disk, not
+    # two disagreeing about which is newer.
+    sleep 2
+
+    SC_SERVICES_DIR="$WRDIR" "$SCR" start "$WR" \
+      > "$WORK/wr.restart.out" 2> "$WORK/wr.restart.err" </dev/null
+    wr_restarted=""
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+      st=$(SC_SERVICES_DIR="$WRDIR" "$SCR" check "$WR" 2>/dev/null </dev/null \
+             | grep -F -- "$WR" | sed 's/ *|.*//; s/^ *//')
+      [ "$st" = RUNNING ] && { wr_restarted=yes; break; }
+      sleep 1
+    done
+
+    if [ -z "$wr_restarted" ]; then
+      report FAIL wr-restart "FIXTURE: $WR did not come back up (last state '$st')"
+      failed=$((failed+1))
+    else
+      wr_files2=$(ls -1 "$LOGDIR"/*."$WR".log 2>/dev/null)
+      wr_count2=$(printf '%s\n' "$wr_files2" | grep -c . || true); [ -z "$wr_count2" ] && wr_count2=0
+
+      if [ "$wr_count2" -ne 2 ]; then
+        report FAIL wr-two-files "expected exactly 2 files matching *.$WR.log after stop-then-start, found $wr_count2"
+        detail "files: $wr_files2"
+        detail "nothing deletes the older file (docs/parity.md) - if this is 1, the restart reused the first file's name"
+        failed=$((failed+1))
+      else
+        # Lexicographically greatest = newest, because the stamp is a fixed
+        # width (docs/parity.md) - sorted rather than assumed to come out of
+        # `ls` in a particular order.
+        wr_newer=$(printf '%s\n' "$wr_files2" | sort | tail -n 1)
+        wr_older=$(printf '%s\n' "$wr_files2" | sort | head -n 1)
+
+        if [ "$wr_newer" = "$wr_older" ] || [ "$wr_older" != "$wr_file" ]; then
+          report FAIL wr-two-files "the two files on disk are not what stage 4's start and this restart should have produced"
+          detail "stage 4 wrote: $wr_file"
+          detail "now on disk:   $wr_files2"
+          failed=$((failed+1))
+        else
+          report PASS wr-two-files "two files on disk, $wr_older then $wr_newer - neither was deleted"
+          pass=$((pass+1))
+
+          SC_SERVICES_DIR="$WRDIR" "$SCR" loginfo "$WR" \
+            > "$WORK/wr.loginfo2.out" 2> "$WORK/wr.loginfo2.err" </dev/null
+          wr_rc2=$?
+          if [ "$wr_rc2" -ne 0 ]; then
+            report FAIL wr-newest "scr loginfo exited $wr_rc2, wanted 0"
+            failed=$((failed+1))
+          elif grep -Fq -- "$wr_older" "$WORK/wr.loginfo2.out" "$WORK/wr.loginfo2.err" 2>/dev/null; then
+            report FAIL wr-newest "scr loginfo reported the OLDER file - a fix returning the first match, rather than the greatest, would pass every earlier case in this file and only fails here"
+            failed=$((failed+1))
+          elif grep -Fq -- "$wr_newer" "$WORK/wr.loginfo2.out"; then
+            report PASS wr-newest "a separate scr loginfo process reports the newer of the two files"
+            pass=$((pass+1))
+          else
+            report FAIL wr-newest "scr loginfo names neither file"
+            detail "it said: $(grep -F -- "$WR" "$WORK/wr.loginfo2.out" "$WORK/wr.loginfo2.err" 2>/dev/null | head -n 1)"
+            failed=$((failed+1))
+          fi
+        fi
+      fi
+    fi
+  fi
+fi
+
+echo
 echo "pass=$pass   failed=$failed   pinned-changed=$changed   reference-drift=$refdrift"
 echo "artefacts: $WORK   (.out and .err captured separately for every case; KEEP=1 to keep them)"
 
@@ -1109,9 +1344,10 @@ echo "artefacts: $WORK   (.out and .err captured separately for every case; KEEP
 #   empty line at the end of stdout; nothing distinguishes them, and nothing
 #   needs to.
 #
-#   A SERVICE WITH SEVERAL LOGS. Upstream keeps one timestamped file per start
-#   and this fixture starts once. Which of several a stopped-and-restarted
-#   service would report is not asked here.
+#   A SERVICE WITH SEVERAL LOGS - now covered. Stage 5 starts, stops and
+#   starts stage 4's fixture again with scr and asserts exactly two files
+#   exist and that loginfo, run as a separate process, reports the newer.
+#   This paragraph used to say the question was not asked here; it now is.
 #
 #   THE BLANK LINE BEYOND TWO MEMBERS, AND BEYOND ONE SHAPE OF GROUP. The group
 #   case pins one blank line for a command naming TWO services, one found and

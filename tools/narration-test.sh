@@ -606,15 +606,25 @@ pass=0; failed=0; refdrift=0; skipped=0
 # rule the log's size before and after a run is evidence and has to be handled
 # like any other fixture.
 #
-# RMSC APPENDS TO THE LOG RATHER THAN TRUNCATING IT. Measured 4 September 2026:
-# a start command printing 36 bytes leaves a 36-byte log on the first attempt
-# and a 72-byte one on the second. So a log left behind by an EARLIER RUN of
-# this script is content, and the service that must print no log-file line
-# would print one - a fixture failure that looks exactly like a defect. Every
-# case below therefore resets the log before the run it measures.
+# UPDATED 19 September 2026 for docs/parity.md's "The log file naming"
+# (MEASURED and IMPLEMENTED that date): RMSC no longer writes one static
+# `<short>.log`, reused and appended to across restarts - measured 4
+# September 2026, back when it did, that a start command printing 36 bytes
+# left a 36-byte log on the first attempt and 72 on the second, so a log left
+# behind by an EARLIER RUN of this script was content the next run would
+# wrongly measure. Every start now gets its OWN fresh, timestamped file, so
+# that specific hazard is gone - but a wildcard reset before each run stays
+# worth doing regardless, as ordinary hygiene against debris from a killed
+# run, and log_bytes has to find the CURRENT file the same way loginfo does:
+# by scanning for the newest name matching this service, not by assuming one
+# fixed name.
 RMSC_LOGS="$HOME/.sc/logs"
-log_reset() { rm -f "$RMSC_LOGS/$1.log"; }
-log_bytes() { if [ -f "$RMSC_LOGS/$1.log" ]; then wc -c < "$RMSC_LOGS/$1.log" | tr -d ' '; else echo 0; fi; }
+log_reset() { rm -f "$RMSC_LOGS"/*."$1".log; }
+log_bytes() {
+  local f
+  f=$(ls -1t "$RMSC_LOGS"/*."$1".log 2>/dev/null | head -n 1)
+  if [ -n "$f" ] && [ -f "$f" ]; then wc -c < "$f" | tr -d ' '; else echo 0; fi
+}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1666,7 +1676,7 @@ if require_state fail-start "$FAIL" NOT; then
   ne=$(n_prefix "$fe" "$LOGDETAIL"); [ -z "$ne" ] && ne=0
   fb=$(log_bytes "$FAIL")
   [ "$fb" = 0 ] \
-    || probs+=("$FAIL's log holds $fb byte(s) after a start whose command prints nothing - the gate is log CONTENT, so this run cannot ask about row 1 of the table at all; something else wrote to $RMSC_LOGS/$FAIL.log")
+    || probs+=("$FAIL's log holds $fb byte(s) after a start whose command prints nothing - the gate is log CONTENT, so this run cannot ask about row 1 of the table at all; something else wrote to $RMSC_LOGS/*.$FAIL.log")
   [ "$n" -eq 0 ] || probs+=("$n '$LOGDETAIL' line(s) on stdout for a service that never came up, with $fb byte(s) in its log: at 0 bytes the line follows nothing, and above 0 the row above says this run cannot ask the question at all - see the table in this case's comment")
   [ "$ne" -eq 0 ] || probs+=("$ne of them on stderr, where upstream puts none of them")
   check_named fail-log-detail-absent measured \
@@ -1756,13 +1766,17 @@ fi
 # two rules predicted identically on every row anyone had. Separating them
 # needed a fixture that moved one of the two, which is this one.
 #
-# THE PATH IS ASSERTED BY SHAPE AND NOT BYTE FOR BYTE, and the reason is a real
-# divergence rather than a convenience: RMSC's log is ~/.sc/logs/<short>.log
-# and upstream's is ~/.sc/logs/<timestamp>.<short>.log, so the two lines cannot
-# be equal however right the gate is. What is common to both - the prefix, the
-# directory, the service's own short name, the .log suffix - is asserted; the
-# timestamp is not. docs/messages.md records the divergence as a property of
-# SCLOG_path that pre-dates all of this.
+# THE PATH IS ASSERTED BY SHAPE AND NOT BYTE FOR BYTE. Before 19 September
+# 2026 this was a real divergence rather than a convenience - RMSC's log was
+# ~/.sc/logs/<short>.log and upstream's was ~/.sc/logs/<timestamp>.<short>.log,
+# so the two lines could never be equal however right the gate was. Both now
+# write ~/.sc/logs/<timestamp>.<short>.log (docs/parity.md, "The log file
+# naming", MEASURED and IMPLEMENTED that date), but this assertion stays
+# shape-based rather than byte-for-byte regardless: the timestamp is real
+# wall-clock time and will never match between two separate processes run
+# moments apart, RMSC's and upstream's alike. What is common to both - the
+# prefix, the directory, the service's own short name, the .log suffix - is
+# asserted; the timestamp is not, and could not usefully be.
 ensure_down "$NOISY" >/dev/null 2>&1
 log_reset "$NOISY"
 if require_state noisy-log-detail "$NOISY" NOT; then

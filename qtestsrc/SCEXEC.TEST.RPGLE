@@ -70,6 +70,18 @@ end-pr;
 
 dcl-pr remove_fixtures end-pr;
 
+//------------------------------------------------------------------------------
+// pt_stage_log / pt_stamp_shape_ok - support for the SCLOG_new_path /
+// SCLOG_path split. See the "Log file location" tests below.
+//------------------------------------------------------------------------------
+dcl-pr pt_stage_log;
+  path like(STMF_t) const;
+end-pr;
+
+dcl-pr pt_stamp_shape_ok like(BOOLEAN_t);
+  stamp varchar(19) const;
+end-pr;
+
 // ADHOC PGM- and LONG-ROW blocks - see the two group headers at the end of
 // this suite. Global declarations must precede the first subprocedure, so
 // these live here rather than beside the procedures that use them.
@@ -267,6 +279,65 @@ dcl-proc load_def;
   IFS_close_file(handle);
 
   return SCDEF_load(path: def);
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// pt_stage_log - write an empty file directly on disk, standing in for a log
+// SCLOG_path must find by SCANNING rather than by remembering. Uses the same
+// IFS primitives load_def already uses to stage a definition; the content is
+// irrelevant here, only the FILENAME is under test.
+//------------------------------------------------------------------------------
+dcl-proc pt_stage_log;
+  dcl-pi *n;
+    path like(STMF_t) const;
+  end-pi;
+
+  dcl-s handle like(INTEGER_t);
+
+  handle = IFS_open_file(path: IFS_OPEN_TYPE_WRITE);
+  assert((handle >= 0): 'Could not stage log fixture ' + %trim(path) +
+                        ' - ' + %trim(IFS_error_text()));
+  IFS_write_utf8(handle: 'staged by SCEXEC.TEST for SCLOG_path');
+  IFS_close_file(handle);
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// pt_stamp_shape_ok - does a 19-character string look like YYYY-MM-DD-HH.MM.SS
+//
+// MEASURED 19 September 2026 (docs/parity.md, "The log file naming"): the
+// stamp is a fixed 19-character prefix, digits everywhere except three
+// hyphens (positions 5, 8, 11) and two dots (14, 17). This checks the SHAPE
+// only - it does not parse the value into a real calendar date, which is not
+// what SCLOG_new_path promises and not something a caller can check from
+// outside anyway.
+//------------------------------------------------------------------------------
+dcl-proc pt_stamp_shape_ok;
+  dcl-pi *n like(BOOLEAN_t);
+    stamp varchar(19) const;
+  end-pi;
+
+  if %len(stamp) <> 19;
+    return false;
+  endif;
+
+  if %subst(stamp: 5: 1)  <> '-' or %subst(stamp: 8: 1)  <> '-' or
+     %subst(stamp: 11: 1) <> '-' or %subst(stamp: 14: 1) <> '.' or
+     %subst(stamp: 17: 1) <> '.';
+    return false;
+  endif;
+
+  if %check('0123456789': %subst(stamp: 1: 4))  <> 0 or
+     %check('0123456789': %subst(stamp: 6: 2))  <> 0 or
+     %check('0123456789': %subst(stamp: 9: 2))  <> 0 or
+     %check('0123456789': %subst(stamp: 12: 2)) <> 0 or
+     %check('0123456789': %subst(stamp: 15: 2)) <> 0 or
+     %check('0123456789': %subst(stamp: 18: 2)) <> 0;
+    return false;
+  endif;
+
+  return true;
 
 end-proc;
 
@@ -500,34 +571,195 @@ end-proc;
 
 //==============================================================================
 // Log file location
+//
+// MEASURED and IMPLEMENTED 19 September 2026 (docs/parity.md, "The log file
+// naming"): SCLOG_path used to COMPUTE a deterministic, static path. That job
+// now belongs to SCLOG_new_path - a fresh, timestamped path for a service
+// being started right now, one call per start. SCLOG_path keeps its name and
+// signature but is redefined to SCAN the log directory for the greatest
+// (i.e. newest) existing filename matching '*.<short_name>.log', or return ''
+// if none exists. The two tests below tested the OLD SCLOG_path and are
+// updated to call SCLOG_new_path, which is the procedure that now does what
+// they were checking; the tests further down exercise the redefined
+// SCLOG_path on its own terms.
 //==============================================================================
 
 dcl-proc test_log_path_default export;
 
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  dir  like(STMF_t);
+  dcl-s  path like(STMF_t);
+  dcl-s  tail like(STMF_t);
 
   assert(load_def('logdefault.yaml':
     'start_cmd: /usr/bin/x' + LF +
     'check_alive: 8080' + LF: def): 'load');
 
-  assert((%scan('.sc/logs': SCLOG_dir(def)) > 0):
-         'defaults to the home log directory');
-  assert((%scan('logdefault.log': SCLOG_path(def)) > 0):
-         'named after the service');
+  dir  = SCLOG_dir(def);
+  assert((%scan('.sc/logs': dir) > 0): 'defaults to the home log directory');
+
+  path = SCLOG_new_path(def);
+  assert((%subst(path: 1: %len(%trim(dir)) + 1) = %trim(dir) + '/'):
+         'the fresh path is inside the log directory');
+
+  tail = %subst(path: %len(%trim(dir)) + 2);
+  assert(pt_stamp_shape_ok(%subst(tail: 1: 19)):
+         'MEASURED 19 September 2026 - a fresh path carries a 19-character ' +
+         'YYYY-MM-DD-HH.MM.SS stamp, not the old static name alone: "' +
+         %trim(tail) + '"');
+  aEqualV('.': %subst(tail: 20: 1): 'a dot separates the stamp from the name');
+  aEqualV('logdefault.log': %subst(tail: 21): 'named after the service');
 
 end-proc;
 
 dcl-proc test_log_path_explicit export;
 
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  dir  like(STMF_t);
+  dcl-s  path like(STMF_t);
+  dcl-s  tail like(STMF_t);
 
   assert(load_def('logexplicit.yaml':
     'start_cmd: /usr/bin/x' + LF +
     'check_alive: 8080' + LF +
     'log_dir: /tmp/rmsc-logs' + LF: def): 'load');
 
-  aEqualV('/tmp/rmsc-logs': SCLOG_dir(def): 'log_dir wins');
-  aEqualV('/tmp/rmsc-logs/logexplicit.log': SCLOG_path(def): 'full path');
+  dir = SCLOG_dir(def);
+  aEqualV('/tmp/rmsc-logs': dir: 'log_dir wins');
+
+  path = SCLOG_new_path(def);
+  assert((%subst(path: 1: %len(%trim(dir)) + 1) = %trim(dir) + '/'):
+         'the fresh path is inside the explicit log_dir');
+
+  tail = %subst(path: %len(%trim(dir)) + 2);
+  assert(pt_stamp_shape_ok(%subst(tail: 1: 19)):
+         'MEASURED 19 September 2026 - the 19-character stamp shape holds ' +
+         'under an explicit log_dir too: "' + %trim(tail) + '"');
+  aEqualV('.': %subst(tail: 20: 1): 'stamp then dot then name');
+  aEqualV('logexplicit.log': %subst(tail: 21): 'full name, after the stamp');
+
+end-proc;
+
+//==============================================================================
+// SCLOG_path returns '' when nothing has been staged yet
+//
+// The OLD SCLOG_path computed a path deterministically and could never return
+// an empty string - which is exactly why the two tests above, unchanged,
+// could never have exercised this. The redefined SCLOG_path scans for an
+// EXISTING file, so on a freshly loaded definition whose log directory is
+// real but empty, it must find nothing at all.
+//==============================================================================
+
+dcl-proc test_log_path_empty_when_nothing_staged export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  dir like(STMF_t);
+
+  dir = '/tmp/rmsc-sclog-empty-' + %trim(psds.current_user);
+  IFS_crtdir(dir);
+
+  assert(load_def('lognothing.yaml':
+    'start_cmd: /usr/bin/x' + LF +
+    'check_alive: 8080' + LF +
+    'log_dir: ' + %trim(dir) + LF: def): 'load');
+
+  aEqualV('': SCLOG_path(def):
+          'nothing on disk yet - SCLOG_path must find no file, not invent one');
+
+  IFS_dltdir(dir);
+
+end-proc;
+
+//==============================================================================
+// SCLOG_path returns the NEWEST of several staged log files, not merely one
+//
+// MEASURED 19 September 2026, live: stopping and restarting the same service
+// leaves TWO files on disk, and loginfo reports the newer of the two by
+// SCANNING, not by remembering anything from the start. This is the "must
+// disagree" case CLAUDE.md asks for: a fix that returned the FIRST match, an
+// arbitrary match, or the OLDEST match, would all still pass a single-file
+// test - only a fixture with two files whose right answers differ can catch
+// it, and that is what the two filenames staged here are for.
+//
+// The fixed-width stamp sorts lexicographically by time (docs/parity.md), so
+// no real clock or file mtime is needed - two literal, clearly-ordered stamps
+// are staged directly, which is more deterministic than racing the clock.
+//==============================================================================
+
+dcl-proc test_log_path_returns_newest_staged export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  dir   like(STMF_t);
+  dcl-s  older like(STMF_t);
+  dcl-s  newer like(STMF_t);
+
+  dir = '/tmp/rmsc-sclog-newest-' + %trim(psds.current_user);
+  IFS_crtdir(dir);
+
+  assert(load_def('lognewest.yaml':
+    'start_cmd: /usr/bin/x' + LF +
+    'check_alive: 8080' + LF +
+    'log_dir: ' + %trim(dir) + LF: def): 'load');
+
+  older = %trim(dir) + '/2020-01-01-00.00.00.lognewest.log';
+  newer = %trim(dir) + '/2099-12-31-23.59.59.lognewest.log';
+  pt_stage_log(older);
+  pt_stage_log(newer);
+
+  aEqualV(newer: SCLOG_path(def):
+          'the lexicographically GREATEST matching name is the newest one, ' +
+          'and must win over the older file staged beside it');
+
+  IFS_remove_file(older);
+  IFS_remove_file(newer);
+  IFS_dltdir(dir);
+
+end-proc;
+
+//==============================================================================
+// SCLOG_path matches the EXACT short name, not any name ending with it
+//
+// A short name that is a SUFFIX of another service's short name is the
+// control case CLAUDE.md's rule calls for. The pattern is
+// '*.<short_name>.log' - dot, name, dot, log - and a substring-based match (or
+// one that only checks the filename ENDS WITH short_name + '.log', without
+// also requiring the character before it to be a dot) would let 'svc' pick up
+// a file staged for 'myservice_svc', since "myservice_svc.log" ends with
+// "svc.log" as plain text. This pins the dot.
+//==============================================================================
+
+dcl-proc test_log_path_does_not_match_a_longer_suffix export;
+
+  dcl-ds def_short likeds(SCDEF_t) inz(*likeds);
+  dcl-ds def_long  likeds(SCDEF_t) inz(*likeds);
+  dcl-s  dir       like(STMF_t);
+  dcl-s  long_file like(STMF_t);
+
+  dir = '/tmp/rmsc-sclog-suffix-' + %trim(psds.current_user);
+  IFS_crtdir(dir);
+
+  assert(load_def('svc.yaml':
+    'start_cmd: /usr/bin/x' + LF +
+    'check_alive: 8080' + LF +
+    'log_dir: ' + %trim(dir) + LF: def_short): 'load short');
+
+  assert(load_def('myservice_svc.yaml':
+    'start_cmd: /usr/bin/x' + LF +
+    'check_alive: 8081' + LF +
+    'log_dir: ' + %trim(dir) + LF: def_long): 'load long');
+
+  long_file = %trim(dir) + '/2026-01-01-00.00.00.myservice_svc.log';
+  pt_stage_log(long_file);
+
+  aEqualV('': SCLOG_path(def_short):
+          'a file staged for myservice_svc must not answer for svc, even ' +
+          'though the filename ends with the text "svc.log"');
+  aEqualV(long_file: SCLOG_path(def_long):
+          'control: the same file DOES answer for its own service - proving ' +
+          'the empty result above is the match rule, not a broken fixture');
+
+  IFS_remove_file(long_file);
+  IFS_dltdir(dir);
 
 end-proc;
 

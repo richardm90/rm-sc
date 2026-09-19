@@ -142,14 +142,16 @@ export QIBM_MULTI_THREADED=Y
 # RECLASSIFY and fail the run, which is the discipline working correctly on a
 # stale entry.
 #
-# WHAT WILL CHANGE THAT. RMSC writes ~/.sc/logs/<svc>.log where upstream
-# writes ~/.sc/logs/<timestamp>.<svc>.log, so the moment a swept service has
-# a log the two paths differ and loginfo fails here. That is the recorded
-# log-naming divergence surfacing, NOT a regression in the wording work - and
-# the failure will look like a formatting defect, which is why this is
-# written down before it happens. If it fires, the question is whether to
-# normalise the timestamp or to settle the naming divergence; do not simply
-# put loginfo back on a list.
+# WHAT WOULD HAVE CHANGED THAT, and did not: this paragraph used to warn that
+# RMSC wrote ~/.sc/logs/<svc>.log where upstream wrote
+# ~/.sc/logs/<timestamp>.<svc>.log, so the moment a swept service had a log
+# the two paths would differ and loginfo would fail here, looking like a
+# formatting defect rather than the recorded log-naming divergence surfacing.
+# RESOLVED 19 September 2026 (docs/parity.md, "The log file naming"): RMSC
+# now writes the same ~/.sc/logs/<timestamp>.<svc>.log upstream does, found by
+# the same directory scan, so a swept service with a real log file no longer
+# has anything to disagree about here. Left standing as history rather than
+# deleted, the way this project's other corrected predictions are.
 DIFF_OPS="check info file loginfo jobinfo scrunattrs perfinfo"
 
 # Verification step 8 requires the sweep to include "two system-group services".

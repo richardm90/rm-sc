@@ -28,7 +28,20 @@ dcl-pr SCLOG_dir like(STMF_t);
 end-pr;
 
 ///
-// The log file for a service.
+// A fresh, timestamped path for a service being started now. Compute once
+// per start and thread the result through - a second call for the same
+// instance names a different file. See SCLOG.RPGLE for the exact format.
+///
+
+dcl-pr SCLOG_new_path like(STMF_t);
+  def likeds(SCDEF_t) const;
+end-pr;
+
+///
+// The MOST RECENT existing log file for a service, or '' if none. A service
+// started more than once has one timestamped file per start; this finds the
+// greatest matching name, which is the newest. Does not say whether the
+// service that wrote it is still running - see SCEXEC_loginfo for that.
 ///
 
 dcl-pr SCLOG_path like(STMF_t);

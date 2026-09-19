@@ -141,4 +141,8 @@ STRPGMEXP PGMLVL(*CURRENT) SIGNATURE('RMSC 0.4.0')
   EXPORT SYMBOL(SCOUT_no_job_info)
   /* A stop_cmd that did not bring the service down - see SCOUT_D. */
   EXPORT SYMBOL(SCOUT_stop_retry)
+  /* A fresh, timestamped log path for a service being started - see SCLOG_D.
+     SCLOG_path itself is unchanged in signature; only its meaning moved,
+     from the one deterministic file to the most recent one on disk. */
+  EXPORT SYMBOL(SCLOG_new_path)
 ENDPGMEXP
