@@ -398,15 +398,29 @@ usage errors on the same delivery path. All 33 cases in the harness pass; the fi
 no regression.
 
 **Short-versus-friendly naming.** Upstream's progress line uses a service's **short** name; its
-status and error lines use the **friendly** name. RMSC uses the short name throughout. Already
-measured and closed for the narration family specifically (above) and for the per-member group
-error (`tools/error-delivery-test.sh:902`); what was still open was applying the same rule
-everywhere else it appears — the `SCEXEC` failure texts among them.
+status and error lines use the **friendly** name. **DECIDED 18 September 2026: apply it
+everywhere, matching upstream.**
 
-**DECIDED 18 September 2026: apply it everywhere, matching upstream.** Progress lines keep the
-short name; status and error lines switch to the friendly name. The widest-touching item in this
-round of decisions — many call sites print one or the other today without distinguishing which
-kind of line they are. Not yet implemented.
+**RE-CHECKED 19 September 2026, and it is narrower than it looked.** Re-measuring live turned up
+two things:
+
+- **The narration family and the per-member group error already follow the rule correctly** —
+  confirmed again live, byte for byte, including the dependency-wrapped form
+  (`SCOUT_err_timeout`/`SCOUT_err_dep_failed`). Nothing to change here; this half was already done
+  on 3 September.
+- **What looked like the remaining case — `SCEXEC_start`'s `'Could not start ' + short_name + ':
+  ' + reason` (line ~471) — is not reachable the way it was assumed to be.** A `start_cmd` that
+  does not exist is not a launch failure upstream-side; it is an ordinary timeout, which already
+  goes through the correct, friendly-named path. The branch this text belongs to only fires when
+  `SCLAUNCH_start` itself fails at the PASE level, a rare condition with no cheap, safe way to
+  reproduce live. Left as found, pending a way to trigger it for a proper red-then-green cycle.
+- **The other three candidate texts turned out to sit downstream of a real behavioural gap, not a
+  naming one** — see "`stop` does not escalate when its own `stop_cmd` fails", above. Rewording
+  them now would be polishing text on a code path this project may replace.
+
+So: **the decided rule is fully applied everywhere it is currently measurable.** What remains is
+one rare, hard-to-trigger case and three texts blocked on the escalation decision above, not a
+wide sweep of call sites.
 
 **`info`** — eight measured differences, listed in full in `docs/messages.md`, **all fixed 18
 September 2026.** The two that were shape rather than spelling: upstream prints `Depends on the
@@ -664,6 +678,52 @@ The cost of closing it is that these are new lines on **stdout**, which the cons
 column position. They do not yield three fields, so a parser that drops malformed rows is
 unaffected - but that is a property of the consumer, not of the output, and is worth confirming
 before the lines are added.
+
+## Beyond the operations — `stop` does not escalate when its own `stop_cmd` fails
+
+**Found 19 September 2026, by accident** — while trying to measure the exact wording of three
+`stop`-path error texts recorded as `unmeasured` (see `docs/messages.md`: `Stop command failed for
+<short>: <reason>`, `<short> did not stop within <n> seconds`, `<short> did not stop, even
+immediately`). What was measured is not a wording gap. It is a real difference in **behaviour**,
+and it is bigger than the three rows it was standing in for.
+
+**A service with its own `stop_cmd`, where that command does not actually bring the service
+down.** Measured with a real listener (`tools/gate-listen.py`, self-bounded so nothing outlives
+the test regardless of outcome) and a `stop_cmd` that exits non-zero without touching the job:
+
+```
+upstream:  Performing operation 'STOP' on service 'zzsf_cmdfail'
+           WARNING: Timed out waiting for service 'Zulu Stop Fail CmdFail' to stop. Will try harder
+           Stopping via endjob
+           Service 'Zulu Stop Fail CmdFail' successfully stopped
+           exit 0
+
+RMSC:      Performing operation 'STOP' on service 'zzsf_cmdfail'
+           ERROR: Stop command failed for zzsf_cmdfail: Stop command failed with 1:
+           exit 253, service still running
+```
+
+**Upstream does not treat a failing `stop_cmd` as final.** It warns, escalates to `ENDJOB`
+regardless of whether a custom stop command was configured, and succeeds. RMSC gives up
+immediately and leaves the service running.
+
+**This contradicts a premise already written into `stop_one`** (`QRPGLESRC/SCEXEC.RPGLE`, around
+the comment beginning "Escalate only where upstream does"): *"a service that supplied its own stop
+command has said how it wants to be stopped, and overriding that could cut short whatever the
+command was doing."* That reasoning is not what was measured. Upstream overrides it.
+
+**Undecided, and not part of the 18/19 September decision round** — this was found while chasing
+item 4 (short-versus-friendly naming) and is a different, larger question: whether `stop` should
+change its escalation behaviour to match, not merely its wording. Fixing only the text of the
+three `unmeasured` rows above on top of the current behaviour would be polishing a message this
+project may be about to replace.
+
+**The two remaining scenarios behind those three rows were not measured, on purpose.** The
+"did not stop within `<n>` seconds" and "did not stop, even immediately" texts belong to the
+*no-`stop_cmd`* path (`ENDJOB` used directly, with its own `*CNTRLD`-then-`*IMMED` escalation).
+Measuring the second of those live means staging a job that resists `ENDJOB OPTION(*IMMED)` on a
+real box — a materially different risk from anything else measured today — and was deliberately
+not attempted without a decision on scope and safety first.
 
 ## Beyond the operations — specifiers
 
@@ -956,12 +1016,14 @@ anything that ran, which is the argument for the fixture pack rather than a foot
    `INTENTIONAL` to per-recorded-difference rather than per-operation — see "The gate" above —
    since several operations carry both a settled part and one still open.
 
-Also decided 18 September 2026: the `sc: ` stderr prefix, **dropped 19 September 2026**. Still not
-yet implemented: apply short-versus-friendly naming everywhere upstream does, not just in
-narration; stage a dedicated verification fixture under `CLAUDE`'s account rather than Richard's.
-`SC_OPTIONS`/`.scrc` was considered and deliberately left undecided pending further investigation
-— see "Beyond the
-operations — inputs RMSC does not read" above.
+Also decided 18 September 2026: the `sc: ` stderr prefix, **dropped 19 September 2026**.
+Short-versus-friendly naming, **re-checked 19 September 2026: already applied everywhere it is
+currently measurable** — see "The two whole-surface differences" above; a rare `SCEXEC` case and
+three texts blocked on the new `stop`-escalation finding remain. Still not yet implemented: stage
+a dedicated verification fixture under `CLAUDE`'s account rather than Richard's, and decide
+whether `stop` should escalate to `ENDJOB` when its own `stop_cmd` fails (new, 19 September 2026,
+see above). `SC_OPTIONS`/`.scrc` was considered and deliberately left undecided pending further
+investigation — see "Beyond the operations — inputs RMSC does not read" above.
 
 Separately, and not part of step 8: the gate should compare `list -a` across all services, to
 hold Verification step 9's discovery parity. The two implementations agree on it today, but the
