@@ -31,7 +31,7 @@
 #
 # Stage names are the lower-case words below: suites, narration, api-silence,
 # error-delivery, load-warning, loginfo, jobinfo, adhoc-name, sampletime,
-# colour, gate, fixture-pack.
+# colour, gate, gate-granularity, fixture-pack.
 #
 # A PARTIAL RUN IS NOT A VERIFICATION. The stage list exists for the edit-run
 # loop, not for deciding something is finished. Before a commit, run the lot.
@@ -72,7 +72,7 @@ want() {
 
 # Reject a stage name that matches nothing, rather than running a subset the
 # caller did not ask for and reporting it as a pass.
-ALL="suites narration api-silence error-delivery load-warning loginfo jobinfo adhoc-name sampletime colour gate fixture-pack"
+ALL="suites narration api-silence error-delivery load-warning loginfo jobinfo adhoc-name sampletime colour gate gate-granularity fixture-pack"
 for w in $WANTED; do
   case " $ALL " in
     *" $w "*) ;;
@@ -232,6 +232,16 @@ harness adhoc-name      tools/adhoc-name-test.sh     8
 harness sampletime      tools/sampletime-test.sh     6
 harness colour          tools/colour-test.sh         3
 harness gate            tools/fidelity-gate.sh       4
+# NEEDS NOTHING LIVE - no BASELINE, no service, no real sc or scr. It tests the
+# gate's OWN classifier against synthetic stand-ins, so it belongs beside gate
+# rather than inside fixture-pack, which tests the implementations. Seconds,
+# not minutes: nothing here starts a JVM.
+#
+# 7, not fewer: four report lines, a blank, the pass/failed summary and the
+# artefacts path. A failing case also prints the gate's own dump beneath its
+# report line, which this tail does not reach - diagnosed by running the
+# harness directly, the same trade-off tools/loginfo-test.sh makes.
+harness gate-granularity tools/gate-granularity-test.sh 7
 # 12, not 6. The pack's ordering note is a nine-line heredoc that prints only
 # when order_only > 0, and it pushed the summary counts out of a six-line tail -
 # so the stage that now decides the run could have its numbers truncated away.

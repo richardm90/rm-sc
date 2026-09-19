@@ -170,11 +170,12 @@ STEP8_SYSTEM="${STEP8_SYSTEM:-system_admin1 system_telnet}"
 #   perfinfo    TWO differences, and BOTH are now settled - it sat in
 #               UNDECIDED until 9 September 2026 because only one was.
 #
-#               Three lines per job: the thread-resources-affinity pair and
-#               the resources affinity group. Upstream scrapes DSPJOB
-#               OPTION(*RUNA) for them; RMSC reads QUSRJOBI, which does not
-#               carry them (IBM's reference for the API does not contain the
-#               word "affinity"). Richard's decision, 8 September 2026.
+#               Four lines per job: the thread-resources-affinity line and its
+#               two indented sub-fields (Group, Level), and the resources
+#               affinity group. Upstream scrapes DSPJOB OPTION(*RUNA) for
+#               them; RMSC reads QUSRJOBI, which does not carry them (IBM's
+#               reference for the API does not contain the word "affinity").
+#               Richard's decision, 8 September 2026.
 #
 #               The order of the job blocks. Upstream's is Java HashSet
 #               iteration order over the job-name strings - measured, by
@@ -187,10 +188,14 @@ STEP8_SYSTEM="${STEP8_SYSTEM:-system_admin1 system_telnet}"
 #
 #               docs/parity.md carries both, with the evidence.
 #
-#               STILL per-operation, not per-line: this list accepts any
-#               perfinfo difference, not only those two. A THIRD would pass
-#               unnoticed. That is the open granularity item on the fixture
-#               pack, and this is one of the entries it should cover.
+#               DECIDED 18 September 2026, IMPLEMENTED 19 September 2026:
+#               perfinfo no longer rides on the operation's own INTENTIONAL
+#               membership alone. perfinfo_residual(), below, strips exactly
+#               these two recorded shapes and nothing else; if anything is
+#               still standing afterwards this operation is reported as a
+#               REGRESSION regardless of being listed here. See
+#               docs/parity.md, "The gate", the paragraph beginning
+#               "DECIDED 18 September 2026, IMPLEMENTED 19 September 2026".
 INTENTIONAL="file scrunattrs perfinfo"
 
 # Divergences the plan does NOT settle either way. These need a decision before
@@ -237,6 +242,77 @@ normalise() {
     -e 's#^([[:space:]]*(Function|Job Status): ).*#\1VALUE#'
 }
 
+# perfinfo_residual JAVA_FILE RMSC_FILE - verification step 8, gate granularity
+# (docs/parity.md, "The gate", "IMPLEMENTED 19 September 2026").
+#
+# perfinfo carries exactly two settled differences and nothing else is
+# entitled to ride along under them:
+#
+#   - four lines per job that no QUSRJOBI field carries, present in
+#     upstream's output only: the THDRSCAFN line (confirmed, live, to carry
+#     a trailing space and no value - `cat -A` against a real two-job
+#     service, 19 September 2026) and its two indented sub-fields (Group,
+#     Level), and RSCAFNGRP. Richard's decision, 8 September 2026 - see
+#     docs/messages.md, "perfinfo", "Settled 8 September 2026".
+#   - the ORDER of the per-job blocks. Upstream's is Java HashSet iteration
+#     over job-name strings - a function of the job NUMBERS, which
+#     reshuffles on every restart - RMSC sorts ascending by job number
+#     instead. There is no correct order to reproduce, only whether the
+#     same blocks are present - see docs/parity.md, "The job order -
+#     SETTLED 9 September 2026".
+#
+# THE ORDER LICENCE IS FOR JOB BLOCKS, NOT FOR EVERY LINE. An earlier version
+# of this function stripped the affinity lines and then `sort`ed the two
+# WHOLE files, which forgives far more than was ever decided: it cannot tell
+# a re-ordering of the job blocks from the two jobs' figures being swapped
+# between them (the exact defect docs/parity.md's "The job order" section
+# describes as having actually happened - "upstream's Java figures sit on
+# the first job and RMSC's on the second"), or from the lines WITHIN one
+# block being printed in the wrong order (docs/parity.md says plainly:
+# "Reordering these lines is a parity defect even when every value is
+# present"). A whole-file sort cannot fail on either, because both leave the
+# same bag of lines standing. Caught only by a peer review, 19 September
+# 2026, before this ever reached a real perfinfo defect.
+#
+# perfinfo_canon (below) sorts the per-job PARAGRAPHS as single, indivisible
+# blocks of text - upstream's own blank-line-delimited paragraph shape, which
+# `awk`'s paragraph mode (RS="") already speaks - so a block's internal line
+# order and a block's association with ITS job survive intact, and only the
+# order the blocks appear in the file is forgiven.
+perfinfo_canon() {
+  awk -v RS='' -v ORS='\n\n' '
+    { paras[NR] = $0; isjob[NR] = ($0 ~ /^Job: /) }
+    END {
+      m = 0
+      for (i = 1; i <= NR; i++) if (isjob[i]) { m++; jobs[m] = paras[i] }
+      # insertion sort - a service carries a handful of jobs, never enough
+      # for the algorithm to matter
+      for (a = 2; a <= m; a++) {
+        key = jobs[a]; b = a - 1
+        while (b >= 1 && jobs[b] > key) { jobs[b+1] = jobs[b]; b-- }
+        jobs[b+1] = key
+      }
+      k = 0
+      for (i = 1; i <= NR; i++) {
+        if (isjob[i]) { k++; print jobs[k] } else print paras[i]
+      }
+    }'
+}
+
+PERFINFO_AFFINITY_LINES='^ {4}Thread resources affinity \(THDRSCAFN\): ?$|^ {6}(Group|Level): |^ {4}Resources affinity group \(RSCAFNGRP\): '
+
+# Prints the residual diff, empty when there is none. The caller checks
+# whether the OUTPUT is empty, not `diff`'s exit status - `diff` exits
+# non-zero on a real residual, but that is indistinguishable from a caller
+# passing it a bad path, and this must never mistake "found nothing" for
+# "looked at nothing". Process substitution rather than a temp file: nothing
+# here needs to survive the comparison, so there is nothing to leak on a
+# kill and nothing to leave outside $WORK's own cleanup.
+perfinfo_residual() {
+  local java="$1" rmsc="$2"
+  diff <(grep -vE "$PERFINFO_AFFINITY_LINES" "$java" | perfinfo_canon) <(perfinfo_canon < "$rmsc")
+}
+
 echo "== stage 1: byte-exact against captured Java fixtures"
 for op in check list groups; do
   b="$BASELINE/baseline-$op.txt"
@@ -276,13 +352,27 @@ printf '  %-12s %-11s %-8s %s\n' operation verdict differs note
 printf '  %-12s %-11s %-8s %s\n' ------------ ----------- -------- ----
 
 for op in $DIFF_OPS; do
-  op_fail=0; failed_on=""
+  op_fail=0; failed_on=""; residual_fail=0; residual_on=""
   for svc in $services; do
     "$SC"  "$op" "$svc" 2>&1 | normalise > "$WORK/$op.$svc.java"
     "$SCR" "$op" "$svc" 2>&1 | normalise > "$WORK/$op.$svc.rmsc"
     cmp -s "$WORK/$op.$svc.java" "$WORK/$op.$svc.rmsc" || {
       op_fail=$((op_fail+1)); failed_on="$failed_on $svc"
       diff "$WORK/$op.$svc.java" "$WORK/$op.$svc.rmsc" > "$WORK/$op.$svc.diff"
+      # Gate granularity (verification step 8, docs/parity.md "DECIDED 18
+      # September 2026"). perfinfo is the one operation on INTENTIONAL that
+      # carries a specific, recorded shape rather than a whole-surface
+      # difference (file and scrunattrs are whole-surface: nothing prints
+      # under the same verb that is even trying to agree). Whatever is left
+      # after perfinfo_residual has stripped that shape is uncatalogued and
+      # must not hide inside "by design" - see the classification below.
+      if [ "$op" = perfinfo ]; then
+        residue="$(perfinfo_residual "$WORK/$op.$svc.java" "$WORK/$op.$svc.rmsc")"
+        if [ -n "$residue" ]; then
+          residual_fail=$((residual_fail+1)); residual_on="$residual_on $svc"
+          printf '%s\n' "$residue" > "$WORK/$op.$svc.residual"
+        fi
+      fi
     }
   done
 
@@ -299,6 +389,12 @@ for op in $DIFF_OPS; do
                     "now matches - remove from $klass list"
              unexpected=$((unexpected+1)) ;;
     esac
+  elif [ "$klass" = intentional ] && [ "$residual_fail" -gt 0 ]; then
+    # The operation is sanctioned, but not this much of it: something beyond
+    # the recorded shape differs too, on real output, right now.
+    printf '  %-12s %-11s %-8s %s\n' "$op" "REGRESSION" "$ratio" \
+           "recorded differences don't cover it - residual on:$residual_on"
+    unexpected=$((unexpected+1))
   else
     case "$klass" in
       intentional) printf '  %-12s %-11s %-8s %s\n' "$op" "by design" "$ratio" \

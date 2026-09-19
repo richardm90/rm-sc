@@ -565,10 +565,13 @@ never authorised printing less.
 #### Settled 8 September 2026 — the mechanism, and three corrections to the above
 
 **Upstream scrapes `DSPJOB OPTION(*RUNA)`.** `docs/parity.md` carries the evidence and Richard's
-decision that RMSC will not. The consequence for this section is that the three affinity lines —
-`Thread resources affinity (THDRSCAFN)` with `Group:` and `Level:`, and
-`Resources affinity group (RSCAFNGRP)` — are **not reachable from QUSRJOBI** and RMSC omits them.
-Sixty-three lines where upstream prints sixty-six, recorded as a deliberate departure.
+decision that RMSC will not. The consequence for this section is that the four affinity lines —
+`Thread resources affinity (THDRSCAFN)` and its two indented sub-fields, `Group:` and `Level:`,
+and `Resources affinity group (RSCAFNGRP)` — are **not reachable from QUSRJOBI** and RMSC omits
+them. Sixty-two lines where upstream prints sixty-six, recorded as a deliberate departure.
+Corrected 19 September 2026: this used to say three lines and sixty-three, undercounting
+`THDRSCAFN`'s own line alongside its two sub-fields; `docs/parity.md`'s two-job measurement
+(sixty-six against fifty-eight, i.e. four per job) was already right.
 
 **Correction: this document's claim that upstream "thousands-separates the Java figures" is
 wrong**, and the truth is finer. The split is per FIELD, not per type. Measured on a live JVM
@@ -675,8 +678,8 @@ Reproduce it exactly. Every line of it is somebody's expectation.
 Ordered by size rather than by importance:
 
 1. ~~**`perfinfo`**~~ — **done, 8 September 2026.** It was a query change, as this said. RMSC now
-   reads the attributes from `QUSRJOBI` and the sampled figures from SQL, and prints sixty-three
-   of upstream's sixty-six lines; the three it omits are the affinity values, which no API
+   reads the attributes from `QUSRJOBI` and the sampled figures from SQL, and prints sixty-two
+   of upstream's sixty-six lines per job; the four it omits are the affinity values, which no API
    carries. See `docs/parity.md`.
 2. **The usage block** — now measured verbatim, 33 lines, wanted by four rows and by D3. Large to
    type, trivial to get right.

@@ -1095,7 +1095,7 @@ end-proc;
 // Upstream builds this block by scraping DSPJOB OPTION(*RUNA) and printing
 // whatever matched, then appending a set of sampled figures sorted by label.
 // RMSC reads the same values from QUSRJOBI and SQL - docs/parity.md carries
-// the decision and the three affinity lines it costs.
+// the decision and the four affinity lines it costs.
 //
 // The ORDER below is not a choice. Upstream's sampled figures come out of a
 // sorted map, so they appear alphabetically by label, and the arrow on
@@ -1134,8 +1134,8 @@ dcl-proc field_line;
   //
   // Every line RMSC prints here carries a value. Upstream has one that does
   // not - `Thread resources affinity (THDRSCAFN): ` with a trailing space and
-  // nothing after it - but that is one of the three lines RMSC omits, so the
-  // empty-value shape never arises. If those three ever become reachable,
+  // nothing after it - but that is one of the four lines RMSC omits, so the
+  // empty-value shape never arises. If those four ever become reachable,
   // this is where the trailing space has to come back.
   return '    ' + %trimr(label) + ': ' + %trimr(value);
 

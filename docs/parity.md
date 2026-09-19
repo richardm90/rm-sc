@@ -65,7 +65,7 @@ that step asks for.
 | `info` | live differential | **undecided** (one item open, not this) | all eight measured differences matched 18 September 2026 — the gate's remaining `info` difference is the separate, pre-existing relative-`dir:` question, not one of the eight |
 | `jobinfo` | live differential | **pass** | matched 10 September 2026 — header, indent, not-running text, per-command blank line and colour |
 | `loginfo` | live differential | **pass** (one item open, not this) | matched 9 September 2026, stopped-service scoping matched 18 September 2026, log-filename scheme matched 19 September 2026 — see below |
-| `perfinfo` | live differential | **by design** | two differences, both settled: three affinity lines per job that no API carries, and the order of the job blocks, which upstream draws from a hash and RMSC sorts — see below |
+| `perfinfo` | live differential | **by design** | two differences, both settled: four affinity lines per job that no API carries, and the order of the job blocks, which upstream draws from a hash and RMSC sorts — see below. The gate checks for exactly these two and nothing else, per-recorded-difference since 19 September 2026 — see "The gate" |
 | `start` | not gated | — | state-changing; `SCLIFE.TEST` covers the lifecycle against a service it creates and removes |
 | `stop` | not gated | — | as above |
 | `kill` | not gated | — | as above |
@@ -113,17 +113,47 @@ Verdicts are `by design` (sanctioned below), `undecided` (listed below, awaiting
 `PASS`, or `REGRESSION`. The gate fails when something regresses **and** when something starts
 matching without the list being updated, so the classification cannot quietly go stale.
 
-**The verdict is classified per operation, not per recorded difference — and that is a gap.**
-`perfinfo` is the case that surfaced it: it carries two settled differences (the affinity lines
-and the job-block order, below), and a THIRD, unrelated difference in that operation would pass
-the gate silently, because `INTENTIONAL` sanctions the operation as a whole rather than the
-specific rows recorded here. `perfinfo` itself is deliberately kept out of the gate's
-`by design`/`INTENTIONAL` list for exactly this reason — see the job-order discussion below.
+**The verdict used to be classified per operation, not per recorded difference — and that was a
+gap.** `perfinfo` is the case that surfaced it: it carries two settled differences (the affinity
+lines and the job-block order, below), and a THIRD, unrelated difference in that operation would
+have passed the gate silently, because `INTENTIONAL` sanctioned the operation as a whole rather
+than the specific rows recorded here.
 
-**DECIDED 18 September 2026: tighten `INTENTIONAL` to per-recorded-difference.** The gate should
-match an observed difference against the specific ones catalogued in `docs/messages.md`, and fail
-on anything else in that operation rather than passing the operation wholesale. Gate-infrastructure
-work, not yet implemented.
+**DECIDED 18 September 2026, IMPLEMENTED 19 September 2026: `INTENTIONAL` is tightened to
+per-recorded-difference for `perfinfo`.** `tools/fidelity-gate.sh` now strips exactly the two
+catalogued shapes — the four affinity lines (present in upstream's output only) and the per-job
+block ORDER — from a failing comparison before deciding the verdict. Whatever is left after that
+is a residual: uncatalogued, and reported as `REGRESSION` even though `perfinfo` stays on
+`INTENTIONAL`, rather than riding along under it.
+
+**The order licence is for job BLOCKS, not for every line.** A first version of this stripped the
+affinity lines and then sorted the two WHOLE files, which forgives far more than was ever decided
+— it cannot tell a re-ordering of the job blocks from the two jobs' figures being swapped between
+them (exactly the defect "The job order" below records as having actually happened: "upstream's
+Java figures sit on the first job and RMSC's on the second"), or from the lines WITHIN one block
+being printed in the wrong order (which this document already calls a defect in its own right —
+see "The order of the sampled block is alphabetical by label" above). A peer review caught this
+before it reached a real `perfinfo` defect. The fix treats each `Job:` paragraph — upstream's own
+blank-line-delimited block — as one indivisible unit and sorts only THOSE, so a block's internal
+line order and its association with its own job survive; only the order the blocks appear in is
+forgiven.
+
+`tools/gate-granularity-test.sh` (new) proves this against synthetic `sc`/`scr` stand-ins with
+three scenarios sharing one scaffold — the recorded shape alone (`by design`), the recorded shape
+plus one value nothing catalogues (`REGRESSION`), and the recorded shape with two jobs' real
+values swapped between them and nothing else changed (`REGRESSION` — the case a whole-file sort
+would have missed). Confirmed red against the pre-fix classifier (which reported `by design` for
+all three) and green after. `file` and `scrunattrs` did not need the same treatment: both are
+whole-surface differences by the plan's own words — the entirety of what each verb prints is a
+different thing, not a mostly matching operation with a few catalogued exceptions — so there is
+nothing more specific than the operation itself to check against.
+
+**A new way for the gate to be red that is not a defect.** `perfinfo` can now fail the whole run
+where it previously could not: if the job SET itself differs between the `sc` and `scr`
+invocations — a job starting or ending in the gap between them, on a real, live service — that
+shows up as a residual and reports `REGRESSION`, because job numbers are normalised but a job's
+presence is not. This is a real race, not a defect in either implementation; if it is ever seen,
+recognise it as this rather than debugging `perfinfo` itself.
 
 **Which account verification runs under is also unsettled, separately from the differences
 themselves.** `list`, `check` and `groups` read `$HOME/.sc/services`. `CLAUDE`'s copy is empty;
@@ -548,6 +578,11 @@ with no attributes — the exact failure shape this project keeps finding and re
 | `Thread resources affinity (THDRSCAFN):` → `Level:` | how strictly that placement is honoured — a preference (`*NORMAL`) or binding (`*HIGH`) |
 | `Resources affinity group (RSCAFNGRP):` | whether the job joins a group so related jobs share processors and memory |
 
+Three attributes, but **four printed lines**: `Thread resources affinity (THDRSCAFN):` prints its
+own header line, with a trailing space and no value, before its two indented sub-fields. The gate
+(below) strips all four; `docs/messages.md`'s earlier "three lines" count under-counted that
+header line and is corrected there.
+
 All twelve `JOBI*` formats were dumped for a live job and searched for printable runs — not for
 expected names, so a different spelling would still have been found. None carries them. The
 converse could not be staged: **neither `CHGJOB` nor `SBMJOB` accepts `THDRSCAFN` or
@@ -659,16 +694,15 @@ criteria** is undefined, because the merge fills from each criterion in turn. An
 specification is *ascending job number*, not *oldest first*; those differ after the job-number
 counter wraps at 999999.
 
-**It also means `perfinfo` is not "matching except three lines".** It matches except three lines
-per job AND the order of the job blocks. The gate cannot see the difference between those two
-statements, because it classifies per operation.
+**It also means `perfinfo` is not "matching except three lines".** It matches except four lines
+per job AND the order of the job blocks.
 
-That is why `perfinfo` stays in the gate's **undecided** list rather than moving to
-*intentional*, even though the affinity half is settled. `INTENTIONAL` is the list that lets a
-run eventually report that every difference is intentional and listed, and an ordering
-difference nobody has explained must not be able to hide inside that sentence. It moves when the
-ordering is settled, not before — which was a review finding on the first version of this work,
-where it had been moved on the strength of the half that was decided.
+**Read the two paragraphs above as history; both differences are now settled and `perfinfo` is on
+`INTENTIONAL`.** The gap they describe — the gate could not see the difference between "matches
+except the four affinity lines" and "matches except the four affinity lines *and* an ordering
+nobody had explained" — is the one closed 19 September 2026 by making the gate check for the
+recorded shape specifically rather than trusting the operation's own membership. See "The gate"
+above.
 
 ## Beyond the operations — a quoted `on` in `enabled:`
 
@@ -1163,9 +1197,10 @@ anything that ran, which is the argument for the fixture pack rather than a foot
 3. Widen the gate to exercise `port:` and `job:` specifiers, so the ad-hoc naming difference is
    covered by something that runs rather than by this paragraph.
 4. Remove whatever is settled from the gate's `UNDECIDED` list. It will then report step 8
-   complete, and fail if any of it silently changes afterwards. This also depends on tightening
-   `INTENTIONAL` to per-recorded-difference rather than per-operation — see "The gate" above —
-   since several operations carry both a settled part and one still open.
+   complete, and fail if any of it silently changes afterwards. **The per-recorded-difference
+   tightening this depended on is done** — see "The gate" above — for the one operation that
+   needed it, `perfinfo`. `info` is still on `UNDECIDED`, for the separate relative-`dir:`
+   question, so step 8 is not complete yet.
 
 Also decided 18 September 2026: the `sc: ` stderr prefix, **dropped 19 September 2026**.
 Short-versus-friendly naming, **re-checked 19 September 2026: already applied everywhere it is
