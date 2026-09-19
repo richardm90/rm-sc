@@ -385,16 +385,21 @@ fix landed, not anticipated in advance. `qtestsrc/SCEXEC.TEST.RPGLE` gained four
 covering `SCLOG_new_path`'s shape and `SCLOG_path`'s empty/newest-wins/exact-suffix-match
 behaviour directly, isolated from any live differential.
 
-**Not yet verified: the four new `SCEXEC.TEST.RPGLE` unit tests.** `RUCRTRPG` on this box currently
-fails with `CPF9E18: Attempt made to exceed usage limit for product 5770WDS` — a licensing/usage
-constraint on the RPGUnit test-compile path specifically (`makei build`'s own `CRTRPGMOD` calls for
-the production modules are unaffected and succeeded throughout this work), and checking or
-resetting it needs authority this account does not have (`WRKLICINF` answers `CPD0032: Not
-authorized`). The **existing, already-compiled** `RMSCT/SCEXEC` test program was run against the
-new build regardless: 76 of 78 cases pass, and the two failures are exactly `test_log_path_default`
-and `test_log_path_explicit` — the two tests the new source already rewrites to call
-`SCLOG_new_path` instead — with no other regression. Recompile and confirm all 82 cases pass once
-the licensing issue is resolved.
+**Verified 19 September 2026, after a false start.** The first `RUCRTRPG` attempt failed with
+`CPF9E18: Attempt made to exceed usage limit for product 5770WDS`, and Richard checked
+`WRKLICINF PRDID(5770WDS)`: features 5101/5102/5103 all showed a Usage Limit of `0`, which
+briefly looked like the cause. It was not — Richard confirmed the same `CPF9E18` appears in his
+own successful compiles and does not stop them, which sent the search to the actual compile
+listing rather than the licensing screen. The real fault was `RNF0273: Compiler not able to open
+the /COPY or /INCLUDE file` on every one of RMSC's own copybooks, cascading into hundreds of
+"name or indicator not defined" errors: `RUCRTRPG` was invoked with a **relative** `INCDIR`
+(`'QPROTOSRC' '/prj/rmtools'`, matching `.vscode/testing.json` and `makei build`'s own working
+`CRTRPGMOD` calls) but without first `cd`-ing into the deploy directory the way `makei build`
+does — so `QPROTOSRC` resolved against the wrong working directory. Adding `cd
+/home/CLAUDE/builds/rm-sc` before the `RUCRTRPG` call fixed it outright; `CPF9E18` still prints,
+harmlessly, exactly as Richard's own compiles show. `RMSCT/SCEXEC` now compiles clean and **all
+81 cases pass** (78 original plus 3 new — two of the four new assertions extended existing test
+procedures rather than adding new ones), 573 assertions, 0 failures.
 
 **The spooled-file section.** RMSC prints `    spooled file <name> number <n> in <job>` after the
 log line. Upstream has a spooled-file path of its own (`getSpooledFiles`), and **what it prints
