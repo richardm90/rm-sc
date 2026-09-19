@@ -180,6 +180,7 @@ dcl-proc test_port_variables export;
   dcl-ds env likeds(SCLAUNCH_ENV_t) inz(*likeds);
 
   assert(load_def('webproxy.yaml':
+    'name: webproxy' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF: def): 'load');
 
@@ -203,6 +204,7 @@ dcl-proc test_no_port_when_ambiguous export;
   dcl-s  found like(BOOLEAN_t) inz(false);
 
   assert(load_def('twoports.yaml':
+    'name: twoports' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080,8081' + LF: def): 'load');
 
@@ -231,6 +233,7 @@ dcl-proc test_no_port_for_job_criterion export;
   dcl-s  found like(BOOLEAN_t) inz(false);
 
   assert(load_def('jobonly.yaml':
+    'name: jobonly' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: WEBPROXY' + LF: def): 'load');
 
@@ -281,6 +284,7 @@ dcl-proc test_service_variables export;
   dcl-ds env likeds(SCLAUNCH_ENV_t) inz(*likeds);
 
   assert(load_def('vars.yaml':
+    'name: vars' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'environment_vars:' + LF +
@@ -305,6 +309,7 @@ dcl-proc test_blocked_variables export;
   dcl-ds env likeds(SCLAUNCH_ENV_t) inz(*likeds);
 
   assert(load_def('blocked.yaml':
+    'name: blocked' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF +
     'environment_vars:' + LF +
@@ -337,6 +342,7 @@ dcl-proc test_start_command_detaches export;
   dcl-s  cmd like(SCLAUNCH_CMD_t);
 
   assert(load_def('detach.yaml':
+    'name: detach' + LF +
     'start_cmd: /usr/bin/webproxy --serve' + LF +
     'check_alive: 8080' + LF: def): 'load');
 
@@ -363,6 +369,7 @@ dcl-proc test_start_command_working_directory export;
   dcl-s  cmd like(SCLAUNCH_CMD_t);
 
   assert(load_def('wd.yaml':
+    'name: wd' + LF +
     'start_cmd: ./webproxy' + LF +
     'check_alive: 8080' + LF +
     'dir: /QOpenSys/opt/webproxy' + LF: def): 'load');
@@ -396,6 +403,7 @@ dcl-proc test_job_name_from_service export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(load_def('web-proxy.yaml':
+    'name: web-proxy' + LF +
     'start_cmd: /usr/bin/webproxy' + LF +
     'check_alive: 8080' + LF: def): 'load');
 
@@ -409,6 +417,7 @@ dcl-proc test_job_name_truncated export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(load_def('a-very-long-service-name.yaml':
+    'name: a-very-long-service-name' + LF +
     'start_cmd: /usr/bin/x' + LF +
     'check_alive: 8080' + LF: def): 'load');
 
@@ -421,6 +430,7 @@ dcl-proc test_job_name_explicit export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(load_def('explicit.yaml':
+    'name: explicit' + LF +
     'start_cmd: /usr/bin/x' + LF +
     'check_alive: 8080' + LF +
     'sbmjob_jobname: WEBPROXY' + LF: def): 'load');
@@ -541,6 +551,7 @@ dcl-proc test_job_name_derived_from_a_long_name export;
   iEqual(100: %len(nm): 'a service name of 100 characters');
 
   assert(load_def(nm + '.yaml':
+    'name: probe' + LF +
     'start_cmd: /usr/bin/rmscjn' + LF +
     'check_alive: 8080' + LF: def):
     'no sbmjob_jobname, so the job name is derived - and a long SERVICE ' +
@@ -561,6 +572,7 @@ dcl-proc test_job_name_derived_from_the_longest_name export;
   iEqual(250: %len(nm): 'the longest base name a .yaml file can carry');
 
   assert(load_def(nm + '.yaml':
+    'name: probe' + LF +
     'start_cmd: /usr/bin/rmscjn' + LF +
     'check_alive: 8080' + LF: def):
     'the longest service name the IFS will hold still loads - it was the ' +
@@ -598,6 +610,7 @@ dcl-proc test_job_name_explicit_with_leading_blanks export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(load_def('explicitblank.yaml':
+    'name: explicitblank' + LF +
     'start_cmd: /usr/bin/x' + LF +
     'check_alive: 8080' + LF +
     'sbmjob_jobname: "  ABCDEFGH"' + LF: def):

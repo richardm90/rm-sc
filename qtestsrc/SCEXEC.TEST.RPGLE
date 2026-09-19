@@ -350,6 +350,7 @@ dcl-proc test_status_running_on_live_port export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(load_def('live.yaml':
+    'name: live' + LF +
     'start_cmd: /usr/bin/x' + LF +
     'check_alive: ' + SSH_PORT_TEXT + LF: def): 'load');
 
@@ -362,6 +363,7 @@ dcl-proc test_status_not_running_on_dead_port export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(load_def('dead.yaml':
+    'name: dead' + LF +
     'start_cmd: /usr/bin/x' + LF +
     'check_alive: ' + UNUSED_PORT_TEXT + LF: def): 'load');
 
@@ -383,6 +385,7 @@ dcl-proc test_status_partial export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(load_def('partial.yaml':
+    'name: partial' + LF +
     'start_cmd: /usr/bin/x' + LF +
     'check_alive: ' + SSH_PORT_TEXT + ',' + UNUSED_PORT_TEXT + LF: def):
     'load');
@@ -402,6 +405,7 @@ dcl-proc test_status_all_satisfied export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(load_def('allup.yaml':
+    'name: allup' + LF +
     'start_cmd: /usr/bin/x' + LF +
     'check_alive: ' + SSH_PORT_TEXT + ',QP0ZSPWP' + LF: def): 'load');
 
@@ -419,6 +423,7 @@ dcl-proc test_criterion_port export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(load_def('crit1.yaml':
+    'name: crit1' + LF +
     'start_cmd: /usr/bin/x' + LF +
     'check_alive: ' + SSH_PORT_TEXT + LF: def): 'load');
 
@@ -431,6 +436,7 @@ dcl-proc test_criterion_job export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(load_def('crit2.yaml':
+    'name: crit2' + LF +
     'start_cmd: /usr/bin/x' + LF +
     'check_alive: QP0ZSPWP' + LF: def): 'load');
 
@@ -444,6 +450,7 @@ dcl-proc test_criterion_job_absent export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(load_def('crit3.yaml':
+    'name: crit3' + LF +
     'start_cmd: /usr/bin/x' + LF +
     'check_alive: ZZNOSUCH' + LF: def): 'load');
 
@@ -491,6 +498,7 @@ dcl-proc test_criterion_job_lower_case export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(load_def('critlc1.yaml':
+    'name: critlc1' + LF +
     'start_cmd: /usr/bin/x' + LF +
     'check_alive: qp0zspwp' + LF: def): 'load');
 
@@ -499,6 +507,7 @@ dcl-proc test_criterion_job_lower_case export;
          'job running this suite');
 
   assert(load_def('critlc2.yaml':
+    'name: critlc2' + LF +
     'start_cmd: /usr/bin/x' + LF +
     'check_alive: jobname' + LF +
     'check_alive_criteria: qp0zspwp' + LF: def): 'load');
@@ -519,6 +528,7 @@ dcl-proc test_jobs_for_running_service export;
   dcl-ds jobs likeds(SCQRY_JOBS_t) inz(*likeds);
 
   assert(load_def('jobs.yaml':
+    'name: jobs' + LF +
     'start_cmd: /usr/bin/x' + LF +
     'check_alive: ' + SSH_PORT_TEXT + LF: def): 'load');
 
@@ -539,6 +549,7 @@ dcl-proc test_jobs_deduplicated export;
   dcl-s j like(INTEGER_t);
 
   assert(load_def('dedup.yaml':
+    'name: dedup' + LF +
     'start_cmd: /usr/bin/x' + LF +
     'check_alive: ' + SSH_PORT_TEXT + ',' + SSH_PORT_TEXT + LF: def): 'load');
 
@@ -592,6 +603,7 @@ dcl-proc test_log_path_default export;
   dcl-s  tail like(STMF_t);
 
   assert(load_def('logdefault.yaml':
+    'name: logdefault' + LF +
     'start_cmd: /usr/bin/x' + LF +
     'check_alive: 8080' + LF: def): 'load');
 
@@ -620,6 +632,7 @@ dcl-proc test_log_path_explicit export;
   dcl-s  tail like(STMF_t);
 
   assert(load_def('logexplicit.yaml':
+    'name: logexplicit' + LF +
     'start_cmd: /usr/bin/x' + LF +
     'check_alive: 8080' + LF +
     'log_dir: /tmp/rmsc-logs' + LF: def): 'load');
@@ -659,6 +672,7 @@ dcl-proc test_log_path_empty_when_nothing_staged export;
   IFS_crtdir(dir);
 
   assert(load_def('lognothing.yaml':
+    'name: lognothing' + LF +
     'start_cmd: /usr/bin/x' + LF +
     'check_alive: 8080' + LF +
     'log_dir: ' + %trim(dir) + LF: def): 'load');
@@ -697,6 +711,7 @@ dcl-proc test_log_path_returns_newest_staged export;
   IFS_crtdir(dir);
 
   assert(load_def('lognewest.yaml':
+    'name: lognewest' + LF +
     'start_cmd: /usr/bin/x' + LF +
     'check_alive: 8080' + LF +
     'log_dir: ' + %trim(dir) + LF: def): 'load');
@@ -739,11 +754,13 @@ dcl-proc test_log_path_does_not_match_a_longer_suffix export;
   IFS_crtdir(dir);
 
   assert(load_def('svc.yaml':
+    'name: svc' + LF +
     'start_cmd: /usr/bin/x' + LF +
     'check_alive: 8080' + LF +
     'log_dir: ' + %trim(dir) + LF: def_short): 'load short');
 
   assert(load_def('myservice_svc.yaml':
+    'name: myservice_svc' + LF +
     'start_cmd: /usr/bin/x' + LF +
     'check_alive: 8081' + LF +
     'log_dir: ' + %trim(dir) + LF: def_long): 'load long');
@@ -800,6 +817,7 @@ dcl-proc test_group_exclusion export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(load_def('grouped.yaml':
+    'name: grouped' + LF +
     'start_cmd: /usr/bin/x' + LF +
     'check_alive: 8080' + LF +
     'groups:' + LF +
@@ -840,8 +858,10 @@ dcl-proc test_list_reports_how_many export;
   // in source order, so a count taken from whatever is lying in the directory
   // is a count of which tests ran first.
   assert(load_def('counted1.yaml':
+    'name: counted1' + LF +
     'start_cmd: /usr/bin/x' + LF + 'check_alive: 55990' + LF: def): 'fixture 1');
   assert(load_def('counted2.yaml':
+    'name: counted2' + LF +
     'start_cmd: /usr/bin/x' + LF + 'check_alive: 55991' + LF: def): 'fixture 2');
 
   SCCOLL_init(coll);
@@ -875,12 +895,15 @@ dcl-proc test_list_restricted_to_a_group export;
   dcl-ds def  likeds(SCDEF_t) inz(*likeds);
 
   assert(load_def('ingroup1.yaml':
+    'name: ingroup1' + LF +
     'start_cmd: /usr/bin/x' + LF + 'check_alive: 55994' + LF +
     'groups:' + LF + '- listgrp' + LF: def): 'fixture in the group');
   assert(load_def('ingroup2.yaml':
+    'name: ingroup2' + LF +
     'start_cmd: /usr/bin/x' + LF + 'check_alive: 55995' + LF +
     'groups:' + LF + '- listgrp' + LF: def): 'second in the group');
   assert(load_def('outgroup.yaml':
+    'name: outgroup' + LF +
     'start_cmd: /usr/bin/x' + LF + 'check_alive: 55996' + LF +
     'groups:' + LF + '- othergrp' + LF: def): 'fixture outside it');
 
@@ -904,8 +927,10 @@ dcl-proc test_check_all_reports_how_many export;
 
   // As above: this test's fixtures are this test's responsibility
   assert(load_def('checked1.yaml':
+    'name: checked1' + LF +
     'start_cmd: /usr/bin/x' + LF + 'check_alive: 55992' + LF: def): 'fixture 1');
   assert(load_def('checked2.yaml':
+    'name: checked2' + LF +
     'start_cmd: /usr/bin/x' + LF + 'check_alive: 55993' + LF: def): 'fixture 2');
 
   SCCOLL_init(coll);
@@ -1020,6 +1045,7 @@ dcl-proc test_evaluate_fixture_ports export;
   dcl-ds ev  likeds(SCEXEC_EVAL_t)  inz(*likeds);
 
   assert(pt_load_def('ptup.yaml':
+    'name: ptup' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: 22' + LF: def): 'load');
   SCEXEC_evaluate(def: ev);
@@ -1029,6 +1055,7 @@ dcl-proc test_evaluate_fixture_ports export;
   clear ev;
   clear def;              // a stale criteria_count would fake a pass
   assert(pt_load_def('ptdown.yaml':
+    'name: ptdown' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: 55999' + LF: def): 'load');
   SCEXEC_evaluate(def: ev);
@@ -1050,6 +1077,7 @@ dcl-proc test_evaluate_all_alive export;
   dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
 
   assert(pt_load_def('ptalive.yaml':
+    'name: ptalive' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: 22' + LF: def): 'load');
 
@@ -1081,6 +1109,7 @@ dcl-proc test_evaluate_none_alive export;
   dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
 
   assert(pt_load_def('ptdead.yaml':
+    'name: ptdead' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: 55999,NOSUCHJOB1' + LF: def): 'load');
 
@@ -1112,6 +1141,7 @@ dcl-proc test_evaluate_none_alive_lists_failures export;
   dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
 
   assert(pt_load_def('ptdead2.yaml':
+    'name: ptdead2' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: 55999,NOSUCHJOB1' + LF: def): 'load');
 
@@ -1140,6 +1170,7 @@ dcl-proc test_evaluate_partial_one_of_two export;
   dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
 
   assert(pt_load_def('ptpart2.yaml':
+    'name: ptpart2' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: 22,55999' + LF: def): 'load');
 
@@ -1170,6 +1201,7 @@ dcl-proc test_evaluate_partial_counts_alive_not_dead export;
   dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
 
   assert(pt_load_def('ptpart3.yaml':
+    'name: ptpart3' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: 22,55998,NOSUCHJOB3' + LF: def): 'load');
 
@@ -1201,6 +1233,7 @@ dcl-proc test_evaluate_failures_join_in_declared_order export;
   dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
 
   assert(pt_load_def('ptorder1.yaml':
+    'name: ptorder1' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: 22,55998,NOSUCHJOB3' + LF: def): 'load');
 
@@ -1215,6 +1248,7 @@ dcl-proc test_evaluate_failures_join_in_declared_order export;
   clear ev;
   clear def;
   assert(pt_load_def('ptorder2.yaml':
+    'name: ptorder2' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: NOSUCHJOB3,22,55998' + LF: def): 'load');
 
@@ -1240,6 +1274,7 @@ dcl-proc test_evaluate_one_of_four export;
   dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
 
   assert(pt_load_def('ptpart4.yaml':
+    'name: ptpart4' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: 22,55997,55998,NOSUCHJOB3' + LF: def): 'load');
 
@@ -1274,18 +1309,21 @@ dcl-proc test_status_still_returns_bare_words export;
   dcl-ds def likeds(SCDEF_t) inz(*likeds);
 
   assert(pt_load_def('ptstat1.yaml':
+    'name: ptstat1' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: 22' + LF: def): 'load');
   aEqual('RUNNING': SCEXEC_status(def): 'running');
 
   clear def;
   assert(pt_load_def('ptstat2.yaml':
+    'name: ptstat2' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: 55999' + LF: def): 'load');
   aEqual('NOT RUNNING': SCEXEC_status(def): 'not running');
 
   clear def;
   assert(pt_load_def('ptstat3.yaml':
+    'name: ptstat3' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: 22,55999' + LF: def): 'load');
   aEqual('PARTIAL': SCEXEC_status(def):
@@ -1309,6 +1347,7 @@ dcl-proc test_evaluate_agrees_with_status export;
   dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
 
   assert(pt_load_def('ptagree.yaml':
+    'name: ptagree' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: 22,55999' + LF: def): 'load');
 
@@ -2186,6 +2225,7 @@ dcl-proc test_usable_definitions_are_unchanged export;
 
   // RUNNING
   assert(pt_load_def('ucok1.yaml':
+    'name: ucok1' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: 22' + LF: def): 'load');
   SCEXEC_evaluate(def: ev);
@@ -2201,6 +2241,7 @@ dcl-proc test_usable_definitions_are_unchanged export;
   clear ev;
   clear def;
   assert(pt_load_def('ucok2.yaml':
+    'name: ucok2' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: 55999,NOSUCHJOB1' + LF: def): 'load');
   SCEXEC_evaluate(def: ev);
@@ -2217,6 +2258,7 @@ dcl-proc test_usable_definitions_are_unchanged export;
   clear ev;
   clear def;
   assert(pt_load_def('ucok3.yaml':
+    'name: ucok3' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: 22,55999' + LF: def): 'load');
   SCEXEC_evaluate(def: ev);
@@ -2266,6 +2308,7 @@ dcl-proc test_evaluate_does_not_inherit_a_previous_verdict export;
 
   clear def;              // the DEFINITION is replaced; ev deliberately is not
   assert(pt_load_def('ucreuse2.yaml':
+    'name: ucreuse2' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: 22' + LF: def): 'load the good one');
   SCEXEC_evaluate(def: ev);
@@ -2381,6 +2424,7 @@ dcl-proc test_port_surrounding_space_is_usable export;
 
   // unquoted: YAML trims this before RMSC sees it
   assert(pt_load_def('ucsp1.yaml':
+    'name: ucsp1' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: port' + LF +
     'check_alive_criteria:   22  ' + LF: def): 'load');
@@ -2393,6 +2437,7 @@ dcl-proc test_port_surrounding_space_is_usable export;
   clear ev;
   clear def;
   assert(pt_load_def('ucsp2.yaml':
+    'name: ucsp2' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: port' + LF +
     'check_alive_criteria: "22 "' + LF: def): 'load');
@@ -2431,6 +2476,7 @@ dcl-proc test_port_out_of_range_is_usable_but_never_alive export;
 
   // zero
   assert(pt_load_def('ucr1.yaml':
+    'name: ucr1' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: port' + LF +
     'check_alive_criteria: 0' + LF: def): 'load 0');
@@ -2443,6 +2489,7 @@ dcl-proc test_port_out_of_range_is_usable_but_never_alive export;
   clear ev;
   clear def;
   assert(pt_load_def('ucr2.yaml':
+    'name: ucr2' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: port' + LF +
     'check_alive_criteria: -1' + LF: def): 'load -1');
@@ -2462,6 +2509,7 @@ dcl-proc test_port_out_of_range_is_usable_but_never_alive export;
   clear ev;
   clear def;
   assert(pt_load_def('ucr3.yaml':
+    'name: ucr3' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: port' + LF +
     'check_alive_criteria: 65536' + LF: def): 'load 65536');
@@ -2473,6 +2521,7 @@ dcl-proc test_port_out_of_range_is_usable_but_never_alive export;
   clear ev;
   clear def;
   assert(pt_load_def('ucr4.yaml':
+    'name: ucr4' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: port' + LF +
     'check_alive_criteria: 999999' + LF: def): 'load 999999');
@@ -2492,6 +2541,7 @@ dcl-proc test_port_out_of_range_is_usable_but_never_alive export;
   clear ev;
   clear def;
   assert(pt_load_def('ucr5.yaml':
+    'name: ucr5' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: port' + LF +
     'check_alive_criteria: "+55999"' + LF: def): 'load +55999');
@@ -2548,6 +2598,7 @@ dcl-proc test_port_not_a_number_is_unusable export;
 
   // digits first - the dangerous one
   assert(pt_load_def('ucn1.yaml':
+    'name: ucn1' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: port' + LF +
     'check_alive_criteria: 12ab' + LF: def): 'load 12ab');
@@ -2560,6 +2611,7 @@ dcl-proc test_port_not_a_number_is_unusable export;
   clear ev;
   clear def;
   assert(pt_load_def('ucn2.yaml':
+    'name: ucn2' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: port' + LF +
     'check_alive_criteria: ab12' + LF: def): 'load ab12');
@@ -2571,6 +2623,7 @@ dcl-proc test_port_not_a_number_is_unusable export;
   clear ev;
   clear def;
   assert(pt_load_def('ucn3.yaml':
+    'name: ucn3' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: port' + LF +
     'check_alive_criteria: "80 80"' + LF: def): 'load 80 80');
@@ -2582,6 +2635,7 @@ dcl-proc test_port_not_a_number_is_unusable export;
   clear ev;
   clear def;
   assert(pt_load_def('ucn4.yaml':
+    'name: ucn4' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: port' + LF +
     'check_alive_criteria: 8080.0' + LF: def): 'load 8080.0');
@@ -2645,6 +2699,7 @@ dcl-proc test_criterion_used_as_number_rendered_as_text export;
 
   // a live port, written with a leading zero: the NUMBER is what gets probed
   assert(pt_load_def('uczero1.yaml':
+    'name: uczero1' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: port' + LF +
     'check_alive_criteria: "022"' + LF: def): 'load "022"');
@@ -2658,6 +2713,7 @@ dcl-proc test_criterion_used_as_number_rendered_as_text export;
   clear ev;
   clear def;
   assert(pt_load_def('uczero2.yaml':
+    'name: uczero2' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: port' + LF +
     'check_alive_criteria: "055999"' + LF: def): 'load "055999"');
@@ -2698,6 +2754,7 @@ dcl-proc test_port_too_large_for_the_field_is_unusable export;
   dcl-ds ev  likeds(SCEXEC_EVAL_t) inz(*likeds);
 
   assert(pt_load_def('ucbig.yaml':
+    'name: ucbig' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: port' + LF +
     'check_alive_criteria: 99999999999999999999' + LF: def): 'load');
@@ -2757,6 +2814,7 @@ dcl-proc test_check_all_skips_the_unusable_and_continues export;
   bad = -1;               // so a procedure that never writes it is caught
 
   assert(uc_load_named(d: 'ucwalk1.yaml':
+    'name: ucwalk1' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: 22' + LF: def): 'first, good');
 
@@ -2767,6 +2825,7 @@ dcl-proc test_check_all_skips_the_unusable_and_continues export;
     'check_alive_criteria: abc' + LF: def): 'second, unusable');
 
   assert(uc_load_named(d: 'ucwalk3.yaml':
+    'name: ucwalk3' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: 55999' + LF: def): 'third, good');
 
@@ -2821,9 +2880,11 @@ dcl-proc test_check_all_reports_no_errors_when_all_usable export;
   bad = -1;
 
   assert(uc_load_named(d: 'ucclean1.yaml':
+    'name: ucclean1' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: 22' + LF: def): 'first');
   assert(uc_load_named(d: 'ucclean2.yaml':
+    'name: ucclean2' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: 55999' + LF: def): 'second');
 
@@ -2971,11 +3032,13 @@ dcl-proc test_groups_declared_all_before_system export;
   d = gr_dir();
 
   assert(uc_load_named(d: 'rmscgrp_b1.yaml':
+    'name: rmscgrp_b1' + LF +
     'start_cmd: /usr/bin/rmscgrp' + LF +
     'check_alive: 55961' + LF +
     'groups:' + LF +
     '- grpbef_a' + LF: def): 'first fixture');
   assert(uc_load_named(d: 'rmscgrp_b2.yaml':
+    'name: rmscgrp_b2' + LF +
     'start_cmd: /usr/bin/rmscgrp' + LF +
     'check_alive: 55962' + LF +
     'groups:' + LF +
@@ -3012,11 +3075,13 @@ dcl-proc test_groups_declared_all_after_system export;
   d = gr_dir();
 
   assert(uc_load_named(d: 'rmscgrp_z1.yaml':
+    'name: rmscgrp_z1' + LF +
     'start_cmd: /usr/bin/rmscgrp' + LF +
     'check_alive: 55963' + LF +
     'groups:' + LF +
     '- zgrpaft_x' + LF: def): 'first fixture');
   assert(uc_load_named(d: 'rmscgrp_z2.yaml':
+    'name: rmscgrp_z2' + LF +
     'start_cmd: /usr/bin/rmscgrp' + LF +
     'check_alive: 55964' + LF +
     'groups:' + LF +
@@ -3069,11 +3134,13 @@ dcl-proc test_groups_declared_system_listed_once export;
   d = gr_dir();
 
   assert(uc_load_named(d: 'rmscgrp_s1.yaml':
+    'name: rmscgrp_s1' + LF +
     'start_cmd: /usr/bin/rmscgrp' + LF +
     'check_alive: 55965' + LF +
     'groups:' + LF +
     '- system' + LF: def): 'first fixture');
   assert(uc_load_named(d: 'rmscgrp_s2.yaml':
+    'name: rmscgrp_s2' + LF +
     'start_cmd: /usr/bin/rmscgrp' + LF +
     'check_alive: 55966' + LF +
     'groups:' + LF +
@@ -3129,11 +3196,13 @@ dcl-proc test_groups_ignore_globals_omits_builtin export;
   d = gr_dir();
 
   assert(uc_load_named(d: 'rmscgrp_g1.yaml':
+    'name: rmscgrp_g1' + LF +
     'start_cmd: /usr/bin/rmscgrp' + LF +
     'check_alive: 55967' + LF +
     'groups:' + LF +
     '- grpbef_a' + LF: def): 'first fixture');
   assert(uc_load_named(d: 'rmscgrp_g2.yaml':
+    'name: rmscgrp_g2' + LF +
     'start_cmd: /usr/bin/rmscgrp' + LF +
     'check_alive: 55968' + LF +
     'groups:' + LF +
@@ -3183,11 +3252,13 @@ dcl-proc test_groups_excluded_service_takes_its_group export;
   d = gr_dir();
 
   assert(uc_load_named(d: 'rmscgrp_f1.yaml':
+    'name: rmscgrp_f1' + LF +
     'start_cmd: /usr/bin/rmscgrp' + LF +
     'check_alive: 55969' + LF +
     'groups:' + LF +
     '- grpbef_a' + LF: def): 'first fixture');
   assert(uc_load_named(d: 'rmscgrp_f2.yaml':
+    'name: rmscgrp_f2' + LF +
     'start_cmd: /usr/bin/rmscgrp' + LF +
     'check_alive: 55970' + LF +
     'groups:' + LF +
@@ -4952,6 +5023,7 @@ dcl-proc test_jobs_one_criterion_ascends export;
   ord_stage();
 
   assert(pt_load_def('ordone.yaml':
+    'name: ordone' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: ' + ORD_JOB_B + LF: def): 'load');
 
@@ -5000,6 +5072,7 @@ dcl-proc test_jobs_ascend_across_criteria export;
   // criteria would already be visited low-number-first and today's code would
   // return the ascending answer by accident.
   assert(pt_load_def('ordtwo.yaml':
+    'name: ordtwo' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: ' + ORD_JOB_A + ',' + ORD_JOB_B + LF: def): 'load');
 
@@ -5044,6 +5117,7 @@ dcl-proc test_jobs_repeated_criterion_listed_once_in_order export;
   ord_stage();
 
   assert(pt_load_def('orddup.yaml':
+    'name: orddup' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: ' + ORD_JOB_A + ',' + ORD_JOB_B + ',' + ORD_JOB_A + LF:
     def): 'load');
@@ -5281,6 +5355,7 @@ dcl-proc test_jobs_overflowing_criterion_keeps_the_oldest export;
   iEqual(ORD_CAP: SCQRY_MAX_JOBS: 'cap moved - restage this case for it');
 
   assert(pt_load_def('ordcap.yaml':
+    'name: ordcap' + LF +
     'start_cmd: /usr/bin/ptprobe' + LF +
     'check_alive: ' + ORD_JOB_C + LF: def): 'load');
 

@@ -292,12 +292,14 @@ dcl-proc setUpSuite export;
 
   // A plain three-link chain: web depends on api depends on db
   y = 'start_cmd: /usr/bin/db' + LF;
+  y += 'name: db' + LF;
   y += 'check_alive: 8080' + LF;
   y += 'groups:' + LF;
   y += '- data' + LF;
   write_file(%trim(g_dir) + '/db.yaml': y);
 
   y = 'start_cmd: /usr/bin/api' + LF;
+  y += 'name: api' + LF;
   y += 'check_alive: 8081' + LF;
   y += 'service_dependencies:' + LF;
   y += '- db' + LF;
@@ -306,6 +308,7 @@ dcl-proc setUpSuite export;
   write_file(%trim(g_dir) + '/api.yaml': y);
 
   y = 'start_cmd: /usr/bin/web' + LF;
+  y += 'name: web' + LF;
   y += 'check_alive: 8082' + LF;
   y += 'service_dependencies:' + LF;
   y += '- api' + LF;
@@ -316,18 +319,21 @@ dcl-proc setUpSuite export;
 
   // A cycle, and a dependency that does not exist
   y = 'start_cmd: /usr/bin/c1' + LF;
+  y += 'name: cyc1' + LF;
   y += 'check_alive: 8091' + LF;
   y += 'service_dependencies:' + LF;
   y += '- cyc2' + LF;
   write_file(%trim(g_dir) + '/cyc1.yaml': y);
 
   y = 'start_cmd: /usr/bin/c2' + LF;
+  y += 'name: cyc2' + LF;
   y += 'check_alive: 8092' + LF;
   y += 'service_dependencies:' + LF;
   y += '- cyc1' + LF;
   write_file(%trim(g_dir) + '/cyc2.yaml': y);
 
   y = 'start_cmd: /usr/bin/orphan' + LF;
+  y += 'name: orphan' + LF;
   y += 'check_alive: 8093' + LF;
   y += 'service_dependencies:' + LF;
   y += '- nosuchservice' + LF;
@@ -335,6 +341,7 @@ dcl-proc setUpSuite export;
 
   // .yml is as valid an extension as .yaml
   y = 'start_cmd: /usr/bin/cache' + LF;
+  y += 'name: cache' + LF;
   y += 'check_alive: 8094' + LF;
   write_file(%trim(g_dir) + '/cache.yml': y);
 
@@ -344,6 +351,7 @@ dcl-proc setUpSuite export;
 
   // A definition missing a required key: recorded, not fatal
   y = 'check_alive: 9999' + LF;
+  y += 'name: broken' + LF;
   write_file(%trim(g_dir) + '/broken.yaml': y);
 
   // In a subdirectory, which must NOT be walked. Upstream's
@@ -352,6 +360,7 @@ dcl-proc setUpSuite export;
   // ships under system/ and oss_common/ by naming those two paths, not by
   // recursing. A scan that recurses finds definitions upstream never sees.
   y = 'start_cmd: /usr/bin/nested' + LF;
+  y += 'name: nested' + LF;
   y += 'check_alive: 8095' + LF;
   write_file(%trim(g_sub) + '/nested.yaml': y);
 
@@ -2276,6 +2285,7 @@ dcl-proc nam_setup;
   // One definition, written under nine names. Valid, so that nothing but the
   // name can decide the outcome.
   y = 'start_cmd: /usr/bin/rmscnam' + LF;
+  y += 'name: good' + LF;
   y += 'check_alive: 8120' + LF;
 
   // Legal names - these three must become services
@@ -2566,6 +2576,7 @@ dcl-proc blk_setup;
   IFS_crtdir(g_blk);
 
   y = 'start_cmd: /usr/bin/rmscblk' + LF;
+  y += 'name: plain' + LF;
   y += 'check_alive: 8130' + LF;
 
   // The only legal name here. Its presence proves the loader ran at all, so
