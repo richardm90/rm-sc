@@ -1,7 +1,8 @@
 #!/QOpenSys/pkgs/bin/bash
 #
 # adhoc-name-test.sh - what an AD HOC service is CALLED, and everywhere that
-# name comes back out.
+# name comes back out - PLUS (stage 7, added 20 September 2026) whether the
+# REST of its output matches upstream too, not only its name.
 #
 # An ad-hoc service is one named on the command line by a specifier rather than
 # by a definition - `scr check port:22`, `scr check job:QINTER`. It has a name
@@ -170,14 +171,29 @@
 # WHAT IS DELIBERATELY NOT ASSERTED
 # ---------------------------------------------------------------------------
 #
-#   THE REST OF `info`. Upstream prints 21 lines for an ad-hoc service and RMSC
-#   14, and the differences have nothing to do with the name: a leading blank,
-#   `Defined in: <ad hoc>` where RMSC leaves it empty, RMSC's extra `Working
-#   Directory: .`, upstream's `Batch Mode:`, `Inherits environment variables?:`
-#   and closing rule. Only the header line is asserted. Those differences are
-#   worth someone's attention and they are not this change; widening this case
-#   to the whole of stdout would fail RMSC for four unrelated reasons and
-#   report it as an ad-hoc naming defect.
+#   THE REST OF `info`, AS OF 10 September 2026 - stale now, kept as history.
+#   Upstream printed 21 lines for an ad-hoc service and RMSC 14: a leading
+#   blank, `Defined in: <ad hoc>` where RMSC left it empty, RMSC's extra
+#   `Working Directory: .`, upstream's `Batch Mode:`, `Inherits environment
+#   variables?:` and closing rule. Only the header line was asserted here,
+#   because widening this case to the whole of stdout would have failed RMSC
+#   for four unrelated reasons and reported it as an ad-hoc naming defect.
+#
+#   MOST OF THAT IS NOW FIXED, ELSEWHERE, NOT BY THIS FILE: the blank-line
+#   counts, `Batch Mode:`, `Inherits environment variables?:` and the closing
+#   rule all closed 18 September 2026 (docs/parity.md, `info`'s eight
+#   differences); `Working Directory:` closed 20 September 2026 (`info`'s
+#   relative-`dir:` question). Widening THIS file's own coverage past the
+#   header line, 20 September 2026, found the two that were left: `Defined
+#   in: <ad hoc>` (see `info-defined-in` below) had been sitting in this very
+#   list, named, since 10 September, unfixed because nothing here asserted
+#   it; and a genuinely new one this list never named at all - upstream
+#   lower-cases an ad-hoc JOB criterion in `Check-alive conditions:`
+#   (`JOBNAME:qinter` whichever case was typed), where RMSC showed it in the
+#   case `criterion.raw` is deliberately stored for MATCHING (see
+#   `info-checkalive-case` below). Both fixed the same day. Stage 7 now
+#   diffs the WHOLE of `info`'s stdout for ad-hoc specifiers, which is what
+#   makes "nothing else differs" a checked claim rather than an assumption.
 #
 #   THE REST OF `perfinfo`. Same reason, and docs/parity.md already lists
 #   `perfinfo` as an intentional difference at the gate.
@@ -799,15 +815,68 @@ header_case() {  # tag op spec suffix
 
 # jobinfo. THE HEADER ONLY. The lines under it - the indent, the bare job name,
 # the blank per command, and which jobs a port resolves to - are
-# tools/jobinfo-test.sh's, over a staged fixture it controls. Measured here on
-# 10 September 2026, upstream and RMSC named a DIFFERENT NUMBER OF JOBS for
-# port:22, which is a real difference and is not this one; a case that compared
-# the whole of stdout would report it as an ad-hoc naming defect.
+# tools/jobinfo-test.sh's, over a staged fixture it controls.
+#
+# WAS: "upstream and RMSC named a DIFFERENT NUMBER OF JOBS for port:22 -
+# measured 10 September 2026 - a case that compared the whole of stdout
+# would report it as an ad-hoc naming defect." STALE since - closed when
+# SCQRY_jobs_on_port gained its REMOTE_PORT = 0 filter, and stage 7 below
+# now DOES compare the whole of `jobinfo port:22` and passes, which is the
+# proof this line's warning no longer applies. Left as history rather than
+# deleted outright, the way this project's other corrected predictions are.
 header_case jobinfo-header  jobinfo  'port:22'            ':'
 
 # info. THE HEADER ONLY - see WHAT IS DELIBERATELY NOT ASSERTED. The slash form,
 # so this row carries rival 3 somewhere other than `check`.
 header_case info-header     info     'job:QUSRWRK/QINTER' ''
+
+# UPSTREAM'S OWN CAPTURE of the same call, for the two rows below - without
+# it, a wording change upstream made to either line would fail RMSC for
+# agreeing with upstream, which is exactly the mistake this file's own
+# stage 3 exists to prevent elsewhere (":975-983").
+grab sc.info-header "$SC" info 'job:QUSRWRK/QINTER'
+
+# 'Defined in: <ad hoc>' - upstream's literal text for a specifier with no
+# definition file. Found live, 20 September 2026, sitting unfixed in "WHAT IS
+# DELIBERATELY NOT ASSERTED" above since 10 September - nothing here checked
+# it until now. Reuses info-header's own capture rather than running info a
+# second time.
+if ! grep -qFx 'Defined in: <ad hoc>' "$WORK/sc.info-header.out"; then
+  report REFDRIFT "sc:info-defined-in" "upstream no longer prints 'Defined in: <ad hoc>'"
+  detail "got: $(grep -F 'Defined in:' "$WORK/sc.info-header.out")"
+  refdrift=$((refdrift+1))
+elif grep -qFx 'Defined in: <ad hoc>' "$WORK/info-header.out"; then
+  report PASS info-defined-in "'Defined in: <ad hoc>' present"
+  pass=$((pass+1))
+else
+  report FAIL info-defined-in "'Defined in: <ad hoc>' missing or wrong"
+  detail "got: $(grep -F 'Defined in:' "$WORK/info-header.out")"
+  failed=$((failed+1))
+fi
+
+# 'Check-alive conditions: JOBNAME:...' - upstream LOWER-CASES an ad-hoc JOB
+# criterion here, whichever case was typed (job:QUSRWRK/QINTER is the form
+# info-header staged). RMSC's criterion.raw is deliberately UPPER-cased for
+# MATCHING (docs/parity.md) - this is a DIFFERENT surface, `info`'s DISPLAY of
+# it, and upstream's own case there does not follow the matching case at all.
+# Found live, 20 September 2026 - not in the "WHAT IS DELIBERATELY NOT
+# ASSERTED" list above, because nobody had looked here before. Measured on
+# JOB and PORT criteria alike (an unusable, non-numeric port - port:aBc -
+# also comes back lower-cased upstream); NOT extended to PGM-, which
+# upstream refuses outright and so never renders at all - see the fix's own
+# comment in SCEXEC.RPGLE.
+if ! grep -qFx 'Check-alive conditions: JOBNAME:qusrwrk/qinter' "$WORK/sc.info-header.out"; then
+  report REFDRIFT "sc:info-checkalive-case" "upstream no longer lower-cases this ad-hoc JOB criterion"
+  detail "got: $(grep -F 'Check-alive conditions:' "$WORK/sc.info-header.out")"
+  refdrift=$((refdrift+1))
+elif grep -qFx 'Check-alive conditions: JOBNAME:qusrwrk/qinter' "$WORK/info-header.out"; then
+  report PASS info-checkalive-case "ad-hoc JOB criterion shown lower-case, matching upstream"
+  pass=$((pass+1))
+else
+  report FAIL info-checkalive-case "ad-hoc JOB criterion not shown lower-case"
+  detail "got: $(grep -F 'Check-alive conditions:' "$WORK/info-header.out")"
+  failed=$((failed+1))
+fi
 
 # perfinfo. THE HEADER ONLY. port:22 because perfinfo reports per job.
 header_case perfinfo-header perfinfo 'port:22'            ''
@@ -1043,64 +1112,82 @@ else
   refdrift=$((refdrift+1))
 fi
 
-# PINNED - THE CHECK-ALIVE CRITERION IS STILL UPPER-CASED, AND THE NAME IS NOT.
+# WAS PINNED HERE AS A DIFFERENCE - "THE CHECK-ALIVE CRITERION IS STILL
+# UPPER-CASED, AND THE NAME IS NOT" - until 20 September 2026, when widening
+# this file past the name found that upstream's `info` shows an ad-hoc JOB
+# criterion LOWER-CASE regardless of typed case (info-checkalive-case,
+# stage 2), which RMSC now matches. This pin READ THAT SAME LINE, so fixing
+# the difference it pinned necessarily changed what it saw - not a
+# regression in the pin, the pin's own observation point going stale.
 #
-#   upstream sc:  `JOBNAME:qusrwrk/qinter` - the specifier, as typed.
-#   RMSC:         `JOBNAME:QUSRWRK/QINTER` - upper-cased, and correct.
+# THE INVARIANT THIS WAS REALLY GUARDING IS UNCHANGED AND STILL TRUE: the
+# criterion RMSC uses for MATCHING is still upper-cased internally
+# (`criterion.raw`, docs/parity.md) - what changed is only which text
+# `info` PRINTS from it.
 #
-# THE OTHER HALF OF RIVAL 2, and the half a suite watching only the name cannot
-# see. Before this change RMSC built the ad-hoc name FROM the upper-cased
-# criterion, which is why `job:qinter` came back as `job:QINTER`. The fix made
-# them two values. There are two ways to undo that and only one of them is
-# visible from stage 1:
-#
-#   the name follows the criterion again   stage 1 goes red. Covered.
-#   the criterion follows the NAME instead - the upper-casing dropped so that
-#                                          the name comes out right - and every
-#                                          case in stage 1 STAYS GREEN while a
-#                                          job criterion silently stops matching.
-#
-# ONE CAPTURE, TWO VALUES, and it has to be a LOWER-CASE, SUBSYSTEM-QUALIFIED
-# specifier: with upper-case input the two values are the same string and this
-# row separates nothing at all.
-#
-# PINNED rather than compared: upper-casing the criterion is RMSC's own decided
-# behaviour and upstream does not do it. The reference row below is what makes
-# that a difference rather than a coincidence.
-CRIT_SPEC='job:qusrwrk/qinter'
-CRIT_UPPER="JOBNAME:$(printf '%s' "${CRIT_SPEC#job:}" | tr 'a-z' 'A-Z')"
-CRIT_HDR="$(adhoc_name "$CRIT_SPEC") ($(adhoc_desc "$CRIT_SPEC"))"
-grab scr.crit "$SCR" info "$CRIT_SPEC"
+# RE-POINTED AT SELF-CONSISTENCY, NOT AT UPSTREAM, and deliberately not at
+# whether job:QUSRWRK/QINTER happens to be RUNNING right now - measured live
+# while writing this, it is NOT (both implementations agree it is NOT
+# RUNNING), which would have made a "matches upstream's answer" row pass
+# whether or not case-insensitive matching still worked, the same way a
+# range check that accepts the fallback value cannot separate "handled" from
+# "defaulted". THE SAME SPECIFIER, typed in BOTH cases, must get the SAME
+# STATUS FROM RMSC EITHER WAY - that is what "matched case-insensitively"
+# means, and it holds whether the true answer is RUNNING or NOT RUNNING,
+# with no dependency on which real job happens to be up on this box today.
+# A criterion that had silently stopped folding case would answer NOT
+# RUNNING for one spelling and (at least sometimes) something else for the
+# other.
+CRIT_UPPER='job:QUSRWRK/QINTER'
+CRIT_LOWER='job:qusrwrk/qinter'
+grab scr.crit_upper "$SCR" check "$CRIT_UPPER"
+grab scr.crit_lower "$SCR" check "$CRIT_LOWER"
 c_why=""
-grep -Fq "$CRIT_UPPER" "$WORK/scr.crit.out" || c_why="$c_why criterion-no-longer-upper-cased"
-grep -Fxq "$CRIT_HDR"  "$WORK/scr.crit.out" || c_why="$c_why name-no-longer-preserved"
+[ "${RC_SAVED[scr.crit_upper]:-1}" -eq 0 ] || c_why="$c_why exit(upper)=${RC_SAVED[scr.crit_upper]}(wanted 0)"
+[ "${RC_SAVED[scr.crit_lower]:-1}" -eq 0 ] || c_why="$c_why exit(lower)=${RC_SAVED[scr.crit_lower]}(wanted 0)"
+if [ -z "$c_why" ] && parse_row "$WORK/scr.crit_upper.out"; then
+  upper_status="$(trim "$ROW_STATUS")"
+  if parse_row "$WORK/scr.crit_lower.out"; then
+    [ "$(trim "$ROW_STATUS")" = "$upper_status" ] || \
+      c_why="$c_why lower-case-status='$(trim "$ROW_STATUS")'(upper-case gave '$upper_status' - a job criterion has stopped matching case-insensitively)"
+  else
+    c_why="$c_why lower-case-row-does-not-parse"
+  fi
+elif [ -z "$c_why" ]; then
+  c_why="$c_why upper-case-row-does-not-parse"
+fi
 if [ -z "$c_why" ]; then
-  report PASS criterion-still-upper "(pinned) $CRIT_UPPER, under the name $(adhoc_name "$CRIT_SPEC")"
+  report PASS criterion-still-matches "(pinned invariant) $CRIT_UPPER and $CRIT_LOWER both: $upper_status"
   pass=$((pass+1))
 else
-  report CHANGED criterion-still-upper "(pinned)$c_why"
-  detail "wanted the criterion '$CRIT_UPPER' and the header '$CRIT_HDR'"
-  detail "got: $(grep -i 'check-alive' "$WORK/scr.crit.out" | head -n 1)"
-  detail "got: $(grep -F '(' "$WORK/scr.crit.out" | head -n 1)"
-  detail "the name and the criterion are two values on purpose. If the criterion"
-  detail "has stopped being upper-cased, a job criterion has silently stopped"
-  detail "matching and every case in stage 1 is still green."
-  detail "If that was intended, update this case and docs/parity.md together."
+  report CHANGED criterion-still-matches "(pinned invariant)$c_why"
+  detail "the SAME specifier, upper- and lower-case, must get the SAME status"
+  detail "from RMSC - that is what case-insensitive matching means, regardless"
+  detail "of whether the job it names is actually up today. info's own"
+  detail "DISPLAY of the criterion is a separate, already-fixed matter"
+  detail "(info-checkalive-case, stage 2)."
   changed=$((changed+1))
 fi
 
-# UPSTREAM'S CRITERION, as the reference behind the row above. Without it, an
-# upstream that started upper-casing too would leave the pin passing while the
-# difference it pins had quietly gone away.
-grab sc.crit "$SC" info "$CRIT_SPEC"
-CRIT_RAW="JOBNAME:${CRIT_SPEC#job:}"
-if grep -Fq "$CRIT_RAW" "$WORK/sc.crit.out"; then
-  report PASS "sc:criterion" "upstream leaves it as typed: $CRIT_RAW"
-  pass=$((pass+1))
+# UPSTREAM'S OWN CASE-INSENSITIVITY, as a control that the invariant above is
+# testing the right thing: if upstream itself ever disagreed between the two
+# spellings, RMSC agreeing with ITSELF would prove nothing about parity.
+grab sc.crit_upper "$SC" check "$CRIT_UPPER"
+grab sc.crit_lower "$SC" check "$CRIT_LOWER"
+if parse_row "$WORK/sc.crit_upper.out"; then
+  sc_upper_status="$(trim "$ROW_STATUS")"
+  if parse_row "$WORK/sc.crit_lower.out" && [ "$(trim "$ROW_STATUS")" = "$sc_upper_status" ]; then
+    report PASS "sc:criterion-case" "upstream also treats $CRIT_UPPER and $CRIT_LOWER alike: $sc_upper_status"
+    pass=$((pass+1))
+  else
+    report REFDRIFT "sc:criterion-case" "upstream itself now disagrees between the two spellings"
+    detail "got upper: $(head -n 1 "$WORK/sc.crit_upper.out")"
+    detail "got lower: $(head -n 1 "$WORK/sc.crit_lower.out")"
+    detail "the row above's self-consistency check rests on upstream being case-insensitive too"
+    refdrift=$((refdrift+1))
+  fi
 else
-  report REFDRIFT "sc:criterion" "upstream's criterion is not '$CRIT_RAW'"
-  detail "got: $(grep -i 'check-alive' "$WORK/sc.crit.out" | head -n 1)"
-  detail "the row above pins RMSC's upper-casing as a DIFFERENCE from upstream"
+  report REFDRIFT "sc:criterion-case" "upstream's row for $CRIT_UPPER does not parse"
   refdrift=$((refdrift+1))
 fi
 
@@ -1377,6 +1464,103 @@ fi
 port_case scr.nocollide "$(adhoc_name 'port:0')" "$(adhoc_desc 'port:0')" port-no-collision
 
 echo
+# ---------------------------------------------------------------------------
+echo "== stage 7: full output parity for ad hoc specifiers - not just the name"
+echo "   (verification step 8's own item: 'widen the gate to exercise port:"
+echo "    and job: specifiers' - tools/fidelity-gate.sh cannot, see WHY A NEW"
+echo "    FILE at the top; this is that widening, here instead)"
+echo
+heading
+# ---------------------------------------------------------------------------
+#
+# Every stage above asks a NARROW question of one line. This asks the SAME
+# question tools/fidelity-gate.sh asks of a DEFINED service - does the WHOLE
+# of stdout and stderr match upstream, byte for byte - of an AD HOC one,
+# which the gate structurally cannot reach at all.
+#
+# check, jobinfo, info AND loginfo ONLY - not file/scrunattrs (whole-surface
+# intentional divergences regardless of what names the service, see WHAT IS
+# DELIBERATELY NOT ASSERTED above and docs/parity.md) and not perfinfo
+# (carries its own settled partial differences - docs/parity.md, "The gate" -
+# that this file has no reason to duplicate tools/fidelity-gate.sh's own
+# per-recorded-difference handling of).
+#
+# THREE FORMS, one of each shape SPECS already establishes matters: a bare
+# port, a bare job, and a subsystem-qualified job. Case variants are already
+# this file's job elsewhere (stages 1-3); a full-output diff does not gain
+# anything by repeating them, since the fix that closed info-checkalive-case
+# is not sensitive to which case was typed, only to the operation.
+#
+# NOT NORMALISED, unlike tools/fidelity-gate.sh's own sweep. Job NUMBERS are
+# stable here for the obvious reason - port:22 (sshd) and job:QINTER /
+# job:QUSRWRK/QINTER (QINTER) name real system jobs that do not restart
+# between two invocations seconds apart - but that alone is not the whole of
+# it, because this harness runs over SSH and a per-connection sshd job could
+# change the SET jobinfo reports even with none of the LISTENER'S numbers
+# moving. What actually holds the set stable is that SCQRY_jobs_on_port
+# filters to LISTENERS only (REMOTE_PORT = 0), which upstream does
+# identically - a concurrent login opens a job with a non-zero remote port
+# and is invisible to both sides the same way. A specifier whose set is not
+# stable this way would need fidelity-gate.sh's own normalise().
+#
+# THE SET ITSELF IS CHECKED, not just diffed - if job:QINTER resolves to
+# NOTHING, a comparison of "both sides print the same empty shape" would
+# pass while testing little, the same trap docs/testing-notes.md records
+# for loginfo ("measured only on the case where BOTH implementations
+# fail"). port:22 already has this guarantee from stage 0's own hard fail.
+#
+# WARNED, NOT HARD-FAILED - unlike stage 0's port:22 (which this harness's
+# own SSH connection guarantees is listening), whether the QINTER
+# subsystem monitor happens to be up is an operator's choice on a shared
+# box and has moved between two runs of this very file. A setup_fail here
+# would abort stages 0-6's results over a fact this file does not control;
+# a warning says so and the sweep still runs - check and info still
+# compare two real, differently-shaped answers even when NOT RUNNING, and
+# only jobinfo's job-form rows genuinely weaken to the both-empty case.
+QINTER_UP=1
+grab full_precheck "$SCR" check 'job:QINTER'
+if ! parse_row "$WORK/full_precheck.out" || [ "$(trim "$ROW_STATUS")" != "RUNNING" ]; then
+  QINTER_UP=0
+  echo "  NOTE      stage-7-qinter-down          job:QINTER is NOT RUNNING right now - its jobinfo"
+  echo "                                         rows below compare two empty 'not found' answers,"
+  echo "                                         weaker than the RUNNING case; check/info still"
+  echo "                                         compare a real NOT RUNNING answer on both sides"
+fi
+
+# loginfo'S THREE ROWS BELOW ARE ALL THE BOTH-FAIL BRANCH - no ad-hoc service
+# has ever been started by `sc`, so every one of them compares two "no log"
+# answers rather than exercising the write side. Recorded here rather than
+# left implicit, for the same reason as the paragraph above it: a reader of
+# "loginfo matched on every specifier tested" should know which branch that
+# was.
+FULL_SPECS=('port:22' 'job:QINTER' 'job:QUSRWRK/QINTER')
+FULL_OPS='check jobinfo info loginfo'
+
+for spec in "${FULL_SPECS[@]}"; do
+  for op in $FULL_OPS; do
+    t="full_$(tagof "$spec")_$op"
+    grab "sc.$t"  "$SC"  "$op" "$spec"
+    grab "scr.$t" "$SCR" "$op" "$spec"
+    fp=()
+    diff "$WORK/sc.$t.out" "$WORK/scr.$t.out" > "$WORK/$t.out.diff" 2>&1
+    diff "$WORK/sc.$t.err" "$WORK/scr.$t.err" > "$WORK/$t.err.diff" 2>&1
+    [ -s "$WORK/$t.out.diff" ] && fp+=("stdout differs")
+    [ -s "$WORK/$t.err.diff" ] && fp+=("stderr differs")
+    if [ ${#fp[@]} -eq 0 ]; then
+      report PASS "$t" "$op $spec matches upstream in full, not only its name"
+      pass=$((pass+1))
+      rm -f "$WORK/$t.out.diff" "$WORK/$t.err.diff"
+    else
+      report FAIL "$t" "($op $spec) ${fp[*]}"
+      [ -s "$WORK/$t.out.diff" ] && { detail "stdout:"; while IFS= read -r p; do detail "  $p"; done < "$WORK/$t.out.diff"; }
+      [ -s "$WORK/$t.err.diff" ] && { detail "stderr:"; while IFS= read -r p; do detail "  $p"; done < "$WORK/$t.err.diff"; }
+      detail "artefacts: $t.out.diff $t.err.diff"
+      failed=$((failed+1))
+    fi
+  done
+done
+
+echo
 echo "pass=$pass   failed=$failed   pinned-changed=$changed   reference-drift=$refdrift"
 echo "artefacts: $WORK   (.out, .err and .diff per case; KEEP=1 to keep them)"
 
@@ -1404,7 +1588,8 @@ echo "artefacts: $WORK   (.out, .err and .diff per case; KEEP=1 to keep them)"
 # ---------------------------------------------------------------------------
 
 if [ "$failed" -ne 0 ]; then
-  echo "FAILED: ad hoc services are not named the way upstream names them"
+  echo "FAILED: ad hoc services are not named the way upstream names them,"
+  echo "        or (stage 7) do not match upstream's full output"
   exit 1
 fi
 if [ "$changed" -ne 0 ]; then
@@ -1413,9 +1598,10 @@ if [ "$changed" -ne 0 ]; then
   exit 1
 fi
 if [ "$refdrift" -ne 0 ]; then
-  echo "REFERENCE DRIFT: upstream sc no longer names ad hoc services as recorded."
+  echo "REFERENCE DRIFT: upstream sc no longer behaves as recorded here."
   echo "Every expectation here rests on that table - re-take it before trusting a"
   echo "pass or acting on a failure."
   exit 1
 fi
-echo "OK: name and description on every form, and on all six surfaces that carry them"
+echo "OK: name and description on every form and every surface that carries them,"
+echo "    and (stage 7) the rest of check/jobinfo/info/loginfo's output besides"

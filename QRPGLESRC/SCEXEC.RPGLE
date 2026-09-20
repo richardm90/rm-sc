@@ -799,8 +799,10 @@ dcl-proc SCEXEC_info export;
     def likeds(SCDEF_t) const;
   end-pi;
 
-  dcl-s line like(SCOUT_LINE_t);
-  dcl-s i    like(INTEGER_t);
+  dcl-s line  like(SCOUT_LINE_t);
+  dcl-s i     like(INTEGER_t);
+  dcl-s ctext like(SCDEF_CRITTEXT_t);
+  dcl-s colon like(INTEGER_t);
 
   // TWO blanks, matching upstream - DECIDED 18 September 2026, docs/parity.md.
   // RMSC printed one; the eight-point measurement in docs/messages.md records
@@ -824,7 +826,15 @@ dcl-proc SCEXEC_info export;
   SCOUT_writeln(SCOUT_list_row(def.short_name: def.friendly));
   SCOUT_writeln('');
   SCOUT_writeln('');
-  SCOUT_writeln('Defined in: ' + %trim(def.defined_at));
+  // '<ad hoc>' - upstream's literal text for a specifier with no definition
+  // file (SCMAIN_adhoc never sets defined_at, so blank means exactly that).
+  // Found live, 20 September 2026, widening ad-hoc-specifier coverage
+  // beyond naming: RMSC printed 'Defined in: ' with nothing after it.
+  if %len(%trim(def.defined_at)) = 0;
+    SCOUT_writeln('Defined in: <ad hoc>');
+  else;
+    SCOUT_writeln('Defined in: ' + %trim(def.defined_at));
+  endif;
   SCOUT_writeln('');
   // OMITTED ENTIRELY when `dir` was never set, not printed with a resolved
   // path invented for it - upstream has no line here for the common case.
@@ -861,7 +871,47 @@ dcl-proc SCEXEC_info export;
     // rendered as 'PGM:x' where upstream has no such form and says
     // 'JOBNAME:PGM-X'; and a port rendered from the converted number, so a
     // criterion upstream shows as PORT:abc appeared here as PORT:0.
-    line += SCDEF_criterion_text(def.criteria(i));
+    ctext = SCDEF_criterion_text(def.criteria(i));
+
+    // AD HOC ONLY, and only the VALUE after the label. Found live, 20
+    // September 2026, widening ad-hoc-specifier coverage beyond naming:
+    // upstream's info shows an ad-hoc criterion lower-cased - measured on
+    // BOTH shapes it can take, 'JOBNAME:qinter' (typed job:QINTER or
+    // job:qinter alike) and 'PORT:abc' (typed port:aBc - upstream still
+    // lower-cases an unusable, non-numeric port value) - where RMSC showed
+    // 'JOBNAME:QINTER' / 'PORT:aBc', the case SCMAIN_adhoc stores
+    // criterion.raw in for JOB matching (correct there - docs/parity.md;
+    // a numeric port has no case for this to affect either way).
+    //
+    // NOT for PGM-, on purpose, and this is the one shape not measured:
+    // upstream REFUSES a PGM- specifier outright (docs/parity.md, "PGM- is
+    // deliberately NOT brought into line"), so there is no upstream
+    // rendering of an ad-hoc PGM- criterion to match. A DEFINED service's
+    // own check_alive: PGM-X already renders 'JOBNAME:PGM-X' upper-cased
+    // (SCDEF.RPGLE) specifically so the defined and ad-hoc forms of the
+    // same program agree with EACH OTHER; lower-casing only the ad-hoc one
+    // here would reopen that self-agreement for a case upstream has no
+    // opinion on at all.
+    //
+    // This does not touch SCDEF_criterion_text, criterion.raw, or a
+    // defined service's own check_alive text anywhere else it is used
+    // (SCCOLL's duplicate-criterion detection, SCEXEC_evaluate's unusable/
+    // failed-criteria text) - only measured for info's ad-hoc case.
+    if %len(%trim(def.defined_at)) = 0
+        and def.criteria(i).kind <> SCDEF_CHECK_PGM;
+      colon = %scan(':': ctext);
+      // colon < %len(ctext), not just > 0: SCDEF_criterion_text always
+      // returns 'LABEL:value', but an EMPTY value (unreachable today - both
+      // SCMAIN_adhoc branches that reach here require more than four
+      // characters past the prefix - see docs/testing-notes.md's %SUBST
+      // trap) would put the colon at the very last position, and
+      // %SUBST(ctext: colon + 1) one past the end of a varchar abends.
+      if colon > 0 and colon < %len(ctext);
+        ctext = %subst(ctext: 1: colon) + STRING_lower(%subst(ctext: colon + 1));
+      endif;
+    endif;
+
+    line += ctext;
   endfor;
   SCOUT_writeln(line);
 

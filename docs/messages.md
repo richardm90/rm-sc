@@ -476,6 +476,16 @@ The full upstream shape, from the staged definition that exercises every branch:
 
 `Shutdown Command:` is absent when `stop_cmd` is unset, which is what RMSC already does.
 
+**Two more, specific to an AD-HOC specifier (`port:N`/`job:NAME`), found and fixed 20 September
+2026 while widening `tools/adhoc-name-test.sh` past the ad-hoc name into a full-output diff —
+see `docs/parity.md`, "Beyond the operations — specifiers".** `Defined in:` reads `<ad hoc>`
+verbatim when there is no definition file, where RMSC printed `Defined in: ` with nothing after
+it. `Check-alive conditions:` lower-cases a JOB criterion's value regardless of typed case
+(`JOBNAME:qinter`, never `JOBNAME:QINTER`) — a different surface from, and not to be confused
+with, the ad-hoc NAME's case (preserved, see `docs/parity.md`'s "Ad-hoc services are named
+differently") or `criterion.raw`'s own case (upper, kept for case-insensitive matching,
+unchanged by this fix).
+
 ### `jobinfo`
 
 A structural difference rather than a wording one. **Measured 3 September.**

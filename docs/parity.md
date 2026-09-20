@@ -1005,6 +1005,71 @@ non-collision control (an unclaimed port still falls back to ad hoc) — both pa
 gate's live differential confirms it on 5 real services with no regression. Neither half is
 client-affecting — the client uses short names and `group:` only.
 
+**The gate itself cannot widen to ad-hoc specifiers — `tools/adhoc-name-test.sh` did instead,
+20 September 2026 (Closing Verification step 8, item 3).** `tools/fidelity-gate.sh` sweeps
+`<op> <service>` over the names `scr list` returns; an ad-hoc service has no definition and
+appears in no `list`, so there is no specifier anywhere in the gate, and widening it would mean
+re-capturing its byte-exact `BASELINE` for ad-hoc rows — a fixture that names a live system's
+services and lives outside this repository for exactly that reason. `tools/adhoc-name-test.sh`
+already had every other piece (both binaries, live capture, the specifier forms), so a new
+stage 7 there does the same thing the gate does for named services — a full, byte-for-byte
+`stdout`/`stderr` diff — for `check`, `jobinfo`, `info` and `loginfo` (not `file`/`scrunattrs`,
+whole-surface intentional divergences regardless of what names the service; not `perfinfo`,
+which carries its own settled partial differences the gate already has dedicated handling for),
+over three representative specifiers (`port:22`, `job:QINTER`, `job:QUSRWRK/QINTER`).
+
+**It found two real, previously uncatalogued differences, both confined to `info`, both fixed the
+same day.** `check`, `jobinfo` and `loginfo` matched upstream byte for byte on every specifier
+tested, with no changes needed.
+
+- **`Defined in: <ad hoc>`.** Upstream's literal text for a specifier with no definition file;
+  RMSC printed `Defined in: ` with nothing after it, because `def.defined_at` is legitimately
+  blank for an ad-hoc definition (only a real file load ever sets it) and `info`'s write
+  (`SCEXEC.RPGLE`) never checked for that case. This was not a new finding in the sense of never
+  having been looked at — `tools/adhoc-name-test.sh`'s own "WHAT IS DELIBERATELY NOT ASSERTED"
+  list named it on 10 September 2026, alongside three other `info` differences that have since
+  been fixed by other work (the eight-difference close, 18 September; the relative-`dir:`
+  question, 20 September). This is the one that outlived all three, because nothing had ever
+  actually asserted it. Fixed by printing `<ad hoc>` when `defined_at` is blank.
+- **`Check-alive conditions: ...` case.** Upstream lower-cases an ad-hoc criterion's *value* in
+  `info` regardless of how it was typed — measured on both shapes it can take: `job:QINTER`,
+  `job:qinter` and `job:QUSRWRK/QINTER` all display as `JOBNAME:qinter` /
+  `JOBNAME:qusrwrk/qinter`, and even a non-numeric, unusable port (`port:aBc`) displays as
+  `PORT:abc`, lower-cased the same way. A first version of this fix, before peer review, excluded
+  `PORT` criteria from the lower-casing on the unmeasured assumption that only JOB criteria were
+  affected — `port:aBc` was the one case the original three specifiers could not separate, and
+  checking it directly overturned the assumption. RMSC showed the JOB form in the case
+  `criterion.raw` is deliberately stored for MATCHING — upper-case, per the ad-hoc naming
+  decision above ("Case is preserved, not upper-cased" is about the ad-hoc NAME; the criterion
+  used for matching is a different field and is upper-cased on purpose). This is a genuinely new
+  finding — `tools/adhoc-name-test.sh` had a stage specifically pinning that the criterion stayed
+  upper-cased, but it read that fact back out of `info`'s own display, which is precisely the
+  surface that turned out to be wrong. Fixed at the `info` write site only (not
+  `SCDEF_criterion_text`, which is shared with `SCCOLL`'s duplicate-criterion detection and
+  `SCEXEC_evaluate`'s unusable/failed-criteria text — those were not measured here and are not
+  touched): the displayed value is lower-cased when the service is ad hoc and the criterion is
+  not `PGM-` — deliberately excluded, and the one shape *not* measured, because upstream refuses
+  a `PGM-` specifier outright (see above) and so never renders one at all; a defined service's
+  own `check_alive: PGM-X` already renders `JOBNAME:PGM-X` upper-cased specifically so the
+  defined and ad-hoc forms of the same program agree with each other, and lower-casing only the
+  ad-hoc one would have reopened that self-agreement for a case upstream has no opinion on.
+  `criterion.raw` itself is untouched, and matching remains exactly as case-insensitive as before.
+
+`tools/adhoc-name-test.sh`'s own pinned check for "the criterion stays upper-cased" was reading
+`info`'s display, so fixing the difference it pinned necessarily changed what it saw — not a
+regression in the pin, its observation point going stale. Re-pointed at SELF-consistency rather
+than at upstream's answer: the same specifier, typed upper- and lower-case, must get the *same*
+status from RMSC either way, whatever that status is — checked directly rather than via whether
+a real job happens to be up today, since `job:QUSRWRK/QINTER` measured NOT RUNNING on both
+implementations while this was being written, which would have made a "matches upstream's
+answer" version of the pin pass regardless of whether case-insensitive matching still worked (the
+same shape of gap CLAUDE.md's own `>= 0` example describes — a check that accepts the fallback
+value cannot tell "handled" from "defaulted"). A companion row confirms upstream is
+case-insensitive here too, so the self-consistency check is provably testing the right thing.
+`tools/adhoc-name-test.sh`: 54 cases, 0 failures, 0 pinned-behaviour changes, 0 reference drift.
+Confirmed live against the real `sc`/`scr` binaries on all three specifier forms, plus the
+`port:aBc` control.
+
 ## Beyond the operations — inputs read before an operation starts
 
 Two more, found while correcting discovery. Neither is reachable from anything the gate runs
@@ -1414,22 +1479,26 @@ anything that ran, which is the argument for the fixture pack rather than a foot
 2. ~~Decide the two specifier differences~~ — **decided AND implemented.** `PGM-` stays an RMSC
    extension (unchanged). `port:N` matches an existing definition first, falling back to ad hoc
    only when none carries that port — decided 18 September 2026, implemented the same round.
-3. Widen the gate to exercise `port:` and `job:` specifiers, so the ad-hoc naming difference is
-   covered by something that runs rather than by this paragraph.
+3. ~~Widen the gate to exercise `port:` and `job:` specifiers~~ — **done, 20 September 2026.**
+   `tools/fidelity-gate.sh` itself is still structurally unable to (see "Beyond the operations —
+   specifiers", "WHY A NEW FILE" in `tools/adhoc-name-test.sh`, for the reasoning against widening
+   it directly — re-capturing its byte-exact `BASELINE` for ad-hoc rows would be a large,
+   external-to-this-repo change for a question a live differential answers just as well). The
+   widening landed instead as a new stage in `tools/adhoc-name-test.sh`, which already had every
+   piece the gate itself would have needed (specifiers, both binaries, live capture) and none of
+   the reason not to use them. See "Beyond the operations — specifiers" below for what it found.
 4. ~~Remove whatever is settled from the gate's `UNDECIDED` list~~ — **done, 20 September 2026.**
    The per-recorded-difference tightening this depended on landed 19 September (see "The gate"
    above) for the one operation that needed it, `perfinfo`. `info`'s relative-`dir:` question —
    the one thing still on `UNDECIDED` — closed 20 September (see "Beyond the operations — a
    definition's real location, not the symlink's" above); `tools/fidelity-gate.sh`'s `UNDECIDED`
    is now empty, and the gate itself reports **"GATE OK: step 8 complete - every difference is
-   intentional and listed"** for the first time. Item 3 below is not part of what the gate checks
-   for that message, and remains open.
+   intentional and listed"** for the first time.
 
-**Item 3 above — widening the gate to exercise `port:`/`job:` specifiers directly — is the one
-piece of this list still not done.** The `port:N`-matches-an-existing-definition behaviour
-(item 2) is implemented and correct, but nothing that runs exercises it; it is covered by
-description here and by `tools/adhoc-name-test.sh`'s own fixtures, not by the fidelity gate's
-live sweep against real services.
+**All four items in this list are now done.** Verification step 8 is complete both in the sense
+`tools/fidelity-gate.sh` checks (every difference on a defined service is intentional and listed)
+and in the sense this list tracked separately (ad-hoc specifiers now have the same standing,
+live-differential coverage named services always had).
 
 Also decided 18 September 2026: the `sc: ` stderr prefix, **dropped 19 September 2026**.
 Short-versus-friendly naming, **re-checked 19 September 2026: already applied everywhere it is
