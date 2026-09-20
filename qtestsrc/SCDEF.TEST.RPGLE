@@ -104,6 +104,45 @@ dcl-pr ut_drop like(BOOLEAN_t);
   prefix varchar(512) const;
 end-pr;
 
+// Symlinked-definition block - see SYMLINKED DEFINITIONS RECORD THE REAL PATH
+// at the foot of this suite. c_symlink is bound straight to the C library:
+// nothing already included here creates a symbolic link, and this is the one
+// place in the suite that needs one.
+dcl-pr c_symlink int(10) extproc('symlink');
+  target   pointer value options(*string);
+  linkpath pointer value options(*string);
+end-pr;
+
+dcl-pr sym_base like(STMF_t) end-pr;
+dcl-pr sym_real_dir like(STMF_t) end-pr;
+dcl-pr sym_link_dir like(STMF_t) end-pr;
+
+dcl-pr sym_real_path like(STMF_t);
+  name like(STMF_t) const;
+end-pr;
+
+dcl-pr sym_link_path like(STMF_t);
+  name like(STMF_t) const;
+end-pr;
+
+dcl-pr sym_stage like(BOOLEAN_t);
+  name    like(STMF_t) const;
+  content like(STRING_t) const;
+end-pr;
+
+// Like sym_stage, but the symlink is created pointing at an EXACT target
+// text supplied by the caller rather than always the real file's own
+// absolute path - for a relative target, or a second hop pointing at
+// another symlink rather than the real file.
+dcl-pr sym_stage_link like(BOOLEAN_t);
+  link_path   like(STMF_t) const;
+  link_target like(STMF_t) const;
+end-pr;
+
+dcl-pr sym_teardown;
+  name like(STMF_t) const;
+end-pr;
+
 //==============================================================================
 // Suite set-up and tear-down
 //==============================================================================
@@ -5065,5 +5104,371 @@ dcl-proc test_no_unknown_keys_reports_none export;
   iEqual(0: def.unknown_count:
          'every key in this file is one RMSC knows, so nothing is ' +
          'unrecognised');
+
+end-proc;
+
+//##############################################################################
+// SYMLINKED DEFINITIONS RECORD THE REAL PATH, NOT THE SYMLINK'S OWN PATH
+//
+// Found live on 20 September 2026 against a currently-installed service:
+// /QOpenSys/etc/sc/services/mapepire.yaml is a symlink to the real file at
+// /QOpenSys/pkgs/lib/mapepire/mapepire.yaml, which sets `dir: .` and a
+// relative start_cmd. Upstream's `info` reports the REAL path as "Defined
+// in:" and resolves `dir: .` against the REAL file's directory. RMSC today
+// records and resolves against the SYMLINK's own path and directory instead
+// - for this real service, on this box, that reaches a start_cmd that does
+// not exist, where upstream's resolution reaches the real, existing binary.
+// Not cosmetic: a symlinked definition with a relative dir: fails to start
+// correctly under RMSC as it stands.
+//
+// Fixture layout, built and torn down entirely under its own directory
+// (never under g_dir, and never left for tearDownSuite's remove_fixtures to
+// find - that helper only knows flat '.yaml' files directly inside g_dir,
+// and would fail its own removal if handed a subdirectory or a symlink):
+//
+//     sym_base()/real/<name>.yaml       <- the real file, written directly
+//     sym_base()/via_link/<name>.yaml   <- a symlink to the file above
+//
+// EVERY CASE HERE IS A DIRECT/SYMLINK PAIR, LOADING THE SAME REAL FILE. The
+// direct load (straight off sym_real_path) is the control: it is not a copy
+// with matching content, it is the identical file the symlink points at, so
+// "the symlink load must agree with the direct load" is a comparison of two
+// live results, not two hard-coded strings. Today the pair DISAGREES on
+// defined_at (the bug); the fix must make it agree. Each case also pins the
+// expected value directly (against sym_real_path/sym_real_dir), so a fix
+// that made both sides agree on some other, still-wrong, value would not
+// pass by coincidence.
+//
+// c_symlink is asserted before anything built on it is trusted, the same
+// discipline load_fixture already applies to IFS_open_file.
+//
+// 20/09/2026 - test author - written against the defect, before the fix
+//##############################################################################
+
+//------------------------------------------------------------------------------
+// sym_base / sym_real_dir / sym_link_dir - the fixture's own directory tree
+//
+// Qualified by user, like pt_dir, and created lazily on each call - harmless
+// if it already exists.
+//------------------------------------------------------------------------------
+dcl-proc sym_base;
+  dcl-pi *n like(STMF_t);
+  end-pi;
+
+  dcl-s d like(STMF_t);
+
+  d = '/tmp/rmsc-scdef-symlink-test-' + %trim(psds.current_user);
+  IFS_crtdir(d);
+
+  return d;
+
+end-proc;
+
+dcl-proc sym_real_dir;
+  dcl-pi *n like(STMF_t);
+  end-pi;
+
+  dcl-s d like(STMF_t);
+
+  d = %trim(sym_base()) + '/real';
+  IFS_crtdir(d);
+
+  return d;
+
+end-proc;
+
+dcl-proc sym_link_dir;
+  dcl-pi *n like(STMF_t);
+  end-pi;
+
+  dcl-s d like(STMF_t);
+
+  d = %trim(sym_base()) + '/via_link';
+  IFS_crtdir(d);
+
+  return d;
+
+end-proc;
+
+dcl-proc sym_real_path;
+  dcl-pi *n like(STMF_t);
+    name like(STMF_t) const;
+  end-pi;
+
+  return %trim(sym_real_dir()) + '/' + %trim(name);
+
+end-proc;
+
+dcl-proc sym_link_path;
+  dcl-pi *n like(STMF_t);
+    name like(STMF_t) const;
+  end-pi;
+
+  return %trim(sym_link_dir()) + '/' + %trim(name);
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// sym_stage - write the real file, then symlink to it
+//
+// Asserts on both the write and the symlink - a suite that pressed on with
+// either missing would not be testing what it claims to.
+//------------------------------------------------------------------------------
+dcl-proc sym_stage;
+  dcl-pi *n like(BOOLEAN_t);
+    name    like(STMF_t) const;
+    content like(STRING_t) const;
+  end-pi;
+
+  dcl-s path   like(STMF_t);
+  dcl-s link   like(STMF_t);
+  dcl-s handle like(INTEGER_t);
+  dcl-s rc     int(10);
+
+  path = sym_real_path(name);
+  link = sym_link_path(name);
+
+  // A run that failed a previous assertion never reaches sym_teardown
+  // (assert ends the procedure by escape message), which would otherwise
+  // leave this symlink on disk and fail EVERY run after it at c_symlink
+  // with EEXIST - reporting a fixture accident as a code failure. Removed
+  // first, unconditionally, the same discipline ut_drop already applies.
+  IFS_remove_file(link);
+
+  handle = IFS_open_file(path: IFS_OPEN_TYPE_WRITE);
+  assert((handle >= 0): 'Could not create fixture ' + %trim(path) +
+                        ' - ' + %trim(IFS_error_text()));
+
+  IFS_write_utf8(handle: content);
+  IFS_close_file(handle);
+
+  rc = c_symlink(%trim(path): %trim(link));
+  assert((rc = 0): 'Could not create symlink ' + %trim(link) + ' -> ' +
+                   %trim(path) + ' (symlink() returned ' + %char(rc) + ')');
+
+  return true;
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// sym_teardown - remove one fixture's real file, symlink and directories
+//
+// Best-effort in the same way pt_load_def's IFS_dltdir is: harmless if
+// another case's fixture is still in there, since the last case out takes
+// the directories with it.
+//------------------------------------------------------------------------------
+dcl-proc sym_teardown;
+  dcl-pi *n;
+    name like(STMF_t) const;
+  end-pi;
+
+  IFS_remove_file(sym_link_path(name));
+  IFS_remove_file(sym_real_path(name));
+  IFS_dltdir(sym_link_dir());
+  IFS_dltdir(sym_real_dir());
+  IFS_dltdir(sym_base());
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// sym_stage_link - create ONE symlink at an exact path, pointing at an
+// exact target text, verbatim. Used for a target that is RELATIVE (sym_stage
+// always writes an absolute one) and for a second hop pointing at another
+// symlink rather than at the real file - neither of which sym_stage itself
+// can express, and both of which the direct/symlink pair above never
+// exercises, since every target there is the real file's own absolute path.
+//------------------------------------------------------------------------------
+dcl-proc sym_stage_link;
+  dcl-pi *n like(BOOLEAN_t);
+    link_path   like(STMF_t) const;
+    link_target like(STMF_t) const;
+  end-pi;
+
+  dcl-s rc int(10);
+
+  IFS_remove_file(link_path);
+
+  rc = c_symlink(%trim(link_target): %trim(link_path));
+  assert((rc = 0): 'Could not create symlink ' + %trim(link_path) + ' -> ' +
+                   %trim(link_target) + ' (symlink() returned ' +
+                   %char(rc) + ')');
+
+  return true;
+
+end-proc;
+
+//==============================================================================
+// THE CORE DEFECT - defined_at follows the symlink today; it must follow the
+// real file instead
+//==============================================================================
+
+dcl-proc test_symlinked_definition_records_the_real_path export;
+
+  dcl-ds def_direct likeds(SCDEF_t) inz(*likeds);
+  dcl-ds def_link   likeds(SCDEF_t) inz(*likeds);
+
+  assert(sym_stage('symdefat.yaml':
+    'name: symdefat' + LF +
+    'start_cmd: /usr/bin/webproxy' + LF +
+    'check_alive: 8080' + LF): 'fixture staged');
+
+  assert(SCDEF_load(sym_real_path('symdefat.yaml'): def_direct):
+         'direct load of the real file');
+  assert(SCDEF_load(sym_link_path('symdefat.yaml'): def_link):
+         'load through the symlink - the content is read transparently, ' +
+         'which already works today');
+
+  aEqual(sym_real_path('symdefat.yaml'): def_direct.defined_at:
+         'the direct load records its own real path');
+
+  aEqual(def_direct.defined_at: def_link.defined_at:
+         'loading the SAME file through a symlink must record the same ' +
+         'real path as loading it directly - today it records the ' +
+         'symlink''s own path instead');
+
+  sym_teardown('symdefat.yaml');
+
+end-proc;
+
+//==============================================================================
+// THE PART THAT ACTUALLY MATTERS FOR A RUNNING SERVICE - dir: . must resolve
+// against the real file's directory, not the symlink's
+//==============================================================================
+
+dcl-proc test_symlinked_definition_dir_dot_resolves_to_the_real_directory export;
+
+  dcl-ds def_direct likeds(SCDEF_t) inz(*likeds);
+  dcl-ds def_link   likeds(SCDEF_t) inz(*likeds);
+
+  assert(sym_stage('symdirdot.yaml':
+    'name: symdirdot' + LF +
+    'start_cmd: ../../bin/webproxy' + LF +
+    'check_alive: 8080' + LF +
+    'dir: .' + LF): 'fixture staged');
+
+  assert(SCDEF_load(sym_real_path('symdirdot.yaml'): def_direct):
+         'direct load of the real file');
+  assert(SCDEF_load(sym_link_path('symdirdot.yaml'): def_link):
+         'load through the symlink');
+
+  aEqual(%trim(sym_real_dir()) + '/.': SCDEF_effective_dir(def_direct):
+         'direct load resolves dir: . against its own real directory');
+
+  aEqual(SCDEF_effective_dir(def_direct): SCDEF_effective_dir(def_link):
+         'the symlinked load must resolve dir: . against the SAME real ' +
+         'directory as the direct load - today it resolves against the ' +
+         'symlink''s directory instead, which is where a relative ' +
+         'start_cmd would actually be launched from');
+
+  sym_teardown('symdirdot.yaml');
+
+end-proc;
+
+//==============================================================================
+// THE SAME FIX APPLIES WHEN dir: IS NEVER SET AT ALL
+//==============================================================================
+
+dcl-proc test_symlinked_definition_dir_absent_resolves_to_the_real_directory export;
+
+  dcl-ds def_direct likeds(SCDEF_t) inz(*likeds);
+  dcl-ds def_link   likeds(SCDEF_t) inz(*likeds);
+
+  assert(sym_stage('symdirnone.yaml':
+    'name: symdirnone' + LF +
+    'start_cmd: /usr/bin/webproxy' + LF +
+    'check_alive: 8080' + LF): 'fixture staged');
+
+  assert(SCDEF_load(sym_real_path('symdirnone.yaml'): def_direct):
+         'direct load of the real file');
+  assert(SCDEF_load(sym_link_path('symdirnone.yaml'): def_link):
+         'load through the symlink');
+
+  aEqual(sym_real_dir(): SCDEF_effective_dir(def_direct):
+         'no dir: means the real file''s own directory');
+
+  aEqual(SCDEF_effective_dir(def_direct): SCDEF_effective_dir(def_link):
+         'with no dir: at all, the symlinked load must still resolve to ' +
+         'the real directory, not the symlink''s - today it resolves to ' +
+         'the symlink''s directory instead');
+
+  sym_teardown('symdirnone.yaml');
+
+end-proc;
+
+//==============================================================================
+// A RELATIVE symlink target - every case above uses sym_stage, which always
+// writes an ABSOLUTE target, so none of them can tell "resolves the target"
+// apart from "resolves an absolute target specifically". A relative one
+// (found by review) is the shape mapepire's own real symlink actually is -
+// '../../../pkgs/lib/mapepire/mapepire.yaml' - and needs its own case.
+//==============================================================================
+
+dcl-proc test_symlinked_definition_relative_target_records_the_real_path
+    export;
+
+  dcl-ds def_direct likeds(SCDEF_t) inz(*likeds);
+  dcl-ds def_link   likeds(SCDEF_t) inz(*likeds);
+
+  assert(sym_stage('symrel.yaml':
+    'name: symrel' + LF +
+    'start_cmd: /usr/bin/webproxy' + LF +
+    'check_alive: 8080' + LF): 'fixture staged');
+
+  // Overwrite sym_stage's own (absolute) symlink with one whose target text
+  // is RELATIVE - via_link/ and real/ are siblings under sym_base(), so
+  // '../real/<name>' reaches the same file sym_stage's absolute form did.
+  assert(sym_stage_link(sym_link_path('symrel.yaml'):
+                         '../real/symrel.yaml'): 'relative symlink staged');
+
+  assert(SCDEF_load(sym_real_path('symrel.yaml'): def_direct):
+         'direct load of the real file');
+  assert(SCDEF_load(sym_link_path('symrel.yaml'): def_link):
+         'load through the RELATIVE-target symlink');
+
+  aEqual(def_direct.defined_at: def_link.defined_at:
+         'a relative symlink target must record the same real path as a ' +
+         'direct load - resolving it against the LINK''s own directory, ' +
+         'not leaving the ../ segments unresolved');
+
+  sym_teardown('symrel.yaml');
+
+end-proc;
+
+//==============================================================================
+// A CHAIN OF TWO SYMLINKS - link2 -> link1 -> the real file. Nothing above
+// exercises more than one hop; resolve_symlinks's bounded loop exists
+// specifically to follow a chain, and nothing pins that it actually does.
+//==============================================================================
+
+dcl-proc test_symlinked_definition_two_hop_chain_records_the_real_path
+    export;
+
+  dcl-ds def_direct likeds(SCDEF_t) inz(*likeds);
+  dcl-ds def_chain  likeds(SCDEF_t) inz(*likeds);
+  dcl-s  hop1_path  like(STMF_t);
+
+  assert(sym_stage('symchain.yaml':
+    'name: symchain' + LF +
+    'start_cmd: /usr/bin/webproxy' + LF +
+    'check_alive: 8080' + LF): 'fixture staged, hop 1 (sym_stage''s own ' +
+                               'link) points straight at the real file');
+
+  // hop 2: a second symlink, sharing hop 1's directory, pointing at hop 1 -
+  // not at the real file - so loading THIS path needs two hops resolved.
+  hop1_path = sym_link_path('symchain.yaml');
+  assert(sym_stage_link(%trim(sym_link_dir()) + '/symchain2.yaml':
+                         hop1_path): 'hop 2 symlink staged, pointing at hop 1');
+
+  assert(SCDEF_load(sym_real_path('symchain.yaml'): def_direct):
+         'direct load of the real file');
+  assert(SCDEF_load(%trim(sym_link_dir()) + '/symchain2.yaml': def_chain):
+         'load through TWO hops of symlink');
+
+  aEqual(def_direct.defined_at: def_chain.defined_at:
+         'a two-hop chain must resolve all the way to the real file, the ' +
+         'same as a direct load - not stop at the first hop');
+
+  IFS_remove_file(%trim(sym_link_dir()) + '/symchain2.yaml');
+  sym_teardown('symchain.yaml');
 
 end-proc;

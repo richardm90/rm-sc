@@ -49,6 +49,25 @@ dcl-pr enabled_is_true like(BOOLEAN_t);
   value like(SCYAML_VALUE_t) const;
 end-pr;
 
+dcl-pr dir_part like(STMF_t);
+  path like(STMF_t) const;
+end-pr;
+
+dcl-pr resolve_symlinks like(STMF_t);
+  path like(STMF_t) const;
+end-pr;
+
+dcl-pr normalize_path like(STMF_t);
+  path like(STMF_t) const;
+end-pr;
+
+// Bound straight to the C library for resolve_symlinks, below - see there.
+dcl-pr c_readlink int(10) extproc('readlink');
+  path   pointer value options(*string);
+  buf    pointer value;
+  bufsiz uns(10) value;
+end-pr;
+
 dcl-pr is_known_key like(BOOLEAN_t);
   key like(SCYAML_KEY_t) const;
 end-pr;
@@ -148,7 +167,18 @@ dcl-proc SCDEF_from_doc export;
 
   def = SCDEF_BLANK;
 
-  def.defined_at = stmf;
+  // The REAL path, symlinks followed - not necessarily stmf itself. Found
+  // live, 20 September 2026, against a real, currently-installed service:
+  // /QOpenSys/etc/sc/services/mapepire.yaml is a symlink to the real file
+  // at /QOpenSys/pkgs/lib/mapepire/mapepire.yaml, which sets `dir: .` and a
+  // relative start_cmd. Upstream reports and resolves against the REAL
+  // file's location; RMSC used to keep the discovered (symlink) path and
+  // directory instead - for this exact service, that reaches a start_cmd
+  // that does not exist on this box, where upstream's resolution reaches
+  // the real, existing binary. defined_at feeds both 'Defined in:' and
+  // SCDEF_effective_dir, which SCLAUNCH actually cd's into before running
+  // start_cmd - so this is a launch-correctness fix, not only a display one.
+  def.defined_at = resolve_symlinks(stmf);
 
   // Upstream takes the short name from the file name, lower-cased.
   //
@@ -159,6 +189,12 @@ dcl-proc SCDEF_from_doc export;
   // the suites - and those callers can pass any path at all. Removing this
   // would leave those callers with a short name that no longer matches how
   // every other part of RMSC spells it.
+  //
+  // FROM stmf, DELIBERATELY, not from defined_at above - a symlink named
+  // differently from its target still names the SERVICE the way discovery
+  // found it. Not separately measured against upstream; only same-named
+  // links (the real, staged, and tested shape) have been - a link renaming
+  // its target is untested territory if it is ever reached.
   def.short_name = STRING_lower(PATH_name(stmf));
 
   // A cluster definition is rejected rather than silently half-honoured:
@@ -753,6 +789,177 @@ dcl-proc SCDEF_clear export;
 end-proc;
 
 //==============================================================================
+// dir_part
+//   The directory containing a path - shared by SCDEF_effective_dir, below,
+//   and resolve_symlinks. NAMING NOTE, since this is exactly where the
+//   mistake keeps getting made in this codebase (docs/testing-notes.md,
+//   "`out` is the OUT opcode", six instances and counting): a local here
+//   called 'out' does not compile, and the diagnostic does not say so.
+//==============================================================================
+
+dcl-proc dir_part;
+  dcl-pi *n like(STMF_t);
+    path like(STMF_t) const;
+  end-pi;
+
+  dcl-s slash like(INTEGER_t);
+
+  slash = %scanr('/': path);
+  if slash > 1;
+    return %subst(path: 1: slash - 1);
+  endif;
+
+  return '.';
+
+end-proc;
+
+//==============================================================================
+// resolve_symlinks
+//   The real path a chain of symlinks resolves to, or the path unchanged if
+//   it cannot be resolved or is not IFS-absolute - a definition must not
+//   become invalid because a file that was just read successfully briefly
+//   could not be re-stat'd, and SCDEF_from_doc's own comment records that a
+//   caller (the bound-call API, the suites) can hand this ANY path, not
+//   only one discovery produced - so a relative one is passed through
+//   untouched rather than mis-anchored at the root.
+//
+//   ONLY THE FINAL COMPONENT IS RESOLVED - a symlinked PARENT DIRECTORY on
+//   the way to the file is not, unlike a true realpath(). Confirmed live,
+//   20 September 2026: none of /QOpenSys/etc, /QOpenSys/etc/sc,
+//   /QOpenSys/etc/sc/services, /QOpenSys/pkgs or /QOpenSys/pkgs/lib is a
+//   symlink on this box, so mapepire's own chain does not exercise the
+//   gap. If a future service's path does, 'Defined in:' would differ from
+//   upstream's full resolution with nothing here to explain why.
+//==============================================================================
+
+dcl-proc resolve_symlinks;
+  dcl-pi *n like(STMF_t);
+    path like(STMF_t) const;
+  end-pi;
+
+  dcl-s current like(STMF_t);
+  dcl-s target  like(STMF_t);
+  dcl-s buf     char(1025);
+  dcl-s n       int(10);
+  dcl-s hop     like(INTEGER_t);
+
+  // NOT %trim(path) - path is already varchar, and a trailing blank in a
+  // real filename is part of the name, the same reason SCCOLL.RPGLE never
+  // trims one either ("the name exactly as readdir gave it").
+  current = path;
+  if %len(current) = 0 or %subst(current: 1: 1) <> '/';
+    return current;
+  endif;
+
+  // QC2LE (the ILE C runtime this binds against) has no realpath() -
+  // CPD5D02 "Definition not found for symbol 'realpath'", found live
+  // trying it. readlink() resolves ONE level; the bounded loop below
+  // follows a chain, the same as realpath() would, and stops (keeping
+  // whatever it has so far) the moment readlink() fails - which is also
+  // exactly what happens for a path that is not a symlink at all, so that
+  // case needs no separate check.
+  for hop = 1 to 10;
+    n = c_readlink(current: %addr(buf): %size(buf));
+    // buf is ONE BYTE WIDER than STMF_t's 1024-character maximum, on
+    // purpose: readlink() fills up to bufsiz bytes and does not
+    // null-terminate, so a target that exactly filled a 1024-byte buffer
+    // would be indistinguishable from one truncated at 1024. n = 1025
+    // means the real target did not fit at all; either way, past 1024 it
+    // cannot be held in current (like(STMF_t)) without EVAL silently
+    // cutting it - so this stops and keeps what it already has, the same
+    // safe fallback as readlink() failing outright.
+    if n <= 0 or n > 1024;
+      leave;
+    endif;
+    target = %subst(buf: 1: n);
+
+    if %subst(target: 1: 1) = '/';
+      current = target;
+    else;
+      // A relative target resolves against the LINK's own directory - the
+      // same rule SCDEF_effective_dir applies to a relative dir:, below.
+      current = dir_part(current) + '/' + target;
+    endif;
+    current = normalize_path(current);
+  endfor;
+
+  return current;
+
+end-proc;
+
+//==============================================================================
+// normalize_path
+//   Collapse '.' and '..' segments out of an IFS-absolute path -
+//   readlink() returns the target exactly as the symlink stores it, so a
+//   relative target concatenated onto the link's own directory can carry
+//   '../..' straight through. Functionally harmless (the IFS resolves '..'
+//   itself), but upstream's own 'Defined in:' is already clean, and a
+//   definition's path is compared byte for byte there.
+//
+//   Only called from resolve_symlinks, which has already refused anything
+//   not IFS-absolute - so 'path' here always starts with '/'.
+//
+//   Segments are NOT trimmed - SCCOLL.RPGLE deliberately keeps a filename's
+//   own trailing blanks for the same reason ("the name exactly as readdir
+//   gave it"), and a trim here would silently open a different path than
+//   the symlink actually named.
+//==============================================================================
+
+dcl-proc normalize_path;
+  dcl-pi *n like(STMF_t);
+    path like(STMF_t) const;
+  end-pi;
+
+  dcl-s work  like(STMF_t);
+  dcl-s seg   like(STMF_t);
+  dcl-s built like(STMF_t) inz('');
+  dcl-s slash like(INTEGER_t);
+  dcl-s last  like(INTEGER_t);
+
+  work = path;
+  if %len(work) > 1;
+    work = %subst(work: 2);
+  else;
+    work = '';
+  endif;
+
+  dow %len(work) > 0;
+    slash = %scan('/': work);
+    if slash = 0;
+      seg = work;
+      work = '';
+    elseif slash = %len(work);
+      seg = %subst(work: 1: slash - 1);
+      work = '';
+    else;
+      seg = %subst(work: 1: slash - 1);
+      work = %subst(work: slash + 1);
+    endif;
+
+    select;
+      when seg = '' or seg = '.';
+        // a doubled '/' or a no-op segment - drop it
+      when seg = '..';
+        last = %scanr('/': built);
+        if last > 1;
+          built = %subst(built: 1: last - 1);
+        else;
+          built = '';
+        endif;
+      other;
+        built = built + '/' + seg;
+    endsl;
+  enddo;
+
+  if %len(built) = 0;
+    return '/';
+  endif;
+
+  return built;
+
+end-proc;
+
+//==============================================================================
 // enabled_is_true
 //   Is this the value upstream reads as enabling the service?
 //
@@ -892,16 +1099,9 @@ dcl-proc SCDEF_effective_dir export;
   end-pi;
 
   dcl-s base like(STMF_t);
-  dcl-s slash like(INTEGER_t);
 
   // The directory holding the definition file
-  base = def.defined_at;
-  slash = %scanr('/': base);
-  if slash > 1;
-    base = %subst(base: 1: slash - 1);
-  else;
-    base = '.';
-  endif;
+  base = dir_part(def.defined_at);
 
   if %len(%trim(def.dir)) = 0;
     return base;

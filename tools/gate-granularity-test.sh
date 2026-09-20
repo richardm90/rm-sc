@@ -67,13 +67,19 @@ report() { printf '  %-9s %-28s %s\n' "$1" "$2" "$3"; }
 # a test of the classifier, not a second copy of the fixture pack, so
 # nothing but perfinfo is given anything NEW to disagree about:
 #
-#   check, loginfo, jobinfo   klass=none    - identical both sides, PASS
-#   file, scrunattrs          intentional   - differ both sides, by design
-#   info                      undecided     - differ both sides, undecided
+#   check, loginfo, jobinfo, info   klass=none  - identical both sides, PASS
+#   file, scrunattrs                intentional - differ both sides, by design
+#
+# info moved into the first group 20 September 2026, when its own last
+# UNDECIDED item (the relative dir: question) closed and
+# tools/fidelity-gate.sh's UNDECIDED list went empty - there is currently no
+# real operation this stub can imitate to exercise an "undecided" verdict,
+# and inventing a fake UNDECIDED entry in production code just to keep a
+# test case would be worse than not having the case.
 #
 # Without this, a stub returning the same fixed text for every operation
-# makes file/scrunattrs/info each RECLASSIFY - "now matches, remove it from
-# the list" - which fails the gate for reasons that have nothing to do with
+# makes file/scrunattrs each RECLASSIFY - "now matches, remove it from the
+# list" - which fails the gate for reasons that have nothing to do with
 # perfinfo, and would make a passing run here look like a failing one.
 cat > "$WORK/bin/fake-sc" <<'FAKE_SC'
 #!/QOpenSys/pkgs/bin/bash
@@ -159,8 +165,8 @@ if [ -z "$svc" ]; then
   exit 0
 fi
 case "$op" in
-  file|scrunattrs|info) printf 'STUB-SCR-DIFFERENT %s %s\n' "$op" "$svc"; exit 0 ;;
-  check|loginfo|jobinfo) printf 'STUB-SC %s %s\n' "$op" "$svc"; exit 0 ;;
+  file|scrunattrs) printf 'STUB-SCR-DIFFERENT %s %s\n' "$op" "$svc"; exit 0 ;;
+  check|loginfo|jobinfo|info) printf 'STUB-SC %s %s\n' "$op" "$svc"; exit 0 ;;
 esac
 runpty_a=50; purge_a='*YES'
 runpty_b=30; purge_b='*NO'

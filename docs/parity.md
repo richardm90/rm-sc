@@ -62,7 +62,7 @@ that step asks for.
 | *(colour off when not a TTY)* | assertion | **pass** | — |
 | `file` | live differential | **by design** | upstream prints the definition's *path*; RMSC prints its *contents* |
 | `scrunattrs` | live differential | **by design** | upstream lists running jobs and their run attributes; RMSC prints the `SCOMMANDER_*` variables it sets |
-| `info` | live differential | **undecided** (one item open, not this) | all eight measured differences matched 18 September 2026 — the gate's remaining `info` difference is the separate, pre-existing relative-`dir:` question, not one of the eight |
+| `info` | live differential | **pass** | all eight measured differences matched 18 September 2026; the separate relative-`dir:` question closed 20 September 2026 — see below |
 | `jobinfo` | live differential | **pass** | matched 10 September 2026 — header, indent, not-running text, per-command blank line and colour |
 | `loginfo` | live differential | **pass** (one item open, not this) | matched 9 September 2026, stopped-service scoping matched 18 September 2026, log-filename scheme matched 19 September 2026 — see below |
 | `perfinfo` | live differential | **by design** | two differences, both settled: four affinity lines per job that no API carries, and the order of the job blocks, which upstream draws from a hash and RMSC sorts — see below. The gate checks for exactly these two and nothing else, per-recorded-difference since 19 September 2026 — see "The gate" |
@@ -72,8 +72,12 @@ that step asks for.
 | `restart` | not gated | — | as above |
 | `reload` | n/a | **out of scope** | cluster-only upstream. RMSC does not recognise the verb at all — see below |
 
-Nine of the thirteen operations RMSC accepts are gated. Four are undecided, and that is what
-keeps Verification step 8 open.
+Nine of the thirteen operations RMSC accepts are gated. **None are on the gate's `UNDECIDED` list
+as of 20 September 2026** — `info`'s relative-`dir:` question was the last one; see
+"IMPLEMENTED, 20 September 2026" below. `tools/fidelity-gate.sh` reports "step 8 complete" for
+the first time. That is the gate's own list, not every open question about these operations:
+`info`'s field-label and rule-line colour is a separate, still-deliberately-open item — see
+"Beyond the operations — colour" below — the gate does not check colour at all.
 
 ## The gate
 
@@ -534,14 +538,26 @@ prints a `Group:` line at all — the one item here that was an RMSC addition wi
 counterpart, unlike `PGM-` above, which upstream actively rejects and RMSC deliberately keeps as
 an extension.
 
-`tools/info-test.sh` (new) pins the shape against three staged definitions — full (two
-dependencies, a group, custom environment variables, no `dir`), minimal (nothing set), and one
-with `dir` set to an absolute path as the regression control for the direction that already
-worked. All 30 checks pass, and the fidelity gate's live differential now matches on 4 of the 5
-real services swept; the fifth, `mapepire`, still differs on `Defined in:` and a raw-versus-
-resolved `Working Directory: .` — the separate, already-documented relative-`dir:` question (see
-`tools/gate-fixtures/README.md`'s `rmscgate_info_reldir`), not one of the eight and not touched by
-this work.
+`tools/info-test.sh` (new 18 September, extended 20 September) pins the shape against staged
+definitions — full (two dependencies, a group, custom environment variables, no `dir`), minimal
+(nothing set), one with `dir` set to an absolute path as the regression control for the direction
+that already worked, and (added 20 September) one with `dir: .` for the relative case, below.
+
+**The separate relative-`dir:` question — DECIDED and IMPLEMENTED 20 September 2026.** Until this
+date, the fidelity gate's live differential matched on 4 of the 5 real services swept; the fifth,
+`mapepire`, differed on `Defined in:` and a raw-versus-resolved `Working Directory: .` (see
+`tools/gate-fixtures/README.md`'s `rmscgate_info_reldir`). Investigating it turned up more than a
+display difference — see "A definition's real location, not the symlink's" below, in "Beyond the
+operations". The decision: `Working Directory:` now prints `dir:`'s raw value, exactly as
+upstream does (`SCEXEC.RPGLE`, the `info` write, changed from `SCDEF_effective_dir(def)` to
+`def.dir`); the resolved form is still what `SCDEF_effective_dir` returns for the ACTUAL launch,
+via `SCLAUNCH`, which must keep resolving correctly and now does so against the real, symlink-
+followed location rather than the raw one. `tools/info-test.sh`'s new `RELDIR` case pins the
+display; `qtestsrc/SCDEF.TEST.RPGLE`'s new symlink cases pin the resolution. The fidelity gate now
+matches on all 5 real services, `info` moved from `UNDECIDED` to fully matching
+(`tools/fidelity-gate.sh` reported `RECLASSIFY` the moment this landed, confirming the list was
+right to update), and **Verification step 8 is complete** for the first time — see "Closing
+Verification step 8" below.
 
 **`perfinfo`** — the plan looked like it settled this and did not. It calls the operation
 *"Improved — drops upstream's optional Python 3 + `ibm_db` dependency, since embedded SQL reads
@@ -1157,6 +1173,74 @@ instead, and honours it the same way. The concept and the search order match; th
 differs because it has to. **By design**, and recorded here because a reader comparing the two
 will otherwise find a property with no counterpart.
 
+## Beyond the operations — a definition's real location, not the symlink's
+
+Found 20 September 2026 while picking up the last piece of Verification step 8: `info`'s
+relative-`dir:` question (see above). Looked at first as a display decision — does `Working
+Directory:` show the raw `dir:` value or a resolved one — and turned out to also be a real
+correctness bug, on a real, currently-installed service.
+
+**The service:** `mapepire`, discovered by RMSC via `/QOpenSys/etc/sc/services/mapepire.yaml`,
+which is a **symlink** to the real file at `/QOpenSys/pkgs/lib/mapepire/mapepire.yaml`. That real
+file sets `dir: .` and a relative `start_cmd: ../../bin/mapepire`.
+
+**Measured, live, side by side:**
+
+| | upstream | RMSC (before the fix) |
+|---|---|---|
+| `Defined in:` | `/QOpenSys/pkgs/lib/mapepire/mapepire.yaml` (the real file) | `/QOpenSys/etc/sc/services/mapepire.yaml` (the symlink) |
+| `dir: .` resolves against | the real file's directory | the symlink's own directory |
+
+Upstream resolves the symlink before recording where a definition came from; RMSC recorded
+wherever it was *discovered* — the directory-walk path, straight off `IFS_readdir`, with nothing
+resolving it further. Traced to `SCDEF_from_doc` (`QRPGLESRC/SCDEF.RPGLE`), which set
+`def.defined_at` directly from the path it was handed.
+
+**Why this is not cosmetic.** `def.defined_at` feeds two things, not one: `info`'s `Defined in:`
+line, and `SCDEF_effective_dir` — which `SCLAUNCH.RPGLE` actually `cd`s into before running
+`start_cmd`. For `mapepire`, on this box, RMSC's (wrong) resolution reaches
+`/QOpenSys/etc/bin/mapepire` — confirmed live, this path does not exist — where upstream's
+correct resolution reaches `/QOpenSys/pkgs/bin/mapepire`, confirmed to exist. A symlinked
+definition with a relative `dir:` would fail to start correctly under RMSC as it stood, silently,
+until someone tried.
+
+**Fixed by resolving the real path before storing it.** `resolve_symlinks` (new,
+`QRPGLESRC/SCDEF.RPGLE`), called from `SCDEF_from_doc` when `def.defined_at` is set. QC2LE (the
+ILE C runtime RMSC binds against) has no `realpath()` — `CPD5D02: Definition not found for symbol
+'realpath'`, found live trying it — so this is built from `readlink()` instead: a bounded loop
+(ten hops, generous for any real chain) that follows one symlink at a time, resolving a relative
+target against the link's own directory the same way `SCDEF_effective_dir` already resolves a
+relative `dir:`, and stopping the moment `readlink()` fails — which is also exactly what happens
+for a path that was never a symlink at all, so that case needs no separate check. A second helper,
+`normalize_path`, collapses the `../..` segments a relative `readlink()` target leaves behind
+before storing the result, so `Defined in:` matches upstream byte for byte rather than merely
+resolving to the same place via IFS traversal.
+
+A separate, blind test author (given the measured defect and `SCDEF_load`/`SCDEF_effective_dir`'s
+existing prototypes, never the implementation) wrote three `iRPGUnit` cases, each a direct-load/
+symlinked-load pair over the SAME real file: today the pair disagrees on `def.defined_at` and on
+`SCDEF_effective_dir(def)` (the bug); after the fix, both must produce the SAME value as the
+direct load, for `dir: .`, and for no `dir:` at all. All three pinned values against the real
+file's own path, not only against each other, so a fix that made both sides agree on some other,
+still-wrong, value would not pass by coincidence. `qtestsrc/SCDEF.TEST.RPGLE`: 126 test cases,
+654 assertions, 0 failures.
+
+`tools/info-test.sh`'s new `RELDIR` fixture and the fidelity gate's real `mapepire` sweep both
+confirm the display side; the `SCDEF.TEST.RPGLE` cases confirm the side that actually matters for
+a running service. **By design once fixed** — not a divergence recorded and left, an actual defect
+closed.
+
+**What was actually measured, stated so it is not overclaimed.** `defined_at` feeds four things,
+not one: `info`'s `Defined in:`, `SCDEF_effective_dir` (measured, both here and by the new unit
+tests), `SCCOLL`'s "Unrecognized attribute" warning, and `SCOMMANDER_DEFINED_AT` (the environment
+variable a launched service receives). Only the first two were measured against upstream through
+a symlink. `file` is unaffected — confirmed live, `scr file` prints the raw YAML content
+regardless (the already-recorded whole-surface divergence, above), never `defined_at` at all. The
+other two almost certainly improve for the same reason `Defined in:` does, since upstream
+presumably uses one resolved value throughout rather than one per call site, but "almost
+certainly" is not "measured" — worth confirming if either is ever the thing actually being
+debugged.
+
 ## Beyond the operations — colour
 
 `check` is compared with colour off, because colour is suppressed whenever stdout is not a
@@ -1332,11 +1416,20 @@ anything that ran, which is the argument for the fixture pack rather than a foot
    only when none carries that port — decided 18 September 2026, implemented the same round.
 3. Widen the gate to exercise `port:` and `job:` specifiers, so the ad-hoc naming difference is
    covered by something that runs rather than by this paragraph.
-4. Remove whatever is settled from the gate's `UNDECIDED` list. It will then report step 8
-   complete, and fail if any of it silently changes afterwards. **The per-recorded-difference
-   tightening this depended on is done** — see "The gate" above — for the one operation that
-   needed it, `perfinfo`. `info` is still on `UNDECIDED`, for the separate relative-`dir:`
-   question, so step 8 is not complete yet.
+4. ~~Remove whatever is settled from the gate's `UNDECIDED` list~~ — **done, 20 September 2026.**
+   The per-recorded-difference tightening this depended on landed 19 September (see "The gate"
+   above) for the one operation that needed it, `perfinfo`. `info`'s relative-`dir:` question —
+   the one thing still on `UNDECIDED` — closed 20 September (see "Beyond the operations — a
+   definition's real location, not the symlink's" above); `tools/fidelity-gate.sh`'s `UNDECIDED`
+   is now empty, and the gate itself reports **"GATE OK: step 8 complete - every difference is
+   intentional and listed"** for the first time. Item 3 below is not part of what the gate checks
+   for that message, and remains open.
+
+**Item 3 above — widening the gate to exercise `port:`/`job:` specifiers directly — is the one
+piece of this list still not done.** The `port:N`-matches-an-existing-definition behaviour
+(item 2) is implemented and correct, but nothing that runs exercises it; it is covered by
+description here and by `tools/adhoc-name-test.sh`'s own fixtures, not by the fidelity gate's
+live sweep against real services.
 
 Also decided 18 September 2026: the `sc: ` stderr prefix, **dropped 19 September 2026**.
 Short-versus-friendly naming, **re-checked 19 September 2026: already applied everywhere it is

@@ -247,8 +247,8 @@ this pack shipped a collision it would have caught.
 
 | File | Covers |
 |---|---|
-| `rmscgate_info_full.yaml` | every `info`-visible key at once, chosen to reach all four of the `info` differences `docs/parity.md` lists as **undecided** |
-| `rmscgate_info_reldir.yaml` | `dir: .` — raw upstream, resolved in RMSC; and resolution against the **file's** location, not the caller's |
+| `rmscgate_info_full.yaml` | every `info`-visible key at once, chosen to reach the differences `docs/parity.md` once listed as **undecided** for this operation - all now closed |
+| `rmscgate_info_reldir.yaml` | `dir: .` — raw in `info` on both sides now (closed 20 September 2026); resolution (for launching) against the **file's** location, not the caller's, and now the real file's location when reached via a symlink |
 | `rmscgate_defaults.yaml` | the smallest legal definition; pins `startup_wait_time` 60, `stop_wait_time` 45, inheriting vars true |
 | `rmscgate_deps_empty.yaml` | `service_dependencies: []`, the pack's only YAML flow sequence |
 | `rmscgate_deps_one.yaml` | a dependency that resolves, inside the pack. **The one base fixture that is not self-contained** — install `base/` whole |

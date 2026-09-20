@@ -685,9 +685,10 @@ Ordered by size rather than by importance:
    carries. See `docs/parity.md`.
 2. **The usage block** — now measured verbatim, 33 lines, wanted by four rows and by D3. Large to
    type, trivial to get right.
-3. **`info`** — eight differences, of which two are shape rather than spelling: the dependency
-   header, and a `Working Directory:` line RMSC invents for every definition that does not set
-   `dir`.
+3. ~~**`info`**~~ — **done, 18 September 2026 (all eight); a separate ninth, relative-`dir:`
+   question closed 20 September 2026.** Of the eight, two were shape rather than spelling: the
+   dependency header, and a `Working Directory:` line RMSC invented for every definition that did
+   not set `dir`. See `docs/parity.md`.
 4. ~~**Narration**~~ — **decided and implemented, 3 September 2026.** RMSC narrates. See
    `docs/parity.md`.
 5. **The load-failure split into two lines** — fixes the wording and `-q` together.

@@ -272,6 +272,20 @@ the fourth instance already named: **the note has to be where someone is
 about to choose the name, not filed under a different procedure that already
 survived it.** Renamed to `kept`; the module compiled clean immediately after.
 
+**Sixth instance, 20 September 2026, in `normalize_path` (the symlink-
+resolution fix for item "info's `dir:` question", `QRPGLESRC/SCDEF.RPGLE`).**
+Same shape, same symptoms, same file family (a path-building accumulator
+named `out`) - the fourth and fifth instances happened in `SCOUT.RPGLE` and
+`SCMAIN.RPGLE` respectively; this one is `SCDEF.RPGLE`'s own first. Found in
+seconds this time, purely from recognising the symptom pattern on sight
+(`RNF5008`/`RNF7560`/`RNF7260` together, no semicolon error at the point that
+actually matters) - the one case so far where the note in this file was
+read *before* choosing the name would have prevented it, and wasn't, because
+writing new code from a design already worked out in a prompt does not
+pause to check a testing-notes file first. Renamed to `built`, and this time
+a warning was left at the declaration itself (see `dir_part` in
+`SCDEF.RPGLE`), not only here - the fourth instance's own point, applied.
+
 ## iRPGUnit truncates your failure message at 64 characters
 
 `iEqual`, `nEqual` and `aEqual` declare `fieldName varchar(64)` with **no

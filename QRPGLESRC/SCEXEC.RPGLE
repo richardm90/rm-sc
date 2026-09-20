@@ -829,8 +829,14 @@ dcl-proc SCEXEC_info export;
   // OMITTED ENTIRELY when `dir` was never set, not printed with a resolved
   // path invented for it - upstream has no line here for the common case.
   // DECIDED 18 September 2026, docs/parity.md.
+  //
+  // THE RAW VALUE, NOT SCDEF_effective_dir(def) - the formerly-separate
+  // open question ("info's dir: question"), decided 20 September 2026.
+  // Upstream prints `dir:` exactly as written, relative or not; only the
+  // ACTUAL launch (SCLAUNCH, via SCDEF_effective_dir) needs the resolved
+  // form, and must keep getting it - this line is display only.
   if %len(%trim(def.dir)) > 0;
-    SCOUT_writeln('Working Directory: ' + %trim(SCDEF_effective_dir(def)));
+    SCOUT_writeln('Working Directory: ' + %trim(def.dir));
     SCOUT_writeln('');
   endif;
   SCOUT_writeln('Startup Command: ' + %trim(def.start_cmd));

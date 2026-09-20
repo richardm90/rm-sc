@@ -30,7 +30,7 @@
 #     tools/verify.sh suites gate          a quick pass while iterating
 #
 # Stage names are the lower-case words below: suites, narration, api-silence,
-# error-delivery, load-warning, loginfo, jobinfo, adhoc-name, sampletime,
+# error-delivery, load-warning, loginfo, jobinfo, info, adhoc-name, sampletime,
 # colour, gate, gate-granularity, fixture-pack.
 #
 # A PARTIAL RUN IS NOT A VERIFICATION. The stage list exists for the edit-run
@@ -72,7 +72,7 @@ want() {
 
 # Reject a stage name that matches nothing, rather than running a subset the
 # caller did not ask for and reporting it as a pass.
-ALL="suites narration api-silence error-delivery load-warning loginfo jobinfo adhoc-name sampletime colour gate gate-granularity fixture-pack"
+ALL="suites narration api-silence error-delivery load-warning loginfo jobinfo info adhoc-name sampletime colour gate gate-granularity fixture-pack"
 for w in $WANTED; do
   case " $ALL " in
     *" $w "*) ;;
@@ -212,6 +212,12 @@ harness loginfo         tools/loginfo-test.sh        4
 # pinned job-order row - the one row whose meaning is that something nobody
 # asked for has changed. A failure is diagnosed by running the harness directly.
 harness jobinfo         tools/jobinfo-test.sh        6
+# NEVER WIRED IN HERE UNTIL 20 September 2026, despite being described as
+# "new" in docs/parity.md since 18 September - a gap found while extending it
+# for the reldir fixture, not by anything that ran. 4 lines: the summary plus
+# the two-line OK/FAILED/REFDRIFT block; a failure is diagnosed by running
+# tools/info-test.sh directly, the same trade-off tools/loginfo-test.sh makes.
+harness info            tools/info-test.sh           4
 # STAGES NOTHING AT ALL for the six stages that matter, and that is the point of
 # it: an ad-hoc service is named on the command line and has no definition, so
 # there is no fixture to own. It reads port 22, which is listening because this

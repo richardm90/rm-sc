@@ -11,11 +11,14 @@
 # assertion style) and tools/loginfo-test.sh (for report/PASS/FAIL/REFDRIFT and
 # the "stage N" banner comments).
 #
-# NONE OF THIS IS IMPLEMENTED YET. Every case below is written to FAIL against
-# RMSC as it stands, for a NAMED reason - not "diff found something", but
-# "blank-lines-after-name=1 (wanted 2)" or the equivalent. It is written before
-# the fix, per this project's rule: a red test proves the test can detect the
-# defect; a test written afterwards proves only that it agrees with the code.
+# WRITTEN BEFORE THE FIX, and every case below is still built the same way -
+# to FAIL against RMSC as it stood, for a NAMED reason ("blank-lines-after-
+# name=1 (wanted 2)", not "diff found something"). That is now history for
+# the original eight: they landed 18-19 September 2026 and all eight PASS.
+# The RELDIR fixture is the exception - added 20 September 2026, AFTER its
+# own fix, because the fix and the finding (a real launch-path bug, not just
+# an info-display one - see docs/parity.md) arrived in the same piece of
+# work; its own banner in stage 1 below says so.
 #
 # ---------------------------------------------------------------------------
 # WHAT IS BEING TESTED, and WHERE IT COMES FROM
@@ -166,9 +169,11 @@
 #   compares RMSC's entries to that set, so the case is correct whichever form
 #   upstream turns out to use. See "UNCERTAIN, FLAGGED" below.
 #
-#   RELATIVE `dir:` RESOLUTION. A separate, open question recorded in
-#   tools/gate-fixtures/README.md (rmscgate_info_reldir) and not part of the
-#   eight decided differences here. DIRSET uses an absolute path on purpose.
+#   RELATIVE `dir:` RESOLUTION - CLOSED 20 September 2026, and RELDIR below
+#   is what asserts it now (see its own banner in stage 1). It was a
+#   separate, open question, not part of the eight decided differences here
+#   - DIRSET stays absolute on purpose, as the control for the direction
+#   that was already correct.
 #
 #   COLOUR. docs/parity.md records `info`'s field-label and rule-line colour
 #   as still open, deliberately, because "colouring the body before the
@@ -283,6 +288,7 @@ SVCDIR="$WORK/services"
 FULL=zzinfo_full;     FULL_F='Zulu Info Full'
 MIN=zzinfo_min;       MIN_F='Zulu Info Min'
 DIRSET=zzinfo_dirset; DIRSET_F='Zulu Info Dirset'
+RELDIR=zzinfo_reldir; RELDIR_F='Zulu Info Reldir'
 DEP1=zzinfo_dep1;     DEP1_F='Zulu Info Dep One'
 DEP2=zzinfo_dep2;     DEP2_F='Zulu Info Dep Two'
 GROUP=zzinfo_grp
@@ -328,6 +334,19 @@ name: $DIRSET_F
 start_cmd: /QOpenSys/usr/bin/true
 check_alive: zzinfodeaddirset
 dir: $DIRVAL
+EOF
+
+# RELDIR - the separate, formerly-open question (docs/parity.md, "info's
+# dir: question"), now decided: 'dir: .' is the exact shape a real,
+# currently-installed service on this box uses (mapepire.yaml), so this
+# fixture is not synthetic in spirit even though its own name is. Upstream
+# prints the raw string as written; RMSC used to resolve it to an absolute
+# path (the bug this fixture exists to catch a regression of).
+cat > "$SVCDIR/$RELDIR.yaml" <<EOF
+name: $RELDIR_F
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: zzinfodeadreldir
+dir: .
 EOF
 
 cleanup() { [ -n "${KEEP:-}" ] || rm -rf "$WORK"; }
@@ -597,8 +616,8 @@ printf '      groups, environment variables, and the closing separator\n'
 printf 'scr: %s\n' "$SCR"
 printf 'sc:  %s (%s)\n' "$SC" \
   "$("$SC" --version 2>/dev/null </dev/null | head -n 1 || echo 'version unknown')"
-printf 'fixtures: %s (deps+group+env, no dir), %s (nothing set, no dir), %s (dir set)\n\n' \
-  "$FULL" "$MIN" "$DIRSET"
+printf 'fixtures: %s (deps+group+env, no dir), %s (nothing set, no dir), %s (dir set), %s (dir: .)\n\n' \
+  "$FULL" "$MIN" "$DIRSET" "$RELDIR"
 
 # ---------------------------------------------------------------------------
 echo "== stage 0: the fixture. Nothing below is evidence until every row passes"
@@ -608,7 +627,7 @@ heading
 
 # (a) EVERY DEFINITION LOADS.
 fail_load=()
-for pair in "$FULL:$FULL_F" "$MIN:$MIN_F" "$DIRSET:$DIRSET_F" "$DEP1:$DEP1_F" "$DEP2:$DEP2_F"; do
+for pair in "$FULL:$FULL_F" "$MIN:$MIN_F" "$DIRSET:$DIRSET_F" "$RELDIR:$RELDIR_F" "$DEP1:$DEP1_F" "$DEP2:$DEP2_F"; do
   n="${pair%%:*}"
   grab "chk.$n" "$SCR_ENV" "$SCR" check "$n"
   grep -qE "^  NOT RUNNING *\| $n \(" "$WORK/chk.$n.out" || fail_load+=("$n did not load as NOT RUNNING: $(cat "$WORK/chk.$n.out")")
@@ -616,13 +635,13 @@ done
 if [ ${#fail_load[@]} -ne 0 ]; then
   hard_fail fixture-definitions "${fail_load[@]}"
 fi
-report PASS fixture-definitions "all five staged definitions load"
+report PASS fixture-definitions "all six staged definitions load"
 pass=$((pass+1))
 
 # (b) THE GROUP HOLDS ONLY $FULL - so the group-removal case (6) has something
 # real to prove RMSC no longer prints a line for.
 grab chk.group "$SCR_ENV" "$SCR" check "group:$GROUP"
-gm=$(grep -cE "\| ($FULL|$MIN|$DIRSET|$DEP1|$DEP2) \(" "$WORK/chk.group.out" 2>/dev/null || true)
+gm=$(grep -cE "\| ($FULL|$MIN|$DIRSET|$RELDIR|$DEP1|$DEP2) \(" "$WORK/chk.group.out" 2>/dev/null || true)
 [ -n "$gm" ] || gm=0
 if [ "$gm" -ne 1 ] || ! grep -qF -- "$FULL (" "$WORK/chk.group.out"; then
   hard_fail group-membership \
@@ -632,17 +651,19 @@ fi
 report PASS group-membership "group:$GROUP holds only $FULL"
 pass=$((pass+1))
 
-# (c) CAPTURE ALL SIX `info` RUNS - streams apart, before any assertion reads
-# them, and check for a crash before trusting anything below.
+# (c) CAPTURE ALL EIGHT `info` RUNS - streams apart, before any assertion
+# reads them, and check for a crash before trusting anything below.
 grab scr.full   "$SCR_ENV" "$SCR" info "$FULL"
 grab sc.full    "$SC_ENV"  "$SC"  info "$FULL"
 grab scr.min    "$SCR_ENV" "$SCR" info "$MIN"
 grab sc.min     "$SC_ENV"  "$SC"  info "$MIN"
 grab scr.dirset "$SCR_ENV" "$SCR" info "$DIRSET"
 grab sc.dirset  "$SC_ENV"  "$SC"  info "$DIRSET"
+grab scr.reldir "$SCR_ENV" "$SCR" info "$RELDIR"
+grab sc.reldir  "$SC_ENV"  "$SC"  info "$RELDIR"
 
 abend=()
-for tag in scr.full sc.full scr.min sc.min scr.dirset sc.dirset; do
+for tag in scr.full sc.full scr.min sc.min scr.dirset sc.dirset scr.reldir sc.reldir; do
   if grep -qE "$ABEND_RE" "$WORK/$tag.out" "$WORK/$tag.err" 2>/dev/null; then
     abend+=("$tag: $(grep -hE -m1 "$ABEND_RE" "$WORK/$tag.out" "$WORK/$tag.err")")
   fi
@@ -651,7 +672,7 @@ done
 if [ ${#abend[@]} -ne 0 ]; then
   hard_fail captures "${abend[@]}"
 fi
-report PASS captures "all six 'info' runs completed, exit 0, no abend"
+report PASS captures "all eight 'info' runs completed, exit 0, no abend"
 pass=$((pass+1))
 
 # (d) UPSTREAM ITSELF REACHES EVERY BRANCH THIS FILE IS BUILT TO CHECK. If it
@@ -663,6 +684,7 @@ branch=()
 [ "$(workdir_count "$WORK/sc.full.out")" -eq 0 ] || branch+=("upstream's own $FULL capture (dir: unset) prints 'Working Directory:' - the omission cannot be exercised")
 [ "$(workdir_count "$WORK/sc.min.out")" -eq 0 ] || branch+=("upstream's own $MIN capture (dir: unset) prints 'Working Directory:'")
 [ "$(workdir_count "$WORK/sc.dirset.out")" -ge 1 ] || branch+=("upstream's own $DIRSET capture (dir: set) does not print 'Working Directory:' at all")
+[ "$(workdir_line "$WORK/sc.reldir.out")" = 'Working Directory: .' ] || branch+=("upstream's own $RELDIR capture does not print the raw 'dir: .' value verbatim - got '$(workdir_line "$WORK/sc.reldir.out")'")
 [ "$(customvars_header_count "$WORK/sc.full.out")" -eq 1 ] || branch+=("upstream's own $FULL capture has no single 'Custom environment variables:' header")
 [ "$(customvars_entries "$WORK/sc.full.out" | grep -c '.')" -eq 2 ] || branch+=("upstream's own $FULL capture does not list 2 custom environment entries")
 [ "$(customvars_header_count "$WORK/sc.min.out")" -eq 0 ] || branch+=("upstream's own $MIN capture prints a 'Custom environment variables:' header with nothing staged")
@@ -680,6 +702,7 @@ pass=$((pass+1))
 dep_entries "$WORK/sc.full.out" > "$WORK/full.dep.want"
 printf 'ZZINFO_ONE=first\nZZINFO_TWO=second value with spaces\n' > "$WORK/full.env.want"
 DIRSET_WANT_LINE=$(workdir_line "$WORK/sc.dirset.out")
+RELDIR_WANT_LINE=$(workdir_line "$WORK/sc.reldir.out")
 
 echo
 # ---------------------------------------------------------------------------
@@ -701,6 +724,12 @@ mapfile -t P < <(workdir_problems "$WORK/scr.min.out" absent)
 verdict_row FAIL workdir-min "no 'Working Directory:' line - dir: was never set" "${P[@]}"
 mapfile -t P < <(workdir_problems "$WORK/scr.dirset.out" present "$DIRSET_WANT_LINE")
 verdict_row FAIL workdir-dirset "'Working Directory:' present and matches upstream - the direction that must not regress" "${P[@]}"
+# The formerly-separate open question: 'dir: .' - RMSC used to resolve it to
+# an absolute path (docs/parity.md, "info's dir: question"); upstream prints
+# it raw, and RMSC must now match that verbatim, byte for byte - computed
+# from upstream's own capture above, never assumed.
+mapfile -t P < <(workdir_problems "$WORK/scr.reldir.out" present "$RELDIR_WANT_LINE")
+verdict_row FAIL workdir-reldir "'Working Directory:' shows the RAW relative value, matching upstream - not resolved to an absolute path" "${P[@]}"
 
 # 4 - Batch Mode, unconditional (the key case is MIN, nothing else staged)
 mapfile -t P < <(batchmode_problems "$WORK/scr.min.out")
@@ -798,9 +827,6 @@ echo "artefacts: $WORK   (.out and .err per case; KEEP=1 to keep them)"
 #
 #   COLOUR of info's field labels and rule lines - deliberately still open in
 #   docs/parity.md, and not part of the eight differences this file covers.
-#
-#   RELATIVE dir: RESOLUTION - tools/gate-fixtures/README.md's
-#   rmscgate_info_reldir, a separate open question. DIRSET here is absolute.
 #
 #   WHICH IDENTITY FORM (short/friendly) A DEPENDENCY ENTRY USES - resolved by
 #   reading it back from upstream's own capture rather than pinned here.

@@ -198,11 +198,21 @@ STEP8_SYSTEM="${STEP8_SYSTEM:-system_admin1 system_telnet}"
 #               "DECIDED 18 September 2026, IMPLEMENTED 19 September 2026".
 INTENTIONAL="file scrunattrs perfinfo"
 
-# Divergences the plan does NOT settle either way. These need a decision before
-# step 8 can be called complete. Byte-exactness is required for check only, so
-# none of these is a correctness problem - but none is a documented choice.
+# Divergences the plan does NOT settle either way. Empty since 20 September
+# 2026 - see below for what used to be here and why it isn't a documented
+# choice needed for step 8 to be complete.
 #
-#   info        plan says only "Formatted definition dump"
+#   info        WAS here: the plan says only "Formatted definition dump",
+#               and matched on all eight decided differences 18 September
+#               2026 but for one separate, then-open question - a relative
+#               dir: resolved to an absolute path where upstream prints it
+#               raw (docs/parity.md, "info's dir: question"). DECIDED and
+#               FIXED 20 September 2026, alongside a real launch-path bug
+#               the same root cause turned out to cause (a symlinked
+#               definition's dir: resolving against the symlink's own
+#               location rather than the real file's - see
+#               QRPGLESRC/SCDEF.RPGLE, resolve_symlinks). Removed from this
+#               list the same day RECLASSIFY confirmed it: 0/5 differ now.
 #   jobinfo     matched 10 September 2026 and is on NEITHER list, for the
 #               same reason loginfo is: it now agrees on every swept service,
 #               so listing it as intentional would fire RECLASSIFY and fail
@@ -212,7 +222,7 @@ INTENTIONAL="file scrunattrs perfinfo"
 #               Do not read this entry's absence as the order having been
 #               matched; tools/jobinfo-test.sh compares the job SET for
 #               exactly that reason.
-UNDECIDED="info"
+UNDECIDED=""
 
 mkdir -p "$WORK"
 pass=0; bydesign=0; undecided_n=0; unexpected=0
