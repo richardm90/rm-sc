@@ -1320,14 +1320,16 @@ anything that ran, which is the argument for the fixture pack rather than a foot
 
 ## Closing Verification step 8
 
-1. ~~Decide the four undecided operations above~~ — **decided, 18 September 2026.** `info`: full
-   parity on all eight points, plus removing the `Group:` line. `loginfo`: match upstream on the
-   two items it had been left deliberately open on (stopped-service scoping, log-file naming).
-   `jobinfo` and the affinity half of `perfinfo` were already matched. None of this is implemented
-   yet.
-2. ~~Decide the two specifier differences~~ — **decided.** `PGM-` stays an RMSC extension
-   (unchanged). `port:N` will match an existing definition first, falling back to ad hoc only when
-   none carries that port — **decided 18 September 2026**, not yet implemented.
+1. ~~Decide the four undecided operations above~~ — **decided AND implemented, 18-19 September
+   2026.** `info`: full parity on all eight points, plus removing the `Group:` line — done.
+   `loginfo`: matches upstream on the two items it had been left deliberately open on
+   (stopped-service scoping, log-file naming) — done. `jobinfo` and the affinity half of
+   `perfinfo` were already matched. This list item was left saying "none of this is implemented
+   yet" for a day after all four had been closed — corrected here rather than left to mislead the
+   next reader.
+2. ~~Decide the two specifier differences~~ — **decided AND implemented.** `PGM-` stays an RMSC
+   extension (unchanged). `port:N` matches an existing definition first, falling back to ad hoc
+   only when none carries that port — decided 18 September 2026, implemented the same round.
 3. Widen the gate to exercise `port:` and `job:` specifiers, so the ad-hoc naming difference is
    covered by something that runs rather than by this paragraph.
 4. Remove whatever is settled from the gate's `UNDECIDED` list. It will then report step 8
