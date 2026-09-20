@@ -472,23 +472,46 @@ this project already uses one:
 
     until grep -q BUILD_DONE "$log"; do sleep 15; done
 
-## `SCAPI`'s staged-directory cases fail on their own, unrelated to whatever else you're doing
+## `SCAPI`'s staged-directory cases were failing on a stale fixture, not an environment problem
 
 Found 19 September 2026 while regression-testing item 8 (`scrc`/`SC_OPTIONS`), which never
-touches `SCAPI`, `SCDIRS`, or anything in the custom-services-directory path. Recorded so the
-next person to see it does not spend time looking at their own unrelated change first.
+touches `SCAPI`, `SCDIRS`, or anything in the custom-services-directory path. **Root-caused and
+fixed 20 September 2026** — recorded here in full because the first write-up of this note was
+itself a misdiagnosis, and it is worth knowing how.
 
-`tools/verify.sh suites` reports three `SCAPI` failures, all downstream of one cause:
-`TEST_STAGED_WIDTH_SERVICES_ARE_VISIBLE` says outright, in its own failure text, "SCDIRS did not
-read /tmp/rmsc-scapi-test-CLAUDE" — the test's own staged fixture directory
-(`SCAPI.TEST.RPGLE`'s `g_api_dir`, set via `ENVVAR_put(SCDIRS_CUSTOM_ENV: g_api_dir)`) is not
-there by the time the assertions run, and the other two failures are the wholeness cases falling
-over for the same reason rather than their own.
+`tools/verify.sh suites` reported three `SCAPI` failures, all traced by
+`TEST_STAGED_WIDTH_SERVICES_ARE_VISIBLE`'s own failure text to "SCDIRS did not read
+/tmp/rmsc-scapi-test-CLAUDE" — the test's own staged fixture directory
+(`SCAPI.TEST.RPGLE`'s `g_api_dir`, set via `ENVVAR_put(SCDIRS_CUSTOM_ENV: g_api_dir)`). That text
+is a guess written into the assertion message by whoever wrote the test, not a measurement, and
+it pointed the wrong way: the directory was being read fine. Adding a redundant `setUp` hook that
+re-issued `ENVVAR_put`/`SC_refresh` before every test case (mirroring `SCOUT.TEST.RPGLE`'s working
+per-test pattern) changed nothing — the three failures reproduced byte-for-byte, which is what
+ruled the environment-variable hypothesis out rather than in.
 
-**Confirmed pre-existing, not a regression from item 8's work**: reverted `SCMAIN.RPGLE`,
-`SCRUN.PGM.RPGLE`, `SCMAIN_D.rpgleinc` and `RMSC.BND` to the committed `HEAD` versions, rebuilt,
-and reran `SCAPI` alone - identical three failures, identical message. Not flaky either: reran
-twice more with no changes at all, same result both times. Not investigated further, because it
-is orthogonal to whatever brought you here; if you're the one who eventually looks at it, start
-from why the directory `ENVVAR_put` names is not there afterwards, not from whatever you changed.
+**The real cause**: two of `write_width_defs`'s three staged fixtures (`qtestsrc/SCAPI.TEST.RPGLE`
+— the 100-character-name fixture behind `g_apiln`, and the `API_TAIL` fixture used by the
+ignore-list pair) had no `name:` key. `SCDEF_from_doc` (`QRPGLESRC/SCDEF.RPGLE`) has refused any
+definition without one, outright, since 19 September 2026 — the same day this note was first
+written — matching upstream's own `Required attribute 'name' not specified` requirement. Both
+fixtures were therefore being silently rejected by `SCCOLL_load_dir` as bad definitions and never
+reaching the API at all, which reads exactly like "the directory was never read" from the
+assertions above it. Confirmed live: staging the identical fixture shape by hand against a real
+`SC OPTION(*CHECK)` reproduced `WARNING: ...: Service ... has no name` on stderr; adding a short
+`name:` line to both fixtures took the suite from 93 assertions/3 failures to 106 assertions/0
+failures.
+
+**Why `test_api_long_ignore_list_still_excludes` stayed green throughout**, and why that is not
+reassuring: with the `API_TAIL` fixture rejected, `api_has_name(list: API_TAIL)` was `false`
+regardless of the ignore list under test, which happens to be what that case asserts. Its control,
+`test_api_long_ignore_list_filler_matches_nothing`, asserts the opposite and is what actually went
+red — the pair only became a genuine separator once the fixture was fixed. A case that cannot
+fail is not passing; it is silent, and this is the same trap the project's own "test first"
+discipline (`CLAUDE.md`) names elsewhere.
+
+**The lesson for the next fixture that goes missing**: an assertion message that names only one
+cause of "not visible to the API" (directory not reached vs. definition refused at load) will be
+believed, and will send the next person down the wrong branch exactly as it did here. The
+assertions in this file now name both and point at the `Service ... has no ...` stderr line as the
+discriminator.
 

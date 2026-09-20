@@ -610,8 +610,10 @@ dcl-proc test_staged_failing_service_is_visible export;
 
   assert(SC_check(API_FAIL: row):
          'the staged definition ' + API_FAIL + ' is not visible to the API - ' +
-         'SCDIRS did not read ' + %trim(g_api_dir) + ', and every case below ' +
-         'would be asserting about an unknown service instead');
+         'either SCDIRS did not read ' + %trim(g_api_dir) + ', or the ' +
+         'staged definition was refused at load (look for ''Service ... ' +
+         'has no ...'' on stderr), and every case below would be ' +
+         'asserting about an unknown service instead');
 
   aEqualV(API_FAIL: row.NAME: 'the row is the staged service');
   aEqualV(SC_NOT_RUNNING: row.STATUS:
@@ -978,6 +980,17 @@ end-proc;
 // The names all begin 'zz' for the reason the failing fixtures above give: the
 // collection sorts by code point, so they land at the end and no case that
 // reads row 1 meets them.
+//
+// EVERY FIXTURE NEEDS 'name:'. SCDEF_from_doc refuses a definition without
+// one outright - upstream refuses it too ('Required attribute ''name'' not
+// specified'; RMSC's own wording is 'Service <short> has no name', unmatched
+// by design, see docs/parity.md) - and a fixture missing it is not staged,
+// it is silently absent. Found the hard way: the first and third fixtures
+// below shipped without it, and every case that depends on them failed
+// looking like a directory the API never read, not a rejected file. The
+// first fixture's own 'name:' is short and unrelated to the 100-character
+// width under test, so a width defect in short_name/friendly cannot hide
+// behind it.
 //------------------------------------------------------------------------------
 dcl-proc write_width_defs;
 
@@ -988,7 +1001,8 @@ dcl-proc write_width_defs;
   g_apiln  = api_name('ln': 100);
   g_apidsc = api_name('dsc': 200);
 
-  y = 'start_cmd: /QOpenSys/usr/bin/true' + LF;
+  y = 'name: Zz Api Long Name' + LF;
+  y += 'start_cmd: /QOpenSys/usr/bin/true' + LF;
   y += 'check_alive: 8181' + LF;
 
   path = %trim(g_api_dir) + '/' + %trim(g_apiln) + '.yaml';
@@ -998,6 +1012,7 @@ dcl-proc write_width_defs;
   IFS_write_utf8(handle: y);
   IFS_close_file(handle);
 
+  // name: required - see write_width_defs' own header above
   y = 'name: ' + %trim(g_apidsc) + LF;
   y += 'start_cmd: /QOpenSys/usr/bin/true' + LF;
   y += 'check_alive: 8182' + LF;
@@ -1009,7 +1024,9 @@ dcl-proc write_width_defs;
   IFS_write_utf8(handle: y);
   IFS_close_file(handle);
 
-  y = 'start_cmd: /QOpenSys/usr/bin/true' + LF;
+  // name: required - see write_width_defs' own header above
+  y = 'name: Zz Api Tail' + LF;
+  y += 'start_cmd: /QOpenSys/usr/bin/true' + LF;
   y += 'check_alive: 8183' + LF;
   y += 'groups:' + LF;
   y += '  - ' + API_TAILGRP + LF;
@@ -1044,9 +1061,11 @@ dcl-proc test_staged_width_services_are_visible export;
 
   assert(api_row_by_prefix(%subst(g_apiln: 1: 32): row):
          'the 100-character service is not visible to the API AT ALL, by ' +
-         'the first 32 characters of its name - SCDIRS did not read ' +
-         %trim(g_api_dir) + ', and the wholeness cases below would be ' +
-         'failing for that reason instead of for their own');
+         'the first 32 characters of its name - either SCDIRS did not read ' +
+         %trim(g_api_dir) + ', or the staged definition was refused at ' +
+         'load (look for ''Service ... has no ...'' on stderr) - and the ' +
+         'wholeness cases below would be failing for that reason instead ' +
+         'of for their own');
 
   assert(api_row_by_prefix(API_DESC_SVC: row):
          'the long-description service is visible');
