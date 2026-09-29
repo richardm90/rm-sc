@@ -576,6 +576,37 @@ Code Test Explorer — and a plain `.RPGLE` test has no such problem.
 
 ---
 
+## 11. A stable benchmark, 29 September 2026
+
+Sections 1-9 time a default `check`, which showed exactly three services at the time: `mapepire`,
+`rmcbackend`, `rmcnginx` (the only ones outside the default-excluded `system` group). A later
+rebuild of this box dropped `rmcbackend`/`rmcnginx` - they belong to a different application
+entirely (`docs/parity.md`, "recaptured 29 September 2026") - leaving a default `check` with just
+`mapepire`. A 1-service run cannot reproduce sections 1-9's per-call, multi-service figures, and
+re-timing it would not be a comparable re-run.
+
+**`check group:system` replaces it.** The 33 built-in `system_*` services (`system_sshd`,
+`system_ftp`, the `system_as-*` host servers, and so on) are IBM's own shipped definitions, not
+this box's own — recaptured across a rebuild without needing anything restored. Confirmed
+byte-identical between `sc check group:system` and `scr check group:system` before timing either
+(`docs/performance.md`'s own rule: "a faster run that prints the wrong thing is worthless").
+
+| | |
+|---|---|
+| `sc check group:system` — Java, 3 runs | 1.662s / 1.425s / 1.306s |
+| `scr check group:system` — RMSC, 12 runs | min 0.42s / median **0.70s** / max 0.91s |
+
+**Not directly comparable to sections 1-9's ratios, and that is the point of saying so rather
+than quoting one.** 33 services against a shared LPAR is a different shape of run from 3 - more
+dominated by per-service work, less by the fixed cost of starting a JVM versus a PASE job - so a
+ratio computed from this table would answer a different question than section 1's 2.19x. What
+this does establish, on a service set immune to this box's own churn: RMSC is still
+substantially faster than Java here (roughly 2x on the medians), and the byte-exact match holds
+at 33 services, not just 3. Reproduce with the same commands section 10 gives for `check`, with
+`group:system` appended to both sides.
+
+---
+
 All timings from a hosted IBM i 7.5 LPAR, 0.25 shared core. Figures for `check`, `list` and
 `groups` were taken only against runs whose output was verified byte-identical to the captured
 Java fixtures. Behavioural parity beyond those three operations is recorded in `parity.md`.
