@@ -44,6 +44,14 @@ diffs the default `list`, which shows only the three services a default `check` 
 agreement is held by a manual run, not by anything that runs on its own, and it is easy to
 mistake the green result for the stronger claim.
 
+**Closed 29 September 2026** — see "Closing Verification step 8" below for the mechanism. The
+service count above (36, and the plan's own "~39") is a snapshot of the box at the time it was
+measured, not a fixed figure: this box gets rebuilt regularly, and the count has already moved
+once since (down to 34 — `mapepire` plus the `system` group's 33 — when `rmcbackend`/`rmcnginx`,
+belonging to a different application entirely, dropped out of a rebuild). Nothing here depends on
+a particular count; `tools/gate-list-a-test.sh` proves the gate's coverage with a synthetic stand-in
+precisely so this does not need any specific real service to keep existing.
+
 For every operation beyond those three, the standard comes from Verification step 8 in the plan:
 
 > Side-by-side diff for the remaining operations against [five services]. **Differences must be
