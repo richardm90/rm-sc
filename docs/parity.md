@@ -1455,6 +1455,71 @@ the difference is known rather than discovered.
 Worth knowing if a definition ever does carry one: quoting the value (`'022'`) makes both
 implementations treat it as text, and is the portable way to write it.
 
+## Beyond the operations — `check_alive`'s DIRECT form doesn't know the ad-hoc prefixes
+
+**Found 29 September 2026, by accident, while building a throwaway detachment-test fixture** (a
+`check_alive: port:55499` line, copying the ad-hoc command-line specifier's own syntax — see
+"Beyond the operations — specifiers" — straight into a YAML file). **FIXED the same day**, after
+Richard's go-ahead to close it — see "Closed 29 September 2026" below.
+
+Upstream's `check_alive` parser recognises `port:N` and `job:N` (and, separately, `PGM-name` —
+already handled by RMSC) as PREFIXES even when they arrive through the DIRECT form
+(`check_alive: <value>`, no companion `check_alive_criteria:` key), stripping the prefix and
+parsing what is left. Measured via `info`'s `Check-alive conditions:` line, `services.dir`
+pointed at a throwaway definition, both sides:
+
+| written | upstream reads it as | RMSC reads it as |
+|---|---|---|
+| `check_alive: port:55499` | `PORT:55499` | `JOBNAME:PORT:55499` |
+| `check_alive: job:QSYSWRK/QSQSRVR` | `JOBNAME:QSYSWRK/QSQSRVR` | `JOBNAME:JOB:QSYSWRK/QSQSRVR` |
+
+RMSC's `add_criterion` (`QRPGLESRC/SCDEF.RPGLE`) only recognises three shapes in the DIRECT form:
+all-digits-and-a-usable-port → `PORT`, a `PGM-` prefix → `PGM`, everything else → `JOB` (verbatim,
+uppercased, slash-split into subsystem/job if a slash is present). `port:`/`job:` are not
+special-cased, so they fall into the `JOB` branch as literal text — a job that will never exist,
+so the service silently reports `NOT RUNNING` forever rather than reading the criterion that was
+actually meant. No error either side of a bind: RMSC loads the definition and never rejects the
+value; upstream's `info` shows the correctly-parsed form, so nothing there errors either.
+
+**Why this is more than a hypothetical typo.** The ad-hoc specifier grammar (`port:N`, `job:N`,
+`PGM-name`) is the one upstream documents for the command line, and — as this was found —
+writing it into a YAML `check_alive:` directly is exactly the mistake someone who knows that
+grammar would make, since the DIRECT form's own companion-key alternative (`check_alive: port` /
+`check_alive_criteria: N`) is easy to not know exists. A definition written this way is not
+refused by either side, so it would sit silently reporting the wrong status indefinitely rather
+than failing to load.
+
+**Closed 29 September 2026.** `add_criterion` (`QRPGLESRC/SCDEF.RPGLE`) now recognises both
+prefixes case-insensitively on the DIRECT form. `port:` only commits if what follows is itself a
+usable port — the same rule the bare-digits case above already applies, reusing the same
+`usable_port` helper — so `port:abc` and `port:55499extra` still fall through to `JOB` using the
+whole untouched text, exactly as before; nothing about that path changed. `job:` has no such
+validation failure: whatever follows becomes the job name unconditionally (subsystem/job split on
+a `/` still applies to the remainder, not the whole text). `add_criterion` is not exported (absent
+from `QPROTOSRC/SCDEF_D.RPGLEINC`), so no `RMSC.BND` signature change was needed.
+
+Tests came from a QRPGLESRC-blind author, given only the measured table above (confirmed red
+first, then green). Two of that author's raw-field assertions had to be corrected afterwards —
+not because the behaviour was wrong, but because `def.criteria(N).job_name`/`.subsystem` are
+`varchar(10)` (`SCDEF_OBJ_t`), a fact the author had no way to know without reading `QPROTOSRC`,
+and two of the chosen test values were longer than that regardless of which reading was correct.
+
+**A real defect in the first version of the fix, caught by peer review before it shipped, not by
+a test.** `check_alive: job:PGM-something` reads `JOBNAME:PGM-SOMETHING` upstream — measured — not
+a PGM criterion, but the first cut simply stripped the `job:` prefix and let the remainder fall
+through into the general classifier below, which includes the pre-existing `PGM-` check. So a
+`job:`-prefixed value starting with `PGM-` was silently reclassified as a program criterion
+instead of a job named `PGM-something`, contradicting the "unconditional" behaviour `job:` is
+supposed to have. Fixed by having the `job:` branch commit directly to `JOB` (duplicating the
+slash-split rather than falling through), the same way the companion form's forced kind already
+bypasses the `PGM-` check. A locking test (`job:PGM-X`) now covers exactly this.
+
+**One thing the review raised that turned out already correct, not a defect:** `usable_port`
+(reused unchanged for the `port:` prefix's remainder) allows a leading `+`/`-`, so
+`check_alive: port:-8080` was a candidate for disagreeing with upstream. Measured: upstream also
+reads it as `PORT:-8080` — a criterion no real port could ever satisfy, accepted on both sides
+alike (`Integer.parseInt` behaving the same way `usable_port` does here). No change needed.
+
 ## Corrected since this file was written
 
 The ground under several statements above has moved. What changed, so a reader is not comparing

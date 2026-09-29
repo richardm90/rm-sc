@@ -502,6 +502,7 @@ dcl-proc add_criterion;
   dcl-s slash like(INTEGER_t);
   dcl-s i     like(INTEGER_t);
   dcl-s digits like(BOOLEAN_t);
+  dcl-s candidate like(SCDEF_CRIT_t);
 
   work = %trim(raw);
   if %len(work) = 0;
@@ -593,6 +594,56 @@ dcl-proc add_criterion;
   // the type-and-value form is a port because check_alive said so, and its
   // value may be anything at all - see the forced-kind path below, which is
   // where 'port' + 'abc' arrives. Nothing is converted without checking.
+
+  // port: and job: PREFIXES on the direct form - the same ad-hoc
+  // command-line specifiers (docs/parity.md, "Beyond the operations -
+  // specifiers") also work written straight into check_alive, not just typed
+  // after sc/scr. Measured against sc 1.7.1: docs/parity.md, "check_alive's
+  // DIRECT form doesn't know the ad-hoc prefixes" - 29 September 2026.
+  //
+  // port: only takes effect if what follows it is itself a usable port - the
+  // SAME rule as the bare-number case just above, not a looser one - so
+  // 'port:abc' and 'port:55499extra' fall all the way through to the
+  // ordinary JOB handling below using the WHOLE untouched text, exactly as
+  // they already did before this existed. Nothing here changes .raw or
+  // returns unless the remainder actually is a usable port.
+  if %len(work) > 5 and STRING_upper(%subst(work: 1: 5)) = 'PORT:';
+    candidate = %subst(work: 6);
+    if usable_port(candidate);
+      def.criteria(def.criteria_count).kind = SCDEF_CHECK_PORT;
+      def.criteria(def.criteria_count).port = %int(candidate);
+      def.criteria(def.criteria_count).raw = %char(%int(candidate));
+      return true;
+    endif;
+  endif;
+
+  // job: has no equivalent validation failure - whatever follows the prefix
+  // becomes the job name unconditionally, the same as check_alive: <name>
+  // with no prefix at all - EXCEPT that "no prefix at all" is still subject
+  // to the PGM- check below, and job: must not be. Measured: `check_alive:
+  // job:PGM-something` reads JOBNAME:PGM-SOMETHING upstream, not a PGM
+  // criterion - job: commits to JOB outright, the same way the companion
+  // form's forced kind already does a few lines up, rather than falling
+  // through and letting the remainder be reclassified. So this duplicates
+  // the slash-split below rather than stripping `work` and falling into it:
+  // falling through would expose the PGM- check to a remainder that starts
+  // with PGM-, which is exactly the case that must not happen.
+  if %len(work) > 4 and STRING_upper(%subst(work: 1: 4)) = 'JOB:';
+    candidate = %subst(work: 5);
+    def.criteria(def.criteria_count).raw = STRING_upper(candidate);
+    def.criteria(def.criteria_count).kind = SCDEF_CHECK_JOB;
+    slash = %scan('/': candidate);
+    if slash > 1 and slash < %len(candidate);
+      def.criteria(def.criteria_count).subsystem =
+          STRING_upper(%subst(candidate: 1: slash - 1));
+      def.criteria(def.criteria_count).job_name =
+          STRING_upper(%subst(candidate: slash + 1));
+    else;
+      def.criteria(def.criteria_count).job_name =
+          STRING_upper(candidate);
+    endif;
+    return true;
+  endif;
 
   // Below here is the DIRECT form - `check_alive: <value>` with no companion
   // key - and upstream folds a job name reached this way. The forced-kind path

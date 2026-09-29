@@ -1530,6 +1530,309 @@ dcl-proc test_criterion_text_direct_job_still_folds export;
 
 end-proc;
 
+//##############################################################################
+//##                                                                          ##
+//##  THE DIRECT FORM RECOGNISES A port: / job: PREFIX                       ##
+//##                                                                          ##
+//##############################################################################
+//
+// MEASURED live, 29 September 2026, against both sc (upstream) and scr (RMSC)
+// - throwaway definitions staged under each implementation's own services
+// directory and read back through each implementation's own `info`. The
+// complete table:
+//
+//   check_alive: value written    upstream renders          RMSC renders today
+//   port:55499                    PORT:55499                 JOBNAME:PORT:55499
+//   PORT:55499                    PORT:55499                 JOBNAME:PORT:55499
+//   Port:55499                    PORT:55499                 JOBNAME:PORT:55499
+//   job:QSYSWRK/QSQSRVR           JOBNAME:QSYSWRK/QSQSRVR    JOBNAME:JOB:QSYSWRK/QSQSRVR
+//   JOB:QSYSWRK/QSQSRVR           JOBNAME:QSYSWRK/QSQSRVR    JOBNAME:JOB:QSYSWRK/QSQSRVR
+//   job:BAREJOBNAME               JOBNAME:BAREJOBNAME       JOBNAME:JOB:BAREJOBNAME
+//   port:abc                      JOBNAME:PORT:ABC           JOBNAME:PORT:ABC (unaffected)
+//   port:022                      PORT:22                    JOBNAME:PORT:022
+//   port:55499extra               JOBNAME:PORT:55499EXTRA    JOBNAME:PORT:55499EXTRA (unaffected)
+//
+// (A leading space before the value, ' port:55499', also renders PORT:55499
+// upstream - but both sides already trim leading/trailing whitespace, so a
+// case built from it would only re-test trimming and is left out.)
+//
+// The test fixtures below use BAREJOBX rather than the table's BAREJOBNAME,
+// and drop the raw .job_name assertion on port:55499extra: job_name is
+// varchar(10), and both those values are longer than that once truncated
+// they stop discriminating a correct fix from the bug, or from each other.
+// See the two fixtures' own comments.
+//
+// THE RULE, inferred from the table above and NOT read from any source: on
+// the DIRECT form (no companion check_alive_criteria: key), upstream
+// recognises a port: prefix case-insensitively and, ONLY IF what follows the
+// prefix is entirely digits and forms a value small enough to be a usable
+// port, treats the criterion as PORT using that remainder - decimal-parsed,
+// leading zeros just falling away, never read as octal. If what follows is
+// not a clean usable port, the WHOLE original text (unstripped, upper-cased)
+// becomes a JOB name instead, exactly as it already does with no prefix at
+// all. Separately, upstream recognises a job: prefix case-insensitively and
+// unconditionally treats whatever follows as the job name, with the same
+// subsystem/job split on a slash the whole-string form already applies to
+// its remainder - there is no validation failure mode for job: the way there
+// is for port:, since a job name accepts any text.
+//
+// TODAY RMSC does neither: it treats the prefix as inert text and folds the
+// ENTIRE original string - prefix included - into a job name, which is why
+// every row above except the two marked "unaffected" comes out
+// JOBNAME:<PREFIX>:<REMAINDER> instead of the upstream reading.
+//
+// A fix and the break it could have been must disagree about at least one
+// case in the suite. The two "unaffected" rows are the guard against the
+// cheapest wrong fix there is - stripping the port: prefix UNCONDITIONALLY,
+// without checking that what is left is a usable port - so they get their
+// own assertions below rather than being left to pass by coincidence of
+// today's existing fallback. port:022 is a second, different port number
+// from the recognition cases, so a fix that special-cased the literal
+// "55499" rather than reading the substring after the prefix could not pass
+// by accident - and it is also the one place a naive re-use of the existing
+// YAML-1.1-octal-scalar logic could silently produce the wrong number, 18
+// instead of 22.
+//==============================================================================
+
+//------------------------------------------------------------------------------
+// A port: prefix is recognised, case-insensitively, on the direct form
+//
+// Three spellings of the same prefix, one port number, so a fix that only
+// matched a lower-case "port:" literal is caught by the second and third
+// fixtures here.
+//------------------------------------------------------------------------------
+
+dcl-proc test_criterion_text_direct_port_prefix_recognized export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+
+  assert(pt_load_def('ptdirportlc.yaml':
+    'name: ptdirportlc' + LF +
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: port:55499' + LF: def): 'load');
+
+  aEqualV(SCDEF_CHECK_PORT: def.criteria(1).kind:
+          'MEASURED - a port: prefix on the direct form is a PORT criterion');
+  iEqual(55499: def.criteria(1).port:
+         'the digits after the prefix are the port value');
+  aEqual('PORT:55499': SCDEF_criterion_text(def.criteria(1)):
+         'MEASURED - sc info renders PORT:55499, not JOBNAME:PORT:55499');
+
+  assert(pt_load_def('ptdirportuc.yaml':
+    'name: ptdirportuc' + LF +
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: PORT:55499' + LF: def): 'load');
+
+  aEqualV(SCDEF_CHECK_PORT: def.criteria(1).kind:
+          'MEASURED - the prefix is recognised upper-cased too');
+  aEqual('PORT:55499': SCDEF_criterion_text(def.criteria(1)):
+         'MEASURED - PORT:55499 renders the same as port:55499');
+
+  assert(pt_load_def('ptdirportmc.yaml':
+    'name: ptdirportmc' + LF +
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: Port:55499' + LF: def): 'load');
+
+  aEqualV(SCDEF_CHECK_PORT: def.criteria(1).kind:
+          'MEASURED - and mixed case too - the prefix match is not exact-case');
+  aEqual('PORT:55499': SCDEF_criterion_text(def.criteria(1)):
+         'MEASURED - Port:55499 renders the same again');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// A leading zero after the prefix is DECIMAL, not the YAML-1.1 octal reading
+//
+// MEASURED: port:022 -> PORT:22, i.e. 22, not 18. port:022 is text with a
+// prefix, not a bare all-digit YAML scalar, so YAML never gets a chance to
+// type it as a number at all - the separate, already-known, deliberately
+// unfixed octal-scalar-typing gap (a BARE check_alive: 022 with no prefix) is
+// a different topic and is out of scope here. This case is about what RMSC's
+// own port: prefix handling does with the remainder, once it has one to
+// parse, and it is also a different port number from the recognition test
+// above so a literal-string special case could not pass it by accident.
+//------------------------------------------------------------------------------
+
+dcl-proc test_criterion_text_direct_port_prefix_leading_zero_is_decimal export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+
+  assert(pt_load_def('ptdirportzero.yaml':
+    'name: ptdirportzero' + LF +
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: port:022' + LF: def): 'load');
+
+  aEqualV(SCDEF_CHECK_PORT: def.criteria(1).kind: 'a PORT criterion');
+  iEqual(22: def.criteria(1).port:
+         'MEASURED - decimal 22, not octal 18, and not the leading zero kept');
+  aEqual('PORT:22': SCDEF_criterion_text(def.criteria(1)):
+         'MEASURED - sc info renders PORT:22');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// THE RIVAL KILLER - stripping the prefix is conditional on a usable port
+//
+// MEASURED: both port:abc and port:55499extra fall through to JOB, using the
+// WHOLE original text, unstripped and upper-cased - exactly as check_alive:
+// with no prefix at all already does. Both rows already pass today, by
+// coincidence of the existing "not all digits, so it's a job name" fallback,
+// which is precisely why they need their own assertions here: a fix that
+// starts stripping the port: prefix UNCONDITIONALLY - the cheapest wrong
+// reading of "recognise a port: prefix" - would turn these into something
+// else, and nothing above this line would notice a regression doing that.
+//
+// Two fixtures, one procedure: neither exercises a conversion that can
+// overflow or abend on the existing fallback path, so there is no reason to
+// separate them the way the 19-digit block further down has to.
+//------------------------------------------------------------------------------
+
+dcl-proc test_criterion_text_direct_port_prefix_unusable_remainder_falls_to_job
+    export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+
+  assert(pt_load_def('ptdirportbad.yaml':
+    'name: ptdirportbad' + LF +
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: port:abc' + LF: def): 'load');
+
+  aEqualV(SCDEF_CHECK_JOB: def.criteria(1).kind:
+          'MEASURED - not all digits after the prefix, so it stays a JOB');
+  aEqualV('PORT:ABC': def.criteria(1).job_name:
+          'MEASURED - the whole original text, unstripped and upper-cased');
+  aEqual('JOBNAME:PORT:ABC': SCDEF_criterion_text(def.criteria(1)):
+         'MEASURED - sc info renders JOBNAME:PORT:ABC');
+
+  assert(pt_load_def('ptdirportjunk.yaml':
+    'name: ptdirportjunk' + LF +
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: port:55499extra' + LF: def): 'load');
+
+  aEqualV(SCDEF_CHECK_JOB: def.criteria(1).kind:
+          'MEASURED - trailing junk after the digits is not a usable port');
+  // No assertion on .job_name here, unlike the port:abc case above:
+  // job_name is varchar(10) (QPROTOSRC/SCDEF_D.RPGLEINC, SCDEF_OBJ_t), and
+  // 'PORT:55499EXTRA' is 16 characters - both the buggy and the fixed
+  // reading truncate it to the same 10 characters, 'PORT:55499', so a raw
+  // .job_name assertion here could not tell the two apart. The rendered
+  // text below reads from .raw, which is NOT truncated, and still
+  // discriminates correctly.
+  aEqual('JOBNAME:PORT:55499EXTRA': SCDEF_criterion_text(def.criteria(1)):
+         'MEASURED - sc info renders JOBNAME:PORT:55499EXTRA');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// A job: prefix is recognised, case-insensitively, on the direct form
+//
+// Unlike port:, job: has no validation failure mode - whatever follows is a
+// job name unconditionally - so this fixture uses the SBS/JOB slash form to
+// show the split still applies to the remainder left AFTER the prefix is
+// removed, and not to the whole original text (which would leave a stray
+// "JOB:QSYSWRK" as the subsystem).
+//------------------------------------------------------------------------------
+
+dcl-proc test_criterion_text_direct_job_prefix_recognized export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+
+  assert(pt_load_def('ptdirjoblc.yaml':
+    'name: ptdirjoblc' + LF +
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: job:QSYSWRK/QSQSRVR' + LF: def): 'load');
+
+  aEqualV(SCDEF_CHECK_JOB: def.criteria(1).kind:
+          'MEASURED - a job: prefix on the direct form is a JOB criterion');
+  aEqualV('QSYSWRK': def.criteria(1).subsystem:
+          'the subsystem is split out of the remainder, not the whole text');
+  aEqualV('QSQSRVR': def.criteria(1).job_name: 'and so is the job name');
+  aEqual('JOBNAME:QSYSWRK/QSQSRVR': SCDEF_criterion_text(def.criteria(1)):
+         'MEASURED - sc info renders JOBNAME:QSYSWRK/QSQSRVR, not ' +
+         'JOBNAME:JOB:QSYSWRK/QSQSRVR');
+
+  assert(pt_load_def('ptdirjobuc.yaml':
+    'name: ptdirjobuc' + LF +
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: JOB:QSYSWRK/QSQSRVR' + LF: def): 'load');
+
+  aEqualV(SCDEF_CHECK_JOB: def.criteria(1).kind:
+          'MEASURED - the prefix is recognised upper-cased too');
+  aEqual('JOBNAME:QSYSWRK/QSQSRVR': SCDEF_criterion_text(def.criteria(1)):
+         'MEASURED - JOB:QSYSWRK/QSQSRVR renders the same as ' +
+         'job:QSYSWRK/QSQSRVR');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// A job: prefix with no slash is still a bare job name, not a subsystem split
+//
+// The recognition proc above exercises the SBS/JOB path; this exercises the
+// other shape a job name can take, so a fix that only stripped the prefix
+// ahead of a slash-splitter - and left a bare remainder carrying the prefix
+// untouched - would be caught here instead of there.
+//------------------------------------------------------------------------------
+
+dcl-proc test_criterion_text_direct_job_prefix_bare_name export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+
+  // BAREJOBX, not the longer BAREJOBNAME the measured table above shows:
+  // job_name is varchar(10) (QPROTOSRC/SCDEF_D.RPGLEINC, SCDEF_OBJ_t), and
+  // a fixture whose remainder is itself over 10 characters would have its
+  // OWN correct answer truncated too, muddying what this assertion is
+  // proving. Keeping the remainder within the field's width means "the
+  // remainder after the prefix" and "what job_name actually holds" are the
+  // same string, so this stays a clean two-way disagreement between the
+  // buggy prefix-corrupted reading and the correct one.
+  assert(pt_load_def('ptdirjobbare.yaml':
+    'name: ptdirjobbare' + LF +
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: job:BAREJOBX' + LF: def): 'load');
+
+  aEqualV(SCDEF_CHECK_JOB: def.criteria(1).kind: 'a JOB criterion');
+  aEqualV('': def.criteria(1).subsystem: 'no slash, so no subsystem');
+  aEqualV('BAREJOBX': def.criteria(1).job_name:
+          'MEASURED - the remainder after the prefix, not the prefix itself');
+  aEqual('JOBNAME:BAREJOBX': SCDEF_criterion_text(def.criteria(1)):
+         'MEASURED - sc info renders JOBNAME:BAREJOBX, not ' +
+         'JOBNAME:JOB:BAREJOBX');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// job: commits to JOB outright - a PGM- remainder does not get reclassified
+//
+// MEASURED live, 29 September 2026: `check_alive: job:PGM-X` reads
+// JOBNAME:PGM-X upstream, NOT a PGM criterion. job: is documented above as
+// unconditional, and "unconditional" has to mean this case too: a first
+// version of the fix stripped the job: prefix and let the remainder fall
+// through into the general classifier below, which includes the PGM- check
+// - so `job:PGM-X` came out as a PGM criterion (program X) instead of a JOB
+// criterion named PGM-X. Caught by peer review before this reached upstream
+// disagreement in practice, not by a test until now.
+//------------------------------------------------------------------------------
+
+dcl-proc test_criterion_text_direct_job_prefix_not_reclassified_as_pgm export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+
+  assert(pt_load_def('ptdirjobpgm.yaml':
+    'name: ptdirjobpgm' + LF +
+    'start_cmd: /usr/bin/ptprobe' + LF +
+    'check_alive: job:PGM-X' + LF: def): 'load');
+
+  aEqualV(SCDEF_CHECK_JOB: def.criteria(1).kind:
+          'MEASURED - job:PGM-X is a JOB criterion, not a PGM one - the ' +
+          'PGM- check must not see the stripped remainder');
+  aEqualV('': def.criteria(1).subsystem: 'no slash, so no subsystem');
+  aEqualV('PGM-X': def.criteria(1).job_name:
+          'the whole remainder, PGM- prefix included, is the job name');
+  aEqual('JOBNAME:PGM-X': SCDEF_criterion_text(def.criteria(1)):
+         'MEASURED - sc info renders JOBNAME:PGM-X');
+
+end-proc;
+
 //==============================================================================
 // The companion keeps the SHAPE of the value as well as its case
 //
