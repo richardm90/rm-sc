@@ -156,6 +156,14 @@ chmod +x "$WORK/bin/fake-sc"
 cat > "$WORK/bin/fake-scr" <<'FAKE_SCR'
 #!/QOpenSys/pkgs/bin/bash
 op="$1"; svc="$2"
+# list -a is now also part of stage 1 (tools/gate-list-a-test.sh covers ITS
+# own correctness) - this classifier test only needs it to stay quiet, the
+# same fixed text captured into baseline-list-a.txt below, so it can never
+# be what fails or passes a scenario here.
+if [ "$op" = list ] && [ "$svc" = "-a" ]; then
+  printf 'svc1 (Svc One)\n'
+  exit 0
+fi
 if [ -z "$svc" ]; then
   case "$op" in
     check)  printf '  RUNNING            | svc1 (Svc One) \n' ;;
@@ -193,9 +201,10 @@ PERF
 FAKE_SCR
 chmod +x "$WORK/bin/fake-scr"
 
-"$WORK/bin/fake-scr" check  > "$WORK/baseline/baseline-check.txt"
-"$WORK/bin/fake-scr" list   > "$WORK/baseline/baseline-list.txt"
-"$WORK/bin/fake-scr" groups > "$WORK/baseline/baseline-groups.txt"
+"$WORK/bin/fake-scr" check    > "$WORK/baseline/baseline-check.txt"
+"$WORK/bin/fake-scr" list     > "$WORK/baseline/baseline-list.txt"
+"$WORK/bin/fake-scr" list -a  > "$WORK/baseline/baseline-list-a.txt"
+"$WORK/bin/fake-scr" groups   > "$WORK/baseline/baseline-groups.txt"
 
 run_gate() {  # scenario
   PERFINFO_SCENARIO="$1" SC="$WORK/bin/fake-sc" SCR="$WORK/bin/fake-scr" \

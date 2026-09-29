@@ -31,7 +31,7 @@
 #
 # Stage names are the lower-case words below: suites, narration, api-silence,
 # error-delivery, load-warning, loginfo, jobinfo, info, adhoc-name, sampletime,
-# colour, gate, gate-granularity, fixture-pack.
+# colour, gate, gate-granularity, gate-list-a, fixture-pack.
 #
 # A PARTIAL RUN IS NOT A VERIFICATION. The stage list exists for the edit-run
 # loop, not for deciding something is finished. Before a commit, run the lot.
@@ -72,7 +72,7 @@ want() {
 
 # Reject a stage name that matches nothing, rather than running a subset the
 # caller did not ask for and reporting it as a pass.
-ALL="suites narration api-silence error-delivery load-warning loginfo jobinfo info adhoc-name sampletime colour gate gate-granularity fixture-pack"
+ALL="suites narration api-silence error-delivery load-warning loginfo jobinfo info adhoc-name sampletime colour gate gate-granularity gate-list-a fixture-pack"
 for w in $WANTED; do
   case " $ALL " in
     *" $w "*) ;;
@@ -248,6 +248,17 @@ harness gate            tools/fidelity-gate.sh       4
 # report line, which this tail does not reach - diagnosed by running the
 # harness directly, the same trade-off tools/loginfo-test.sh makes.
 harness gate-granularity tools/gate-granularity-test.sh 7
+# NEEDS NOTHING LIVE, same reasoning as gate-granularity above: it tests the
+# gate's OWN `list -a` coverage against synthetic stand-ins, not either real
+# implementation.
+#
+# 8, not fewer: four report lines (clean, a missing service, a reordering and
+# a trailing blank line - each proving the comparison is byte-exact rather
+# than merely set-equal), the disagree summary, a blank, the pass/failed
+# summary and the artefacts path. A failing case also prints the gate's own
+# dump beneath its report line, which this tail does not reach - diagnosed by
+# running the harness directly, the same trade-off gate-granularity makes.
+harness gate-list-a     tools/gate-list-a-test.sh    8
 # 12, not 6. The pack's ordering note is a nine-line heredoc that prints only
 # when order_only > 0, and it pushed the summary counts out of a six-line tail -
 # so the stage that now decides the run could have its numbers truncated away.

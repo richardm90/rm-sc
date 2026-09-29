@@ -1520,3 +1520,52 @@ and the fix; the gate granularity item (below) also closed the same day.
 Separately, and not part of step 8: the gate should compare `list -a` across all services, to
 hold Verification step 9's discovery parity. The two implementations agree on it today, but the
 gate compares the default three, so nothing would catch it if they stopped agreeing.
+
+**Closed 29 September 2026.** `tools/fidelity-gate.sh`'s byte-exact stage now compares `list -a`
+against a captured `baseline-list-a.txt` the same way it already compares `check`/`list`/`groups`
+— a new byte-exact acceptance criterion, not a new `DIFF_OPS` entry, because `list -a` is static
+discovery output, not something that embeds volatile job or timing data. `docs/performance.md` has
+the new file's capture instructions. As the paragraph above puts it, this makes what "checked by
+hand" was holding into something that runs on its own — it does not change what is being held: the
+same set of services on both sides, flat directory scan plus `system/` and `oss_common/`, not
+subdirectory recursion (which the paragraph above already corrected, and which `scr` recursing
+again would now itself be a defect against).
+
+Not the first thing to compare `list -a` at all: `tools/gate-fixtures-run.sh` already runs `compare
+"list -a" list -a` live, `sc` against `scr`, but against its own small staged fixture pack under a
+throwaway `$SC_SERVICES_DIR`/`-Dservices.dir`, not the real box's `system/`/`oss_common/`
+discovery. This is the piece that was missing: a byte-exact check against what the box actually
+has, the same standing `check`/`list`/`groups` already carry.
+
+**One risk carried over from the fixture pack, not yet given anything here.**
+`tools/gate-fixtures-run.sh`'s own comment (around `sort_conflict_members`) records `list -a`
+by name as one of two cases that measurably flapped between three otherwise-identical runs — a
+conflicting-criterion warning block upstream builds from Java `HashSet` iteration order, which is
+"not stable even against ITSELF between consecutive runs". A byte-exact capture freezes whatever
+order that block happened to have at capture time; if the box's services ever produce one, `list -a`
+would go red on a hash reshuffle, not a real regression, and nothing in `tools/fidelity-gate.sh`
+sorts a conflict block's members the way the fixture pack does. Not fixed here — no conflict exists
+on this box's real services today, `list` would already show it if one did — but worth knowing
+before treating a red `list-a` as proof of anything.
+
+`tools/gate-list-a-test.sh` (new, mirrors `tools/gate-granularity-test.sh`'s synthetic-stand-in
+pattern) proves the widening actually closes the gap rather than adding an unreachable stage, on
+two axes:
+
+- **Reachability** — confirmed red against the gate as it stood before this change: a scenario
+  where RMSC's `list -a` silently drops one service (the shape a broken or accidentally-bounded
+  directory scan would produce, and exactly what the paragraph above needs held) reported **"GATE
+  OK: step 8 complete"**, identically to a scenario where nothing was missing at all. Confirmed
+  green after the widening — the same missing-service scenario now reports `list-a FAIL` and the
+  gate exits non-zero, while the clean scenario still passes.
+- **Byte-exactness, not just set-equality** — a first version of this test used only that
+  missing-service pair, and a peer review measured that a gate weakened to `cmp <(sort baseline)
+  <(sort actual)` — forgiving order and trailing blank lines, the exact class of slip `check`'s own
+  byte-exact contract exists to catch — passed it just as cleanly. Two more scenarios close that:
+  the same three services reordered, and the same three lines plus one trailing blank line, each
+  must independently FAIL against the true byte-exact comparison.
+
+`tools/gate-granularity-test.sh`'s own fixture set needed a matching `baseline-list-a.txt` stub so
+the new stage did not fail it — added alongside, generated from its own `fake-scr` stand-in the same
+way its `check`/`list`/`groups` baselines already are, rather than a hand-written literal that could
+drift from the stub silently.

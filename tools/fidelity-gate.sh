@@ -112,8 +112,8 @@ if [ -z "$BASELINE" ]; then
 BASELINE is not set.
 
 Set it to the directory holding the captured Java output - baseline-check.txt,
-baseline-list.txt and baseline-groups.txt. Those captures are not in this
-repository: they name a live system's services.
+baseline-list.txt, baseline-list-a.txt and baseline-groups.txt. Those captures
+are not in this repository: they name a live system's services.
 
 The tracked fixtures/ directory is NOT a substitute. It holds invented names
 describing a different machine, and diffing against it fails in a way that
@@ -323,8 +323,48 @@ perfinfo_residual() {
   diff <(grep -vE "$PERFINFO_AFFINITY_LINES" "$java" | perfinfo_canon) <(perfinfo_canon < "$rmsc")
 }
 
+# list-a is here, not a new DIFF_OPS entry, because it is a byte-exact
+# acceptance criterion in exactly the same sense check/list/groups already
+# are, not a live differential that embeds volatile job/timestamp data.
+# Verification step 9 asks that `sc list -a` and `scr list -a` report the
+# same set of services (docs/parity.md corrects the step's own "proving
+# subdirectory recursion" wording - upstream does not recurse, and RMSC
+# recursing would itself now be a defect; what this actually holds is the
+# flat, system:/oss_common:-plus scan both sides share). The default `list`
+# fixture is deliberately three services and cannot stand in for it: a
+# regression that silently drops one service from the full listing is
+# invisible to a comparison that only ever asks for the default three
+# (docs/parity.md, "Closing Verification step 8", the paragraph beginning
+# "Separately, and not part of step 8"). tools/gate-list-a-test.sh proves
+# that with a synthetic stand-in, confirmed red against the gate before this
+# stage existed - both a clean and a one-service-missing run reported "GATE
+# OK: step 8 complete" identically - and separately proves the comparison is
+# byte-exact rather than merely set-equal (a reordered or trailing-blank-line
+# variant must also fail).
+#
+# A captured baseline here inherits a risk the fixture pack already measured
+# for this exact operation: tools/gate-fixtures-run.sh's sort_conflict_members
+# comment records `list -a` by name as one of two cases that flapped between
+# otherwise-identical runs, because a conflicting-criterion warning block is
+# built from Java HashSet order, unstable even against itself. This stage
+# freezes whatever order such a block happened to have at capture time - not
+# fixed here, since no conflict exists on this box's real services today, but
+# worth knowing before reading a red list-a as a discovery defect.
+#
+# STAGE1_VERB/STAGE1_FLAGS separate the fixture's key ("list-a", so its own
+# baseline file and report line are distinct from plain "list") from the verb
+# and flags actually passed to $SCR - "list-a" is not itself a subcommand.
+# The `for op in ...` line below, not these arrays, is what actually runs -
+# a key added here and not there configures a comparison that never executes
+# and never reports anything, the same class of silent gap this stage exists
+# to close elsewhere. Left unquoted below deliberately: every value here is a
+# single bare word with no IFS or glob characters, so word-splitting can only
+# ever drop an empty argument, which $SCR already treats the same as absent.
+declare -A STAGE1_VERB=(  [check]=check [list]=list [list-a]=list [groups]=groups )
+declare -A STAGE1_FLAGS=( [check]=""    [list]=""   [list-a]=-a   [groups]=""     )
+
 echo "== stage 1: byte-exact against captured Java fixtures"
-for op in check list groups; do
+for op in check list list-a groups; do
   b="$BASELINE/baseline-$op.txt"
   if [ ! -f "$b" ]; then
     # Not a skip. A gate pointed at the wrong BASELINE would otherwise pass
@@ -332,7 +372,7 @@ for op in check list groups; do
     printf '  %-12s FAIL  (no fixture at %s)\n' "$op" "$b"
     unexpected=$((unexpected+1)); continue
   fi
-  "$SCR" "$op" > "$WORK/$op.actual" 2>&1
+  "$SCR" ${STAGE1_VERB[$op]} ${STAGE1_FLAGS[$op]} > "$WORK/$op.actual" 2>&1
   if cmp -s "$b" "$WORK/$op.actual"; then
     printf '  %-12s PASS\n' "$op"; pass=$((pass+1))
   else

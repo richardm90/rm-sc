@@ -75,8 +75,33 @@ ssh $HOST "export QIBM_MULTI_THREADED=Y; TIMEFORMAT='%3R'; time sc check >/dev/n
 |---|---|---|
 | `baseline-check.txt` | `sc check` | **The format-critical one** — `\|` at column 22, three services |
 | `baseline-list.txt` | `sc list` | `name (description)` — no status, no leading spaces |
+| `baseline-list-a.txt` | `sc list -a` | Every service on the box, the same set `scr list -a` must report — see below |
 | `baseline-groups.txt` | `sc groups` | Group names only, alphabetical, and it includes `system` |
 | `baseline-operations.txt` | `sc info`, `file`, `jobinfo`, `loginfo`, `scrunattrs` | Reference for the operations outside the byte-exact gate |
+
+**`baseline-list-a.txt` was added 29 September 2026**, not captured in Phase 0 with the rest.
+`tools/fidelity-gate.sh`'s byte-exact stage compared only the default `list` — three services,
+deliberately small — so nothing in the gate could tell whether the two implementations still
+agreed on the full set (`docs/parity.md`, "Closing Verification step 8" — note the step 9 wording
+this cites was itself corrected earlier in that file: `list -a` does not prove *recursion*, upstream
+does not recurse, and it is the flat, `system:`/`oss_common:`-plus scan both sides now share that
+this pins). Capture it with stderr merged, because that is what the gate compares against it:
+
+```bash
+ssh $HOST "export QIBM_MULTI_THREADED=Y; sc list -a" > baseline-list-a.txt 2>&1
+```
+
+**This one detail matters more here than for `check`/`list`/`groups`.** `tools/fidelity-gate.sh`
+captures every stage-1 comparison as `2>&1` (stdout and stderr merged, `tools/fidelity-gate.sh`
+around the stage-1 loop), so a baseline captured stdout-only silently diverges from what the gate
+actually compares it against the moment either side ever emits a load or conflict warning to
+stderr during a full-collection scan. Harmless today only because the existing `baseline-list.txt`
+already proves the collection is warning-free; if that ever stops being true, `list -a` — the
+widest of the four fixtures — is the one most likely to notice first, and a mismatched capture
+would read like a discovery defect rather than a capturing mistake.
+
+`tools/gate-list-a-test.sh` proves the gate's own coverage of this with a synthetic stand-in — it
+does not need `baseline-list-a.txt` itself, only `tools/fidelity-gate.sh` does.
 
 Two things about these are easy to trip over later.
 
