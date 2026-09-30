@@ -125,7 +125,7 @@ behaviour diverges from upstream and why.
 | `file` | ✅ | Raw YAML passthrough |
 | `list` | ✅ | Short name + friendly name |
 | `groups` | ✅ | All groups and members |
-| `jobinfo` | ✅ | Active job names — one open finding for certain listener shapes, see `docs/parity.md` |
+| `jobinfo` | ✅ | Active job names |
 | `loginfo` | ✅ | Log paths, sizes, spooled files |
 | `perfinfo` | ✅ | Improved: no Python/`ibm_db` dependency — reads `ACTIVE_JOB_INFO` directly |
 | `scrunattrs` | ✅ | `SCOMMANDER_*` vars from the running job |

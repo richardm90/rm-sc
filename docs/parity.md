@@ -740,41 +740,45 @@ nobody had explained" — is the one closed 19 September 2026 by making the gate
 recorded shape specifically rather than trusting the operation's own membership. See "The gate"
 above.
 
-### `jobinfo` attributes a PASE-spawned worker job, not the real one — found 30 September 2026, NOT CHASED FURTHER
+### `jobinfo` and a PASE-spawned worker job — RETRACTED 30 September 2026, could not reproduce
 
-Found while measuring `sbmjob_jobname`/`sbmjob_opts` for the coverage audit below, not while
-looking for it — an unplanned finding, noted here rather than investigated, per Richard's call
-("if it doesn't affect this piece of work, make a note and move on").
+**This section originally claimed a real divergence and was wrong.** Recorded here rather than
+silently deleted, because the correction is the useful part.
 
-For a service whose `start_cmd` is a **Python** listener (`tools/gate-listen.py`, the fixture used
-throughout this repository's own harnesses) and whose `check_alive` resolves via **port**, `jobinfo`
-reports a different job than upstream does: RMSC names the PASE worker (`QP0ZSPWT`) that ends up
-holding the listening socket; upstream names the job SBMJOB actually created (`CUSTOMJB`, in the
-fixture this was found with).
+The original claim, found while measuring `sbmjob_jobname`/`sbmjob_opts` for the coverage audit
+below: for a service whose `start_cmd` is a Python listener and whose `check_alive` resolves via
+port, `jobinfo` reported a different job than upstream did — RMSC naming the PASE worker
+(`QP0ZSPWT`) holding the listening socket, upstream naming the job SBMJOB actually created
+(`CUSTOMJB`). It was noted and deliberately not chased further at the time, per Richard's own
+call to keep moving rather than open a new investigation mid-task.
 
-What was confirmed live, same session:
+**Investigated properly 30 September 2026, once asked to get to the bottom of it, and it does not
+hold up.** Decompiling `sc.jar`'s `QueryUtils.getListeningJobsByPort` (via `javap -c -p` — no
+source available, no decompiler on the box) showed upstream queries
+`QSYS2.NETSTAT_JOB_INFO WHERE REMOTE_PORT = 0 AND LOCAL_PORT = ?` — the **exact same table and
+filter** `SCQRY_jobs_on_port` already uses, contradicting this section's own original "likely
+code path" guess (`QtocLstNetCnn`, never actually confirmed). With the real mechanism in hand,
+five separate live reproductions followed — different ports, different `sbmjob_jobname` values,
+immediate queries right after `start` returns, ten rapid back-to-back queries, a 6-second polling
+window — and every one of them agreed: `sc` and `scr` both report the same job, and it is the
+PASE worker (`QP0ZSPWP`, not `QP0ZSPWT` — even the job name in the original note was
+imprecise), never the SBMJOB-named job, on either side. `QSYS2.NETSTAT_JOB_INFO` itself was
+queried directly alongside each comparison and never disagreed with what either implementation
+reported.
 
-- **Reproducible**, not a timing artefact — repeated with a fresh fixture and observed each time.
-- **Not specific to batch mode.** Reproduced identically with `batch_mode`/`sbmjob_*` removed from
-  the fixture entirely (`~/sbmjob-test/nonbatch.yaml` on the box) — so this is not something the
-  `sbmjob_jobname`/`sbmjob_opts` work above touches or could have introduced.
-- **Does not orphan anything.** `stop` brings the service down cleanly either way; only the
-  `jobinfo` *report* is wrong, not the lifecycle.
-- **Not reproduced by `mapepire`** (a real, Java-based service) at any point this session, across
-  everything "The job order" above measured — only Python-based listeners have shown it so far.
+**What is real, and was never actually in question:** a Python listener launched via SBMJOB's
+`QSH CMD(...)` wrapper does end up with its socket attributed to a PASE worker job, not the job
+SBMJOB named — that is genuine, confirmed OS behaviour, visible in `NETSTAT_JOB_INFO` itself.
+What was never real is upstream reporting anything different from RMSC about it; both read the
+same table the same way and get the same answer.
 
-Likely code path, not confirmed: `SCEXEC_jobs` (`QRPGLESRC/SCEXEC.RPGLE`) dispatches a port
-criterion to `SCQRY_jobs_on_port`, which resolves via `QtocLstNetCnn` — plausibly a different
-OS-level job-attribution mechanism than whatever upstream's `NETSTAT_INFO`-equivalent path uses,
-one that answers "which job holds this socket right now" differently for a PASE-spawned Python
-process than for a job SBMJOB created directly. This is a hypothesis about *where* to look, not a
-diagnosis — root cause, exact scope (which listener shapes trigger it), and whether any real
-service on the client's box is Python-based and port-checked are all open.
-
-**Why this doesn't touch `sbmjob_jobname`/`sbmjob_opts` above**: that item was verified by reading
-the actual job SBMJOB created directly (`QSYS2.ACTIVE_JOB_INFO`, by the name SBMJOB was given),
-never through `jobinfo` — see `tools/sbmjob-opts-test.sh`'s own header for why that was deliberate
-rather than incidental.
+**Best guess at the original mistake, not confirmed**: the original investigation was several
+ad hoc, unsaved manual SSH commands run while a different question (`sbmjob_jobname`/
+`sbmjob_opts`) was the actual focus — the same class of methodology slip (comparing output from
+different moments or contexts without realising it) that produced the `diff -q` and iconv
+mistakes caught and fixed the same week while building `tools/sc-cmd-test.sh`. No specific
+command has been identified as the cause; careful, repeated, methodical testing simply cannot
+reproduce the original claim.
 
 ## Beyond the operations — a quoted `on` in `enabled:`
 
