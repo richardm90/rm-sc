@@ -103,6 +103,82 @@ Full parity with upstream **except** cluster mode and nginx `cluster.conf` gener
 therefore `reload`, which is cluster-only upstream. Running nginx as an ordinary managed
 service is unaffected — that is a normal service definition, not cluster mode.
 
+## Feature coverage
+
+Everything below is measured against a running `sc`, not assumed from its source. `✅` means
+covered and verified live; `⚠️` means handled deliberately differently from upstream (on
+purpose, not a bug); `❌` means not available in RMSC. Where a `✅` hides a real, sanctioned
+difference in behaviour, the note says so and points at
+[`docs/parity.md`](docs/parity.md), which is the full record of every place RMSC's output or
+behaviour diverges from upstream and why.
+
+### Operations
+
+| Operation | Covered | Notes |
+|---|:---:|---|
+| `check` (alias `status`) | ✅ | Byte-exact output; tri-state RUNNING / NOT RUNNING / PARTIAL |
+| `start` | ✅ | Dependencies started first, recursively |
+| `stop` | ✅ | `stop_cmd` if given, else `ENDJOB`; dependants stopped first |
+| `restart` | ✅ | |
+| `kill` | ✅ | Straight to `ENDJOB`, bypassing `stop_cmd` |
+| `info` | ✅ | Formatted definition dump |
+| `file` | ✅ | Raw YAML passthrough |
+| `list` | ✅ | Short name + friendly name |
+| `groups` | ✅ | All groups and members |
+| `jobinfo` | ✅ | Active job names — one open finding for certain listener shapes, see `docs/parity.md` |
+| `loginfo` | ✅ | Log paths, sizes, spooled files |
+| `perfinfo` | ✅ | Improved: no Python/`ibm_db` dependency — reads `ACTIVE_JOB_INFO` directly |
+| `scrunattrs` | ✅ | `SCOMMANDER_*` vars from the running job |
+| `reload` | ❌ | Cluster-only upstream; rejected with a clear message rather than faked |
+
+### YAML keys
+
+| Key | Covered | Notes |
+|---|:---:|---|
+| `start_cmd` | ✅ | Required |
+| `check_alive` | ✅ | Port, job name, `SBS/JOB`, `PGM-xxx`; comma-separated or a sequence |
+| `check_alive_criteria` | ✅ | The value companion when `check_alive` names a type |
+| `name` | ✅ | Required, exactly as upstream — a definition without one is refused |
+| `dir` | ✅ | Relative paths resolve against the YAML file's own location |
+| `stop_cmd` | ✅ | Literal `null` accepted |
+| `startup_wait_time` / `stop_wait_time` | ✅ | Default 60 / 45 |
+| `log_dir` | ✅ | Custom directory both respected and auto-created if missing |
+| `batch_mode` | ✅ | Bare `true` and quoted `'true'` both accepted |
+| `sbmjob_jobname` / `sbmjob_opts` | ✅ | Both genuinely reach the submitted `SBMJOB` command |
+| `environment_is_inheriting_vars` | ✅ | Default true |
+| `environment_vars` | ✅ | `KEY=VALUE` sequence |
+| `service_dependencies` | ✅ | Including an empty inline `[]` |
+| `groups` | ✅ | Both 0- and 2-indented sequences |
+| `only_if_executable` | ✅ | |
+| `cluster` | ⚠️ | Parsed and rejected with a clear message — never silently ignored |
+| Unknown keys | ⚠️ | Warn under `-v`, never fail |
+
+### Specifiers, flags, and interfaces
+
+| Feature | Covered | Notes |
+|---|:---:|---|
+| Short name | ✅ | |
+| `group:<name>` | ✅ | |
+| No service argument → all | ✅ | |
+| `all` | ✅ | Same as `group:all` |
+| YAML file path (`sc check /path/to/def.yaml`) | ✅ | One sanctioned divergence on a malformed extension — see `docs/parity.md` |
+| `port:<n>`, `job:<name>`, `job:<sbs>/<name>`, `PGM-<name>` | ✅ | Ad hoc, no definition needed |
+| `--ignore-groups=` | ✅ | Default `system` |
+| `-v`, `-q`, `--disable-colors` | ✅ | |
+| `--splf` | ✅ | |
+| `--sampletime=`, `--ignore-globals`, `-a`/`--all` | ✅ | |
+| Colour auto-off when not a TTY | ✅ | See [Compatibility](#compatibility) |
+| Global + user definition directories | ✅ | `/QOpenSys/etc/sc/services`, `$HOME/.sc/services` |
+| Subdirectory recursion | ⚠️ | Not supported — upstream doesn't recurse either, so this matches rather than gaps |
+| Dependency graph + cycle detection | ✅ | |
+| Native `SC` CL command | ✅ | New — upstream has no native CL interface at all |
+| PASE wrapper `scr` | ✅ | Named `scr`, not `sc`, so both stay callable side by side |
+| Bound-call API (`SC_check`, `SC_start`, …) | ✅ | For an ILE caller — see [`QPROTOSRC/SCAPI_D.RPGLEINC`](QPROTOSRC/SCAPI_D.RPGLEINC) |
+| Cluster mode / nginx `cluster.conf` generation | ❌ | Out of scope — see [Scope](#scope) |
+| Parallel operations | ❌ | Sequential; only mattered for cluster fan-out |
+| `sc_install_defaults` equivalent | ⏸ | Undecided — deferred, not yet built |
+| `*SC` TCP server hook (autostart at IPL) | ❌ | Deliberate — see [Autostart at IPL](#autostart-at-ipl) |
+
 ## Dependencies
 
 Requires **`rmtools` 2.0.7 or later**, a general-purpose RPGLE helper library (service
