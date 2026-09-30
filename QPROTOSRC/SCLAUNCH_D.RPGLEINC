@@ -87,11 +87,18 @@ end-pr;
 //
 // Returns once the service has been launched, NOT once it is alive - the
 // caller polls for that.
+//
+// splf: --splf on the command line. Batch only - upstream's own scope for
+// it ("send output to *SPLF when submitting jobs to batch") - a non-batch
+// service ignores it. When set, the SBMJOB command omits the '>> log_file
+// 2>&1' redirect entirely rather than routing it anywhere else; log_file is
+// still passed so the non-splf path is unchanged.
 ///
 
 dcl-pr SCLAUNCH_start like(BOOLEAN_t);
   def      likeds(SCDEF_t) const;
   log_file like(STMF_t) const;
+  splf     like(BOOLEAN_t) const;
   err      like(SCLAUNCH_ERR_t);
 end-pr;
 

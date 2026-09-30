@@ -1520,6 +1520,33 @@ bypasses the `PGM-` check. A locking test (`job:PGM-X`) now covers exactly this.
 reads it as `PORT:-8080` — a criterion no real port could ever satisfy, accepted on both sides
 alike (`Integer.parseInt` behaving the same way `usable_port` does here). No change needed.
 
+## Beyond the operations — `--splf` was accepted and silently ignored
+
+**Found and fixed 29-30 September 2026.** `--splf` ("send output to *SPLF when submitting jobs
+to batch", `docs/messages.md`) parsed cleanly and did nothing: `SCMAIN.RPGLE` stored it into
+`opts.splf` and nothing else in the codebase ever read that field. A batch service started with
+`scr --splf start <name>` behaved identically to an ordinary start — same log file written, same
+everything — silently dropping the flag rather than refusing it or erroring.
+
+**The real mechanism, found by reading the actual submitted command rather than guessing at a
+spooled-file destination.** Comparing a `--splf` batch start against an ordinary one, byte for
+byte, via the started job's own job log (`CPYSPLF ... TOSTMF`, EBCDIC-decoded): the two `SBMJOB`
+commands are identical except that the `--splf` one omits the `>> <logfile> 2>&1` redirect
+entirely. No `OUTQ`/`PRTDEV` difference, no alternate destination upstream writes to instead —
+the started process's output simply isn't captured anywhere. An earlier attempt to find a
+dedicated *SPLF spooled file for the *flag's own name* was the wrong question; every batch job
+writes an ordinary `QPJOBLOG` spooled file at job end regardless of `--splf`, which is unrelated
+and was, for a while, mistaken for the thing being looked for.
+
+`SCLAUNCH_start` (`QRPGLESRC/SCLAUNCH.RPGLE`) now takes an `splf` parameter and omits the redirect
+when it's set, otherwise unchanged. Threaded as an explicit parameter through `SCEXEC_start` and
+`SCEXEC_restart` (both exported, so `RMSC.BND`'s `SIGNATURE` moved `0.4.0` → `0.5.0`) rather than
+via the job-level environment-variable mechanism already used to carry batch env vars into a
+started service — that mechanism specifically carries variables `CPYENVVAR(*YES)` copies **into**
+the service's own process, and `--splf` is configuration for how RMSC builds its own launch
+command, not something the service should ever see in its environment. The bound-call API
+(`SCAPI.RPGLE`) has no `--splf` equivalent and its call sites pass `false`, unchanged.
+
 ## Corrected since this file was written
 
 The ground under several statements above has moved. What changed, so a reader is not comparing

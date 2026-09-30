@@ -407,6 +407,7 @@ dcl-proc SCEXEC_start export;
   dcl-pi *n like(BOOLEAN_t);
     coll likeds(SCCOLL_t);
     name like(SCDEF_NAME_t) const;
+    splf like(BOOLEAN_t) const;
     err  like(SCEXEC_ERR_t);
   end-pi;
 
@@ -476,7 +477,7 @@ dcl-proc SCEXEC_start export;
     // instance's log, or find none at all for the very first start.
     log_path = SCLOG_new_path(def);
 
-    if not SCLAUNCH_start(def: log_path: lerr);
+    if not SCLAUNCH_start(def: log_path: splf: lerr);
       err = 'Could not start ' + %trim(def.short_name) + ': ' + %trim(lerr);
       narrate_error(err);
       return false;
@@ -779,6 +780,7 @@ dcl-proc SCEXEC_restart export;
   dcl-pi *n like(BOOLEAN_t);
     coll likeds(SCCOLL_t);
     name like(SCDEF_NAME_t) const;
+    splf like(BOOLEAN_t) const;
     err  like(SCEXEC_ERR_t);
   end-pi;
 
@@ -786,7 +788,7 @@ dcl-proc SCEXEC_restart export;
     return false;
   endif;
 
-  return SCEXEC_start(coll: name: err);
+  return SCEXEC_start(coll: name: splf: err);
 
 end-proc;
 

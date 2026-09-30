@@ -28,6 +28,7 @@ ctl-opt bnddir('RMSCPGM':'RMSCDEPS');
 /include 'SCCOLL_D.rpgleinc'
 /include 'SCDEF_D.rpgleinc'
 /include 'SCEXEC_D.rpgleinc'
+/include 'SCLOG_D.rpgleinc'
 /include 'SCOUT_D.rpgleinc'
 /include 'SCQRY_D.rpgleinc'
 /include 'include/RMIFS_D.rpgleinc'
@@ -246,7 +247,7 @@ dcl-proc test_start_then_stop export;
 
   // Start. SCEXEC_start returns only once the service is actually alive, so a
   // true here already means the poll saw it.
-  assert(SCEXEC_start(coll: 'rmsclife': err):
+  assert(SCEXEC_start(coll: 'rmsclife': false: err):
          'started: ' + %trim(err));
 
   assert(SCCOLL_find(coll: 'rmsclife': def): 'found');
@@ -274,7 +275,7 @@ dcl-proc test_job_actually_ended export;
 
   build_collection(coll);
 
-  assert(SCEXEC_start(coll: 'rmsclife': err): 'started: ' + %trim(err));
+  assert(SCEXEC_start(coll: 'rmsclife': false: err): 'started: ' + %trim(err));
   assert((SCQRY_jobs_by_name(TEST_JOB: '': jobs) > 0):
          'the system can see the job');
 
@@ -299,8 +300,8 @@ dcl-proc test_start_when_already_running export;
 
   build_collection(coll);
 
-  assert(SCEXEC_start(coll: 'rmsclife': err): 'first start: ' + %trim(err));
-  assert(SCEXEC_start(coll: 'rmsclife': err): 'second start: ' + %trim(err));
+  assert(SCEXEC_start(coll: 'rmsclife': false: err): 'first start: ' + %trim(err));
+  assert(SCEXEC_start(coll: 'rmsclife': false: err): 'second start: ' + %trim(err));
 
   assert(SCCOLL_find(coll: 'rmsclife': def): 'found');
   aEqualV(SCOUT_RUNNING: SCEXEC_status(def): 'still running');
@@ -338,12 +339,155 @@ dcl-proc test_restart export;
 
   build_collection(coll);
 
-  assert(SCEXEC_start(coll: 'rmsclife': err): 'started: ' + %trim(err));
-  assert(SCEXEC_restart(coll: 'rmsclife': err): 'restarted: ' + %trim(err));
+  assert(SCEXEC_start(coll: 'rmsclife': false: err): 'started: ' + %trim(err));
+  assert(SCEXEC_restart(coll: 'rmsclife': false: err): 'restarted: ' + %trim(err));
 
   assert(SCCOLL_find(coll: 'rmsclife': def): 'found');
   aEqualV(SCOUT_RUNNING: SCEXEC_status(def): 'running after restart');
 
   assert(SCEXEC_stop(coll: 'rmsclife': false: err): 'stopped: ' + %trim(err));
+
+end-proc;
+
+//==============================================================================
+// --splf suppresses the per-instance log file; without it, one is written
+//
+// MEASURED live against sc 1.7.1: a normal batch start's launch command ends
+// with a ">> <logfile> 2>&1" redirect, and RMSC's batch-start command
+// normally writes the started instance's log to a fresh, timestamped file
+// under ~/.sc/logs/. --splf ("send output to *SPLF when submitting jobs to
+// batch") makes RMSC omit that redirect entirely, so no per-instance log file
+// is ever created for that start. Confirmed live with a clean A/B on a real
+// service: a normal start left `loginfo` able to find a log path; a --splf
+// start left `loginfo` reporting "<unknown> (try checking in log directory
+// ...)" - no file existed to find.
+//
+// This is deliberately a PAIR, per CLAUDE.md's "must disagree" rule: the two
+// tests below run the identical staged fixture through SCEXEC_start with only
+// the splf argument flipped, and SCLOG_path(def) - the same "scan the log
+// directory for this service's newest file" accessor SCEXEC.TEST's "Log file
+// location" tests use - must answer DIFFERENTLY for the two: '' when splf is
+// true, non-'' when splf is false. A fix that never wires the splf parameter
+// through to the launch command (or wires it backwards) would make both
+// tests see the same answer, and would fail exactly one half of this pair
+// rather than passing both by leaving splf unused altogether.
+//==============================================================================
+
+dcl-proc test_start_without_splf_writes_a_log export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t)  inz(*likeds);
+  dcl-s err like(SCEXEC_ERR_t);
+  dcl-s logPath like(STMF_t);
+
+  build_collection(coll);
+
+  // Same reason as the with-splf sibling below: SCLOG_path finds the
+  // newest matching name, not necessarily one THIS call wrote, so a
+  // leftover from an earlier test in the same run could make this pass
+  // vacuously even if this specific start wrote nothing. Not reachable by
+  // anything in this suite today (every splf=true call site cleans up
+  // after itself), but free to close off rather than leave implicit.
+  assert(SCCOLL_find(coll: 'rmsclife': def): 'found before start');
+  clear_existing_logs(def);
+
+  // splf = false: the ordinary path, same as every other start in this
+  // suite. Named separately from test_start_then_stop because what is under
+  // test here is the LOG FILE it leaves behind, not the running state.
+  assert(SCEXEC_start(coll: 'rmsclife': false: err):
+         'started without --splf: ' + %trim(err));
+
+  assert(SCCOLL_find(coll: 'rmsclife': def): 'found');
+  aEqualV(SCOUT_RUNNING: SCEXEC_status(def): 'running after start');
+
+  logPath = SCLOG_path(def);
+  assert((%trim(logPath) <> ''):
+         'ordinary start (splf off): SCLOG_path should find a log file ' +
+         'written for this instance - the case --splf must differ from');
+
+  assert(SCEXEC_stop(coll: 'rmsclife': false: err): 'stopped: ' + %trim(err));
+
+  // Leave no more behind than the test itself created.
+  if %trim(logPath) <> '';
+    IFS_remove_file(logPath);
+  endif;
+
+end-proc;
+
+dcl-proc test_start_with_splf_writes_no_log export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t)  inz(*likeds);
+  dcl-s err like(SCEXEC_ERR_t);
+
+  build_collection(coll);
+
+  // Diagnosed empirically (29 September 2026, real box, job-log inspection
+  // of the actual submitted SBMJOB command): SCLOG_path finds "the newest
+  // matching name", not "a file THIS call created" (SCLOG.RPGLE says so
+  // directly). Every OTHER test in this suite that starts 'rmsclife' -
+  // test_start_then_stop, test_restart, etc. - leaves its own log file
+  // behind; none of them clean up after themselves the way this test and
+  // its without-splf sibling do. So without this, a leftover from an
+  // EARLIER test in the same run can be found here and mistaken for
+  // evidence that THIS start wrote one - confirmed live: the with-splf
+  // job's own SBMJOB command genuinely carried no redirect, and the
+  // assertion still failed against a stale file from test_restart.
+  // Clearing every existing rmsclife log first makes "SCLOG_path finds
+  // one" mean only one thing again.
+  assert(SCCOLL_find(coll: 'rmsclife': def): 'found before start');
+  clear_existing_logs(def);
+
+  // splf = true: this is the case that must disagree with the test above.
+  assert(SCEXEC_start(coll: 'rmsclife': true: err):
+         'started with --splf: ' + %trim(err));
+
+  assert(SCCOLL_find(coll: 'rmsclife': def): 'found');
+  aEqualV(SCOUT_RUNNING: SCEXEC_status(def): 'running after start');
+
+  aEqualV('': SCLOG_path(def):
+          'MEASURED live against sc 1.7.1 - --splf omits the log redirect ' +
+          'from the batch-start command, so no log file is written for ' +
+          'this instance and SCLOG_path must find none');
+
+  assert(SCEXEC_stop(coll: 'rmsclife': false: err): 'stopped: ' + %trim(err));
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// clear_existing_logs - remove every log file SCLOG_path could find for def,
+// not just the one most recent. Mirrors SCLOG_path's own directory scan
+// (SCLOG.RPGLE) so "no matching file exists" and "SCLOG_path returns ''"
+// stay the same statement.
+//------------------------------------------------------------------------------
+
+dcl-proc clear_existing_logs;
+  dcl-pi *n;
+    def likeds(SCDEF_t) const;
+  end-pi;
+
+  dcl-s dir      like(STMF_t);
+  dcl-s handle   pointer;
+  dcl-s filename like(IFS_DIR_FILENAME_t);
+  dcl-s suffix   like(STMF_t);
+  dcl-s want_len like(INTEGER_t);
+
+  dir = SCLOG_dir(def);
+  handle = IFS_opendir(dir);
+  if handle = *null;
+    return;
+  endif;
+
+  suffix = '.' + %trim(def.short_name) + '.log';
+  want_len = 19 + %len(%trim(suffix));
+
+  dow IFS_readdir(handle: filename);
+    if %len(%trim(filename)) = want_len
+       and %subst(filename: 20: %len(%trim(suffix))) = %trim(suffix);
+      IFS_remove_file(%trim(dir) + '/' + %trim(filename));
+    endif;
+  enddo;
+
+  IFS_closedir(handle);
 
 end-proc;

@@ -1007,13 +1007,13 @@ dcl-proc run_changing;
 
   select;
     when opts.operation = 'start';
-      return SCEXEC_start(coll: name: err);
+      return SCEXEC_start(coll: name: opts.splf: err);
     when opts.operation = 'stop';
       return SCEXEC_stop(coll: name: false: err);
     when opts.operation = 'kill';
       return SCEXEC_stop(coll: name: true: err);
     when opts.operation = 'restart';
-      return SCEXEC_restart(coll: name: err);
+      return SCEXEC_restart(coll: name: opts.splf: err);
   endsl;
 
   // Unreachable: both callers test the operation before calling. A false with

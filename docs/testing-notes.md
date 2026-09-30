@@ -515,3 +515,33 @@ believed, and will send the next person down the wrong branch exactly as it did 
 assertions in this file now name both and point at the `Service ... has no ...` stderr line as the
 discriminator.
 
+## `SCLOG_path` finds "the newest file", not "the file this call wrote"
+
+Found 29-30 September 2026, implementing `--splf`. A new test pair in `SCLIFE.TEST.RPGLE`
+(`test_start_without_splf_writes_a_log` / `test_start_with_splf_writes_no_log`) kept failing after
+the production fix was already confirmed correct two separate, increasingly direct ways: a
+temporary forced-`return false` diagnostic printing the computed values inside `SCLAUNCH_start`
+(proved the string-building logic was right), and separately reading the actual submitted `SBMJOB`
+command text out of the real job's own job log via `CPYSPLF ... TOSTMF` + `iconv -f IBM037` (proved
+the real system behaviour was right too — the redirect genuinely was omitted). Neither confirmation
+moved the test off red.
+
+**The fixture's own log file was never the problem — every OTHER test that starts it is.**
+`SCLOG_path` (`SCLOG.RPGLE`) is documented plainly as "the MOST RECENT existing log for a service"
+— a directory scan for the newest matching filename, not a record tied to one particular start.
+`SCLIFE.TEST.RPGLE`'s other pre-existing cases (`test_start_then_stop`, `test_restart`, etc.) all
+start the same shared `rmsclife` fixture and none of them clean up the log file they leave behind
+— there was never a reason to, before this. So when the with-`--splf` test's own start correctly
+wrote nothing, `SCLOG_path` still found a STALE file left by an earlier test **in the same suite
+run** and reported it as "found" — a false failure with nothing wrong in the code under test, in
+either implementation or test.
+
+**The general shape, worth recognising faster next time**: any assertion of the form "does file/
+resource X exist" is only as trustworthy as the guarantee that nothing else in the same run could
+have created X first. A "must disagree" pair (this project's own testing discipline) is not enough
+by itself if the environment the pair runs in isn't also controlled — two correct, well-designed
+tests can still both give a false answer if something upstream of both left state behind. Fixed by
+adding a `clear_existing_logs` helper (mirrors `SCLOG_path`'s own `IFS_opendir`/`IFS_readdir` scan
+and suffix match) that deletes every existing log for the fixture before either new test starts
+anything, so a non-empty `SCLOG_path` result afterward can only mean the current call wrote it.
+

@@ -274,13 +274,13 @@ dcl-proc act_on;
 
       select;
         when action = 'start';
-          one = SCEXEC_start(g_coll: def.short_name: err);
+          one = SCEXEC_start(g_coll: def.short_name: false: err);
         when action = 'stop';
           one = SCEXEC_stop(g_coll: def.short_name: false: err);
         when action = 'kill';
           one = SCEXEC_stop(g_coll: def.short_name: true: err);
         other;
-          one = SCEXEC_restart(g_coll: def.short_name: err);
+          one = SCEXEC_restart(g_coll: def.short_name: false: err);
       endsl;
 
       // Carry on through the group rather than stopping at the first
@@ -313,13 +313,13 @@ dcl-proc act_on;
 
   select;
     when action = 'start';
-      ok = SCEXEC_start(g_coll: def.short_name: err);
+      ok = SCEXEC_start(g_coll: def.short_name: false: err);
     when action = 'stop';
       ok = SCEXEC_stop(g_coll: def.short_name: false: err);
     when action = 'kill';
       ok = SCEXEC_stop(g_coll: def.short_name: true: err);
     other;
-      ok = SCEXEC_restart(g_coll: def.short_name: err);
+      ok = SCEXEC_restart(g_coll: def.short_name: false: err);
   endsl;
 
   if not ok;

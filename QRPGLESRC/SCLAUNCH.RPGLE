@@ -359,15 +359,17 @@ dcl-proc SCLAUNCH_start export;
   dcl-pi *n like(BOOLEAN_t);
     def      likeds(SCDEF_t) const;
     log_file like(STMF_t) const;
+    splf     like(BOOLEAN_t) const;
     err      like(SCLAUNCH_ERR_t);
   end-pi;
 
   dcl-ds env  likeds(SCLAUNCH_ENV_t);
   dcl-ds qerr likeds(QCMD_ERR_t);
-  dcl-s cmd    like(SCLAUNCH_CMD_t);
-  dcl-s clcmd  like(QCMD_CMD_t);
-  dcl-s stdout like(PASE_IO_t);
-  dcl-s rc     like(INTEGER_t);
+  dcl-s cmd      like(SCLAUNCH_CMD_t);
+  dcl-s clcmd    like(QCMD_CMD_t);
+  dcl-s redirect like(QCMD_CMD_t);
+  dcl-s stdout   like(PASE_IO_t);
+  dcl-s rc       like(INTEGER_t);
   dcl-s i      like(INTEGER_t);
   dcl-s eq     like(INTEGER_t);
 
@@ -392,9 +394,19 @@ dcl-proc SCLAUNCH_start export;
                ENVVAR_LEVEL_JOB);
   endfor;
 
+  // --splf: MEASURED against sc 1.7.1, docs/parity.md - the submitted
+  // command carries no redirect at all, not a redirect to something else.
+  // Everything else about the SBMJOB is identical either way (confirmed:
+  // same JOBPTY/OUTPTY/PRTDEV, no OUTQ difference), so this is the ONLY
+  // thing splf changes here.
+  redirect = '';
+  if not splf;
+    redirect = ' >> ' + %trim(log_file) + ' 2>&1';
+  endif;
+
   clcmd = 'SBMJOB CMD(QSH CMD(''cd ' +
           %trim(SCDEF_effective_dir(def)) + ' && ' +
-          %trim(def.start_cmd) + ' >> ' + %trim(log_file) + ' 2>&1'')) ' +
+          %trim(def.start_cmd) + redirect + ''')) ' +
           'JOB(' + %trim(SCLAUNCH_job_name(def)) + ') ' +
           'CPYENVVAR(*YES) PRTDEV(*USRPRF) ALWMLTTHD(*YES)';
 

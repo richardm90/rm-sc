@@ -123,11 +123,16 @@ end-pr;
 //
 // Returns once the service is alive, or false with err set if it does not
 // come up within its startup_wait_time.
+//
+// splf: --splf on the command line - see SCLAUNCH_start. Applies to every
+// service started in the walk, dependencies included, since they all reach
+// the same SCLAUNCH_start call.
 ///
 
 dcl-pr SCEXEC_start like(BOOLEAN_t);
   coll likeds(SCCOLL_t);
   name like(SCDEF_NAME_t) const;
+  splf like(BOOLEAN_t) const;
   err  like(SCEXEC_ERR_t);
 end-pr;
 
@@ -147,11 +152,16 @@ end-pr;
 
 ///
 // Stop then start.
+//
+// splf: --splf on the command line - passed through to the start half only,
+// see SCEXEC_start. stop has no equivalent, so there is nothing to pass it
+// to on the way down.
 ///
 
 dcl-pr SCEXEC_restart like(BOOLEAN_t);
   coll likeds(SCCOLL_t);
   name like(SCDEF_NAME_t) const;
+  splf like(BOOLEAN_t) const;
   err  like(SCEXEC_ERR_t);
 end-pr;
 
