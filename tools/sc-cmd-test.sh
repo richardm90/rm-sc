@@ -42,18 +42,23 @@
 # built first, passed nothing, and every failure traced to one thing: iconv
 # decoding text that was never encoded to begin with.
 #
-# WHY THE CPD000D THREAD-SAFETY DIAGNOSTIC PLAYS NO PART HERE. Invoking `SC`
-# by fully qualifying it (`RMSC/SC ...`) from a plain PASE `system()` call -
-# a job PASE itself flags as multithreaded - draws
-# "CPD000D: Command RMSC/SC not safe for a multithreaded job" onto stdout,
-# even with stderr redirected separately. `scr` never hits this: it CALLs
-# `SCRUN`, a *PGM, and never invokes `SC` as a *CMD at all - so no real RMSC
-# caller reaches this path today. Measured live (30 September 2026) that the
-# qsh route used throughout this file - liblist set, `SC` invoked unqualified,
-# same as a real native/CL caller with RMSC on their library list would type
-# it - does not draw it. Recorded here rather than chased further: worth
-# knowing if `SC.CMD` is ever invoked some OTHER way, not a defect in what
-# this file measures.
+# WHY THE CPD000D THREAD-SAFETY DIAGNOSTIC PLAYS NO PART HERE, RESOLVED. A
+# plain PASE `system()` call draws "CPD000D: Command RMSC/SC not safe for a
+# multithreaded job" onto stdout; the qsh route this file uses does not.
+# Fully investigated (30 September 2026), not just worked around: qualifying
+# the name and `QIBM_MULTI_THREADED` both turned out to be false leads, tested
+# explicitly with and without - neither changes anything. `DSPCMD CMD(RMSC/SC)`
+# and `DSPSYSVAL SYSVAL(QMLTTHDACN)`, both IBM-supplied commands, draw the
+# IDENTICAL diagnostic under the identical calling shape - this is generic
+# IBM i behaviour for any THDSAFE(*NO) command (which `SC.CMD` is, along with
+# the large majority of IBM's own, by taking the default rather than setting
+# one), triggered by how PASE's `system()` binary's own job gets flagged, not
+# by anything `SC.CMD` does or could declare differently. `scr` never hits
+# this regardless: it `CALL`s `SCRUN`, a *PGM, never invoking `SC` as a *CMD.
+# Not fixed by declaring `SC.CMD` THDSAFE(*YES) - that would be a false claim,
+# since RMSC's RPGLE has never been verified thread-safe, made purely to
+# silence an accurate diagnostic on a path nothing real ever takes. Full
+# writeup: local/plan.md, "To investigate later".
 #
 # ---------------------------------------------------------------------------
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
