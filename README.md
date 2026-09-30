@@ -107,9 +107,8 @@ service is unaffected — that is a normal service definition, not cluster mode.
 
 Everything below is measured against a running `sc`, not assumed from its source. `✅` means
 covered and verified live; `⚠️` means handled deliberately differently from upstream (on
-purpose, not a bug); `❌` means not available in RMSC; `⏸` means undecided — not built, and not
-ruled out either. Where a `✅` hides a real, sanctioned difference in behaviour, the note says so
-and points at
+purpose, not a bug); `❌` means not available in RMSC. Where a `✅` hides a real, sanctioned
+difference in behaviour, the note says so and points at
 [`docs/parity.md`](docs/parity.md), which is the full record of every place RMSC's output or
 behaviour diverges from upstream and why.
 
@@ -177,7 +176,7 @@ behaviour diverges from upstream and why.
 | Bound-call API (`SC_check`, `SC_start`, …) | ✅ | For an ILE caller — see [`QPROTOSRC/SCAPI_D.RPGLEINC`](QPROTOSRC/SCAPI_D.RPGLEINC) |
 | Cluster mode / nginx `cluster.conf` generation | ❌ | Out of scope — see [Scope](#scope) |
 | Parallel operations | ❌ | Sequential; only mattered for cluster fan-out |
-| `sc_install_defaults` equivalent | ⏸ | Undecided — deferred, not yet built |
+| `sc_install_defaults` equivalent | ❌ | Deliberate — a standalone script, not part of `sc` itself, that already works unmodified against `scr` |
 | `*SC` TCP server hook (autostart at IPL) | ❌ | Deliberate — see [Autostart at IPL](#autostart-at-ipl) |
 
 ## Dependencies
