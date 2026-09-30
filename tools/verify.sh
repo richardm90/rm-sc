@@ -72,7 +72,7 @@ want() {
 
 # Reject a stage name that matches nothing, rather than running a subset the
 # caller did not ask for and reporting it as a pass.
-ALL="suites narration api-silence error-delivery load-warning loginfo jobinfo info adhoc-name sampletime colour gate gate-granularity gate-list-a fixture-pack"
+ALL="suites narration api-silence error-delivery load-warning loginfo sbmjob-opts jobinfo info adhoc-name sampletime colour gate gate-granularity gate-list-a fixture-pack"
 for w in $WANTED; do
   case " $ALL " in
     *" $w "*) ;;
@@ -199,6 +199,18 @@ harness load-warning    tools/load-warning-test.sh   4
 # reaches the evidence. The counts decide the run; a failure is diagnosed by
 # running tools/loginfo-test.sh directly.
 harness loginfo         tools/loginfo-test.sh        4
+# STAGES ONE SERVICE IN THE SHARED SERVICES DIRECTORY, same reasoning as
+# loginfo above it, and asks a question neither loginfo nor jobinfo below
+# ask: does sbmjob_jobname/sbmjob_opts actually reach the SBMJOB command, not
+# only get parsed. Checked through QSYS2.ACTIVE_JOB_INFO by db2util, not
+# `jobinfo` - see the harness's own header for why. About 15s, one `sc` and
+# one `scr` invocation.
+#
+# 10 lines: two report lines per implementation plus the summary block
+# covers a clean pass; a failing case adds a detail line under the report row
+# it belongs to, and the worst case (upstream's own row fails, so scr is
+# skipped) still fits. A failure is diagnosed by running the harness directly.
+harness sbmjob-opts      tools/sbmjob-opts-test.sh   10
 # STAGES NOTHING IN A SHARED DIRECTORY, unlike the stage above it. Its three
 # invented definitions live in its own work directory and are shown to both
 # implementations through -Dservices.dir and SC_SERVICES_DIR, because nothing

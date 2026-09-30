@@ -740,6 +740,42 @@ nobody had explained" — is the one closed 19 September 2026 by making the gate
 recorded shape specifically rather than trusting the operation's own membership. See "The gate"
 above.
 
+### `jobinfo` attributes a PASE-spawned worker job, not the real one — found 30 September 2026, NOT CHASED FURTHER
+
+Found while measuring `sbmjob_jobname`/`sbmjob_opts` for the coverage audit below, not while
+looking for it — an unplanned finding, noted here rather than investigated, per Richard's call
+("if it doesn't affect this piece of work, make a note and move on").
+
+For a service whose `start_cmd` is a **Python** listener (`tools/gate-listen.py`, the fixture used
+throughout this repository's own harnesses) and whose `check_alive` resolves via **port**, `jobinfo`
+reports a different job than upstream does: RMSC names the PASE worker (`QP0ZSPWT`) that ends up
+holding the listening socket; upstream names the job SBMJOB actually created (`CUSTOMJB`, in the
+fixture this was found with).
+
+What was confirmed live, same session:
+
+- **Reproducible**, not a timing artefact — repeated with a fresh fixture and observed each time.
+- **Not specific to batch mode.** Reproduced identically with `batch_mode`/`sbmjob_*` removed from
+  the fixture entirely (`~/sbmjob-test/nonbatch.yaml` on the box) — so this is not something the
+  `sbmjob_jobname`/`sbmjob_opts` work above touches or could have introduced.
+- **Does not orphan anything.** `stop` brings the service down cleanly either way; only the
+  `jobinfo` *report* is wrong, not the lifecycle.
+- **Not reproduced by `mapepire`** (a real, Java-based service) at any point this session, across
+  everything "The job order" above measured — only Python-based listeners have shown it so far.
+
+Likely code path, not confirmed: `SCEXEC_jobs` (`QRPGLESRC/SCEXEC.RPGLE`) dispatches a port
+criterion to `SCQRY_jobs_on_port`, which resolves via `QtocLstNetCnn` — plausibly a different
+OS-level job-attribution mechanism than whatever upstream's `NETSTAT_INFO`-equivalent path uses,
+one that answers "which job holds this socket right now" differently for a PASE-spawned Python
+process than for a job SBMJOB created directly. This is a hypothesis about *where* to look, not a
+diagnosis — root cause, exact scope (which listener shapes trigger it), and whether any real
+service on the client's box is Python-based and port-checked are all open.
+
+**Why this doesn't touch `sbmjob_jobname`/`sbmjob_opts` above**: that item was verified by reading
+the actual job SBMJOB created directly (`QSYS2.ACTIVE_JOB_INFO`, by the name SBMJOB was given),
+never through `jobinfo` — see `tools/sbmjob-opts-test.sh`'s own header for why that was deliberate
+rather than incidental.
+
 ## Beyond the operations — a quoted `on` in `enabled:`
 
 RMSC reproduces upstream's `enabled:` rule exactly, including its oddities - the `y` prefix test,
