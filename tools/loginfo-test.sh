@@ -347,6 +347,18 @@ WR="rmsc_lg_wr_$$"
 WRDIR="$WORK/wr-services"
 PORT_WR=59493
 
+# For stage 6 - log_dir. Declared here, not inline in the stage, so teardown()
+# (defined below, but reading these at EXIT time) has real, PID-unique values
+# even if the script never reaches stage 6 - an empty PORT_LD would make
+# teardown's pkill pattern match every gate-listen.py process on the box, not
+# just this run's.
+LD="rmsc_lg_ld_$$"
+LDDIR="$WORK/ld-custom-logs"
+PORT_LD=59494
+LD2="rmsc_lg_ld2_$$"
+LDDIR2="$WORK/ld-missing-dir"
+PORT_LD2=59495
+
 # THE OWNERSHIP MARKER, and why a name is not enough.
 #
 # Staging refuses to overwrite a definition by exact name. The REAPER below is
@@ -415,6 +427,14 @@ teardown() {
   # unique to this run.
   SC_SERVICES_DIR="$WRDIR" "$SCR" kill "$WR" >/dev/null 2>&1 </dev/null
   pkill -f "gate-listen.py.*$PORT_WR" >/dev/null 2>&1
+  # stage 6's two log_dir fixtures - staged in the SHARED SVCDIR like RUN/NONE,
+  # since upstream has to see them too, so both bare "sc"/"scr" clean up their
+  # own side of it, same as $RUN above.
+  "$SC" stop "$LD" >/dev/null 2>&1 </dev/null; "$SCR" kill "$LD" >/dev/null 2>&1 </dev/null
+  "$SC" stop "$LD2" >/dev/null 2>&1 </dev/null; "$SCR" kill "$LD2" >/dev/null 2>&1 </dev/null
+  pkill -f "gate-listen.py.*$PORT_LD" >/dev/null 2>&1
+  pkill -f "gate-listen.py.*$PORT_LD2" >/dev/null 2>&1
+  rm -f "$SVCDIR/$LD.yaml" "$SVCDIR/$LD2.yaml"
   [ -n "${KEEP:-}" ] || rm -rf "$WORK"
 
   # TEARDOWN PROVES ITSELF, AND THE REASON IS THREE STAGES AWAY.
@@ -1322,6 +1342,116 @@ else
     fi
   fi
 fi
+
+echo
+echo "== stage 6: \`log_dir:\` is actually respected, not only displayed"
+echo
+heading
+# ---------------------------------------------------------------------------
+#
+# A coverage audit (30 September 2026) found log_dir's ONLY existing coverage
+# was info's DISPLAY of the value (tools/gate-fixtures/base/rmscgate_info_full.yaml)
+# and RMSC's own internal SCLOG_dir accessor (qtestsrc/SCEXEC.TEST.RPGLE) -
+# never whether a started service's log actually LANDS there, and never
+# against upstream. This stage closes that: a real start, with each
+# implementation, of the SAME shared definition (staged in $SVCDIR so both
+# see it, the same reasoning stage 0-3's fixtures rest on), asserting the log
+# appears under the CUSTOM directory named in the definition, not the
+# default. Two cases, because upstream's own behaviour on a MISSING custom
+# directory was worth confirming rather than assuming: it creates it.
+cat > "$SVCDIR/$LD.yaml" <<EOF
+name: RMSC loginfo log_dir fixture $LD
+start_cmd: $PY $HERE/gate-listen.py --seconds 30 $PORT_LD
+check_alive: $PORT_LD
+startup_wait_time: 10
+stop_wait_time: 5
+log_dir: $LDDIR
+EOF
+
+ld_ok=yes
+
+# upstream first - if it cannot start the fixture, nothing below is evidence.
+mkdir -p "$LDDIR"
+"$SC" start "$LD" > "$WORK/ld.sc.start.out" 2> "$WORK/ld.sc.start.err" </dev/null
+sc_ld_files=$(ls -1 "$LDDIR"/*."$LD".log 2>/dev/null)
+sc_ld_count=$(printf '%s\n' "$sc_ld_files" | grep -c . || true); [ -z "$sc_ld_count" ] && sc_ld_count=0
+"$SC" stop "$LD" >/dev/null 2>&1 </dev/null
+
+if [ "$sc_ld_count" -eq 1 ]; then
+  report PASS log_dir-upstream-writes "sc start wrote a log under the custom log_dir"
+  pass=$((pass+1))
+else
+  report FAIL log_dir-upstream-writes "sc start left $sc_ld_count file(s) under $LDDIR, wanted 1"
+  detail "nothing else in this stage is evidence for anything"
+  failed=$((failed+1))
+  ld_ok=""
+fi
+rm -f "$LDDIR"/*."$LD".log
+
+# RMSC, same shared definition, same custom directory.
+"$SCR" start "$LD" > "$WORK/ld.scr.start.out" 2> "$WORK/ld.scr.start.err" </dev/null
+scr_ld_files=$(ls -1 "$LDDIR"/*."$LD".log 2>/dev/null)
+scr_ld_count=$(printf '%s\n' "$scr_ld_files" | grep -c . || true); [ -z "$scr_ld_count" ] && scr_ld_count=0
+"$SCR" stop "$LD" >/dev/null 2>&1 </dev/null
+
+if [ -n "$ld_ok" ]; then
+  if [ "$scr_ld_count" -eq 1 ]; then
+    report PASS log_dir-rmsc-writes "MEASURED - scr start wrote a log under the custom log_dir too"
+    pass=$((pass+1))
+  else
+    report FAIL log_dir-rmsc-writes "scr start left $scr_ld_count file(s) under $LDDIR, wanted 1 - matches upstream's write side"
+    failed=$((failed+1))
+  fi
+fi
+rm -f "$LDDIR"/*."$LD".log "$SVCDIR/$LD.yaml"
+rmdir "$LDDIR" 2>/dev/null
+
+# A SECOND fixture whose log_dir does not exist yet at all - MEASURED:
+# upstream creates it rather than failing.
+rm -rf "$LDDIR2"
+cat > "$SVCDIR/$LD2.yaml" <<EOF
+name: RMSC loginfo log_dir missing-directory fixture $LD2
+start_cmd: $PY $HERE/gate-listen.py --seconds 30 $PORT_LD2
+check_alive: $PORT_LD2
+startup_wait_time: 10
+stop_wait_time: 5
+log_dir: $LDDIR2
+EOF
+
+"$SC" start "$LD2" > "$WORK/ld2.sc.start.out" 2> "$WORK/ld2.sc.start.err" </dev/null
+sc_ld2_count=0
+[ -d "$LDDIR2" ] && sc_ld2_count=$(ls -1 "$LDDIR2"/*."$LD2".log 2>/dev/null | grep -c . || true)
+[ -z "$sc_ld2_count" ] && sc_ld2_count=0
+"$SC" stop "$LD2" >/dev/null 2>&1 </dev/null
+
+ld2_ok=yes
+if [ "$sc_ld2_count" -eq 1 ]; then
+  report PASS log_dir-upstream-creates-dir "MEASURED - sc start creates a missing log_dir rather than failing"
+  pass=$((pass+1))
+else
+  report FAIL log_dir-upstream-creates-dir "sc start left $sc_ld2_count file(s) under $LDDIR2, wanted 1"
+  detail "the RMSC case below is not evidence for anything either"
+  failed=$((failed+1))
+  ld2_ok=""
+fi
+rm -rf "$LDDIR2"
+
+if [ -n "$ld2_ok" ]; then
+  "$SCR" start "$LD2" > "$WORK/ld2.scr.start.out" 2> "$WORK/ld2.scr.start.err" </dev/null
+  scr_ld2_count=0
+  [ -d "$LDDIR2" ] && scr_ld2_count=$(ls -1 "$LDDIR2"/*."$LD2".log 2>/dev/null | grep -c . || true)
+  [ -z "$scr_ld2_count" ] && scr_ld2_count=0
+  "$SCR" stop "$LD2" >/dev/null 2>&1 </dev/null
+  if [ "$scr_ld2_count" -eq 1 ]; then
+    report PASS log_dir-rmsc-creates-dir "scr start also creates a missing log_dir - matches upstream"
+    pass=$((pass+1))
+  else
+    report FAIL log_dir-rmsc-creates-dir "scr start left $scr_ld2_count file(s) under $LDDIR2, wanted 1"
+    failed=$((failed+1))
+  fi
+fi
+rm -rf "$LDDIR2"
+rm -f "$SVCDIR/$LD2.yaml"
 
 echo
 echo "pass=$pass   failed=$failed   pinned-changed=$changed   reference-drift=$refdrift"
