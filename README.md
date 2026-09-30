@@ -107,8 +107,9 @@ service is unaffected — that is a normal service definition, not cluster mode.
 
 Everything below is measured against a running `sc`, not assumed from its source. `✅` means
 covered and verified live; `⚠️` means handled deliberately differently from upstream (on
-purpose, not a bug); `❌` means not available in RMSC. Where a `✅` hides a real, sanctioned
-difference in behaviour, the note says so and points at
+purpose, not a bug); `❌` means not available in RMSC; `⏸` means undecided — not built, and not
+ruled out either. Where a `✅` hides a real, sanctioned difference in behaviour, the note says so
+and points at
 [`docs/parity.md`](docs/parity.md), which is the full record of every place RMSC's output or
 behaviour diverges from upstream and why.
 
