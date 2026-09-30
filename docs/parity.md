@@ -340,13 +340,25 @@ implementations, in every state.
 RMSC now matches all four. `tools/loginfo-test.sh` covers them with the streams kept apart,
 because the gate structurally cannot — which is how this stayed mis-recorded for six days.
 
-### An unrelated leak found while these lines were open
+### An unrelated leak found while these lines were open — FIXED 9 September 2026, `66571e0`
 
-`SCCOLL.RPGLE`'s `only_if_executable` test calls `IFS_open_file` inside a boolean condition and
-discards the descriptor, leaking one per definition per load. The same defect in
-`SCEXEC_loginfo` was fixed with the `loginfo` work because the lines were already being edited;
-this one is not, because closing it means restructuring a condition on the definition-loading
-path, which feeds the byte-exact operations and wants its own test rather than a drive-by change.
+`SCCOLL.RPGLE`'s `only_if_executable` test called `IFS_open_file` inside a boolean condition and
+discarded the descriptor — and discarded it precisely when the open **succeeded**, so the leak
+happened on the common path, once per such definition per load, not on the path that looks like
+the failure. The identical defect in `SCEXEC_loginfo` was fixed earlier, with the loginfo work,
+because those lines were already open; this one was deliberately left for its own commit, since
+fixing it means restructuring a condition on the definition-loading path, which feeds the
+byte-exact operations. **This paragraph sat describing it as still open for three weeks after it
+was fixed — corrected 30 September 2026, found while auditing this file's own coverage claims
+against `local/plan.md`'s feature table**, itself corrected the same day for describing this
+leak, and two other items, as current when they weren't.
+
+Semantics unchanged: skip a definition when `only_if_executable` is set, is not a directory, and
+cannot be opened. **`only_if_executable` has no RPGUnit suite coverage — deliberate, not an
+oversight** (per the fix's own commit): `tools/gate-fixtures-run.sh`'s fixture pack covers both
+directions live, `rmscgate_exec_yes`/`rmscgate_exec_no`, and those are what would catch a
+regression here — a unit test would need to fake real filesystem existence checks
+(`IFS_isa_directory`/`IFS_open_file`) that the fixture pack already exercises for real.
 
 ### Three things about `loginfo`, two of them now fixed
 
@@ -1077,6 +1089,52 @@ case-insensitive here too, so the self-consistency check is provably testing the
 `tools/adhoc-name-test.sh`: 54 cases, 0 failures, 0 pinned-behaviour changes, 0 reference drift.
 Confirmed live against the real `sc`/`scr` binaries on all three specifier forms, plus the
 `port:aBc` control.
+
+### The file-path specifier — RMSC does not replicate upstream's crash
+
+**Found and decided 30 September 2026, while closing a coverage gap** (upstream's own usage
+block — `docs/messages.md` — documents "the path to a YAML file with a service configuration"
+as a valid `<service(s)>` specifier, and nothing in this repository had ever exercised it, in
+either direction, before this).
+
+**The happy path already matched, byte for byte**, and still does: `sc check <path>` and
+`scr check <path>` produce identical output for an absolute path, a relative path, a `.yml`
+extension, and `info`'s `Defined in:` line, against a throwaway definition outside either
+implementation's normal search directories. RMSC never had explicit code for this specifier —
+it falls out of the same "try this as a literal file" fallback the `check_alive` and ad-hoc
+work already relies on.
+
+**Measured while checking the edges: upstream crashes when the filename's extension is neither
+`.yaml` nor `.yml`.**
+
+```
+$ sc check /home/claude/yamlpath-test/notyaml.txt
+Exception in thread "main" java.lang.NullPointerException
+	at java.base/java.util.TreeMap.put(TreeMap.java:561)
+	at jesseg.ibmi.opensource.ServiceDefinitionCollection.put(ServiceDefinitionCollection.java:136)
+	at jesseg.ibmi.opensource.ServiceCommander.main(ServiceCommander.java:310)
+```
+
+Exit 1, stdout empty, a raw Java stack trace on stderr — not upstream's usual `Invalid
+configuration for service...`/`Could not find definition` error handling, an uncaught exception
+escaping `main`. Reproduced identically for no extension at all, `.json`, and `.txt`. Root cause,
+inferred from the trace rather than from source access: `TreeMap.put` throws `NullPointerException`
+on a null key, and the stack has no frame between the extension-stripping that derives a
+service's short name and the `put` that indexes it — consistent with that derivation returning
+`null` when the filename carries a recognised extension to strip and there being no null check
+before the map insert.
+
+RMSC derives a short name from the filename regardless of extension and handles all of these
+identically to the `.yaml` case: loaded, reported correctly, exit 0.
+
+**Richard's decision: recorded as a sanctioned improvement, not matched.** Unlike the ad-hoc
+naming difference above — where "ours is better" was explicitly rejected as a reason to diverge
+— there is no round-trip or output-format argument for reproducing an uncaught exception, and
+this project already has a precedent for improving on upstream outright (`perfinfo`, dropping
+the Python 3 + `ibm_db` dependency). The difference is not on the `check` path in the sense that
+matters: no defined service ever reaches it, since only a specifier a user typed can, and a user
+who types a `.txt` path meaning a YAML file is better served by RMSC's tolerance than by
+upstream's crash.
 
 ## Beyond the operations — inputs read before an operation starts
 

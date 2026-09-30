@@ -2,7 +2,9 @@
 #
 # adhoc-name-test.sh - what an AD HOC service is CALLED, and everywhere that
 # name comes back out - PLUS (stage 7, added 20 September 2026) whether the
-# REST of its output matches upstream too, not only its name.
+# REST of its output matches upstream too, not only its name - PLUS (stage 8,
+# added 30 September 2026) the file-path specifier, a different kind from
+# the rest of this file: not a constructed name at all, a literal path.
 #
 # An ad-hoc service is one named on the command line by a specifier rather than
 # by a definition - `scr check port:22`, `scr check job:QINTER`. It has a name
@@ -1561,6 +1563,112 @@ for spec in "${FULL_SPECS[@]}"; do
 done
 
 echo
+echo "== stage 8: the file-path specifier - \`check <path>\`, not a name at all"
+echo "   (docs/messages.md's own usage-block citation - 'the path to a YAML"
+echo "    file with a service configuration' - never exercised before 30"
+echo "    September 2026, either direction)"
+echo
+heading
+# ---------------------------------------------------------------------------
+#
+# A different KIND of specifier from everything above: not constructed from a
+# port/job/program name, but a literal path to a definition file outside
+# either implementation's normal search directories. Two questions, and they
+# get different treatment - the first is an ordinary byte-exact comparison,
+# the second is PINNED exactly like stage 4's PGM- row, because the two sides
+# do not agree and are not supposed to.
+#
+# Fixture lives in $WORK, well outside /QOpenSys/etc/sc/services and
+# $HOME/.sc/services, so neither implementation's directory scan can find it
+# any way but by the path given on the command line.
+# ---------------------------------------------------------------------------
+
+cat > "$WORK/filepathspec.yaml" <<'FPEOF'
+name: RMSC File Path Specifier Test
+start_cmd: /QOpenSys/usr/bin/true
+check_alive: 55493
+FPEOF
+
+# THE HAPPY PATH - ordinary byte-exact comparison, same shape as stage 7's
+# full-output cases. MEASURED 30 September 2026: absolute path, relative
+# path and a .yml extension all already matched upstream byte for byte, with
+# no RMSC code written for this specifier at all - it falls out of the same
+# "try this as a literal file" fallback check_alive's own ad-hoc work relies
+# on. This case exists so a regression in that fallback is caught here
+# rather than discovered the next time someone tries it by hand.
+grab scr.fpspec "$SCR" check "$WORK/filepathspec.yaml"
+grab sc.fpspec  "$SC"  check "$WORK/filepathspec.yaml"
+fp_why=""
+if [ "${RC_SAVED[scr.fpspec]}" -ne "${RC_SAVED[sc.fpspec]}" ]; then
+  fp_why="$fp_why exit scr=${RC_SAVED[scr.fpspec]} sc=${RC_SAVED[sc.fpspec]}"
+fi
+diff "$WORK/sc.fpspec.out" "$WORK/scr.fpspec.out" > "$WORK/fpspec.out.diff" 2>&1
+[ -s "$WORK/fpspec.out.diff" ] && fp_why="$fp_why stdout differs"
+if [ -z "$fp_why" ]; then
+  report PASS file-path-specifier "MEASURED - an absolute path to a real definition matches upstream in full"
+  pass=$((pass+1))
+  rm -f "$WORK/fpspec.out.diff"
+else
+  report FAIL file-path-specifier "$fp_why"
+  [ -s "$WORK/fpspec.out.diff" ] && { detail "stdout:"; while IFS= read -r p; do detail "  $p"; done < "$WORK/fpspec.out.diff"; }
+  failed=$((failed+1))
+fi
+
+# PINNED - UPSTREAM CRASHES ON A NON-.yaml/.yml EXTENSION; RMSC DOES NOT.
+#
+#   upstream sc:  Exception in thread "main" java.lang.NullPointerException,
+#                 at ServiceDefinitionCollection.put - exit 1, stdout empty,
+#                 a raw Java stack trace on stderr. Reproduced for no
+#                 extension at all, .json, and .txt.
+#   RMSC:         derives a short name from the filename regardless of
+#                 extension and handles it identically to the .yaml case -
+#                 exit 0, a normal check row.
+#
+# docs/parity.md ("Beyond the operations - specifiers", "The file-path
+# specifier") records Richard's decision NOT to replicate the crash - unlike
+# stage 4's PGM- row, "ours is better" is not being rejected here, because
+# there is no round-trip/output-format argument for reproducing an uncaught
+# exception the way there was for ad-hoc naming.
+#
+# NOTHING HERE ASSERTS THE TWO MATCH. They deliberately do not.
+cp "$WORK/filepathspec.yaml" "$WORK/filepathspec.notyaml"
+grab scr.fpext "$SCR" check "$WORK/filepathspec.notyaml"
+e_why=""
+[ "${RC_SAVED[scr.fpext]:-1}" -eq 0 ] || e_why="$e_why exit=${RC_SAVED[scr.fpext]}(wanted 0)"
+if parse_row "$WORK/scr.fpext.out"; then
+  :
+else
+  e_why="$e_why row-does-not-parse"
+fi
+if [ -z "$e_why" ]; then
+  report PASS file-path-no-yaml-ext "(pinned) a non-.yaml/.yml path still loads and reports - RMSC's own"
+  pass=$((pass+1))
+else
+  report CHANGED file-path-no-yaml-ext "(pinned)$e_why"
+  detail "RMSC's extension tolerance has moved. Upstream CRASHES on this input,"
+  detail "so there is nothing here to be brought into line with."
+  detail "If that was intended, update this case and docs/parity.md together."
+  changed=$((changed+1))
+fi
+
+# UPSTREAM'S CRASH, as the reference behind the row above. Message text not
+# compared - a raw stack trace is not a D2 catalogue entry - only that it
+# still fails the same way (non-zero exit, empty stdout).
+grab sc.fpext "$SC" check "$WORK/filepathspec.notyaml"
+c_why=""
+[ "${RC_SAVED[sc.fpext]}" -ne 0 ] || c_why="$c_why sc-exit=0(wanted nonzero)"
+[ "$(nonblank "$WORK/sc.fpext.out")" -eq 0 ] || c_why="$c_why sc-stdout-not-empty"
+if [ -z "$c_why" ]; then
+  report PASS "sc:notyaml-ext" "crashes: nonzero exit, empty stdout - message text NOT compared"
+  pass=$((pass+1))
+else
+  report REFDRIFT "sc:notyaml-ext" "$c_why"
+  detail "upstream no longer crashes on a non-.yaml/.yml file-path specifier;"
+  detail "the pinned row above rests on it doing so"
+  refdrift=$((refdrift+1))
+fi
+
+echo
 echo "pass=$pass   failed=$failed   pinned-changed=$changed   reference-drift=$refdrift"
 echo "artefacts: $WORK   (.out, .err and .diff per case; KEEP=1 to keep them)"
 
@@ -1604,4 +1712,5 @@ if [ "$refdrift" -ne 0 ]; then
   exit 1
 fi
 echo "OK: name and description on every form and every surface that carries them,"
-echo "    and (stage 7) the rest of check/jobinfo/info/loginfo's output besides"
+echo "    (stage 7) the rest of check/jobinfo/info/loginfo's output besides, and"
+echo "    (stage 8) the file-path specifier - matched, except one pinned crash"

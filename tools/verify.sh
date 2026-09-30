@@ -226,11 +226,13 @@ harness info            tools/info-test.sh           4
 # SC_SERVICES_DIR, never to $HOME/.sc/services, so a killed run leaves nothing
 # anywhere. About 1m, and roughly a dozen `sc` invocations are all of it.
 #
-# 8 lines, not 4: three stages end in a row that can carry several detail lines
-# - the pinned PGM- row, a REFDRIFT quoting upstream, and stage 5's three-way
-# row comparison - and the summary counts must not be truncated away behind
-# them. A failure is diagnosed by running the harness directly.
-harness adhoc-name      tools/adhoc-name-test.sh     8
+# 9 lines, not 4: four stages end in a row that can carry several detail lines
+# - the pinned PGM- row, a REFDRIFT quoting upstream, stage 5's three-way row
+# comparison, and (added 30 September 2026) stage 8's own three-line pinned
+# pair for the file-path specifier - and the summary counts must not be
+# truncated away behind them. A failure is diagnosed by running the harness
+# directly.
+harness adhoc-name      tools/adhoc-name-test.sh     9
 # NEEDS A RUNNING SERVICE, and fails loudly rather than skipping when there is
 # none - see the fixture stage in the harness for why that is the right way
 # round. It is also the slowest non-pack stage at about 4m on a two-job
