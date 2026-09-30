@@ -72,7 +72,7 @@ want() {
 
 # Reject a stage name that matches nothing, rather than running a subset the
 # caller did not ask for and reporting it as a pass.
-ALL="suites narration api-silence error-delivery load-warning loginfo sbmjob-opts jobinfo info adhoc-name sampletime colour gate gate-granularity gate-list-a fixture-pack"
+ALL="suites narration api-silence error-delivery load-warning loginfo sbmjob-opts jobinfo info adhoc-name sampletime sc-cmd colour gate gate-granularity gate-list-a fixture-pack"
 for w in $WANTED; do
   case " $ALL " in
     *" $w "*) ;;
@@ -250,6 +250,19 @@ harness adhoc-name      tools/adhoc-name-test.sh     9
 # round. It is also the slowest non-pack stage at about 4m on a two-job
 # service, because each case spends (jobs x sampletime) seconds sampling.
 harness sampletime      tools/sampletime-test.sh     6
+# NEEDS A RUNNING SERVICE (mapepire), like sampletime above. Nothing here goes
+# through `scr` or `sc` - this is the only harness that drives the native `SC`
+# *CMD at all, through qsh's own `system` built-in, and treats `scr`'s already-
+# proven output as the reference rather than upstream's - see the harness's
+# own header for why. Seconds, not minutes: fourteen cases, no JVM.
+#
+# 33 lines, not fewer: four stage headers with their own blank lines, two
+# report tables (stage 1's and stage 4's, each with its own two-line heading)
+# and stage 2/3's headingless rows, the pass/failed summary and the artefacts
+# line - fourteen cases, one report line each, nothing droppable without
+# losing a row's own verdict. A failure is diagnosed by running the harness
+# directly.
+harness sc-cmd          tools/sc-cmd-test.sh         33
 harness colour          tools/colour-test.sh         3
 harness gate            tools/fidelity-gate.sh       4
 # NEEDS NOTHING LIVE - no BASELINE, no service, no real sc or scr. It tests the
