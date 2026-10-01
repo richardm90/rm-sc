@@ -1080,6 +1080,7 @@ dcl-proc SCEXEC_loginfo export;
   dcl-s handle like(INTEGER_t);
   dcl-s i      like(INTEGER_t);
   dcl-s j      like(INTEGER_t);
+  dcl-s found  like(BOOLEAN_t) inz(false);
 
   path = SCLOG_path(def);
 
@@ -1112,6 +1113,27 @@ dcl-proc SCEXEC_loginfo export;
   // unless a job is running: jobs is fetched here, once, and reused below for
   // the spooled-file loop rather than fetched twice.
   SCEXEC_jobs(def: jobs);
+
+  // SPOOLED FILES FIRST, AND THEY SUPPRESS THE NOT-FOUND WARNING - MEASURED
+  // 1 October 2026, docs/parity.md. Upstream lists a batch job's spooled
+  // files BEFORE the log line, not after, as `<short>: DSPSPLF FILE(<name>)
+  // JOB(<job>) SPLNBR(<n>)` - nothing like the old `    spooled file <name>
+  // number <n> in <job>`, which was never measured against anything. Finding
+  // at least one spooled file counts as "found" for the not-found warning
+  // below, exactly as a non-empty log file already does - a batch service
+  // with spooled output but no log of its own must not be reported as
+  // "<unknown>".
+  for i = 1 to jobs.count;
+    if SCQRY_splfs_for_job(jobs.name(i): splfs) > 0;
+      found = true;
+      for j = 1 to splfs.count;
+        SCOUT_writeln(%trim(def.short_name) + ': DSPSPLF FILE(' +
+                      %trim(splfs.name(j)) + ') JOB(' + %trim(jobs.name(i)) +
+                      ') SPLNBR(' + %char(splfs.file_number(j)) + ')');
+      endfor;
+    endif;
+  endfor;
+
   handle = -1;
   if jobs.count > 0;
     handle = IFS_open_file(path: IFS_OPEN_TYPE_READ);
@@ -1124,22 +1146,10 @@ dcl-proc SCEXEC_loginfo export;
     else;
       SCOUT_writeln(%trim(def.short_name) + ': ' + %trim(path));
     endif;
-  else;
+  elseif not found;
     SCOUT_warnln(%trim(def.short_name) + ': <unknown> (try checking in ' +
                  'log directory ' + %trim(SCLOG_dir(def)) + ')');
   endif;
-
-  // A batch service writes to a spooled file rather than, or as well as, the
-  // log - so report those too or half the output is invisible.
-  for i = 1 to jobs.count;
-    if SCQRY_splfs_for_job(jobs.name(i): splfs) > 0;
-      for j = 1 to splfs.count;
-        SCOUT_writeln('    spooled file ' + %trim(splfs.name(j)) +
-                      ' number ' + %char(splfs.file_number(j)) +
-                      ' in ' + %trim(jobs.name(i)));
-      endfor;
-    endif;
-  endfor;
 
   // NO TRAILING BLANK LINE HERE. Upstream ends the loginfo REPORT with one
   // blank line, not each service's part of it, so it belongs in SCMAIN

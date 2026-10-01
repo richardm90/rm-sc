@@ -551,8 +551,12 @@ Which stream is right is not obvious and is a decision, not a defect: this is a 
 warning, and `-q` has nothing to say about it. But it is upstream's behaviour, and RMSC's whole
 premise is that a consumer can parse stdout.
 
-RMSC additionally reports spooled files for a batch service, indented by four. Whether upstream
-does is still `unmeasured` — the service probed had none.
+**Fixed 1 October 2026** — see `docs/parity.md`'s "spooled-file section" entry for the full
+account. RMSC used to additionally report spooled files for a batch service, indented by four
+(`    spooled file <name> number <n> in <job>`); that text was never measured against anything,
+and once a fixture existed that could genuinely produce a spooled file, upstream turned out to
+say something completely different (`<short>: DSPSPLF FILE(<name>) JOB(<job>) SPLNBR(<n>)`,
+listed *before* the log line, not after). RMSC now matches.
 
 ### `perfinfo`
 

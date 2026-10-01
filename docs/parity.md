@@ -455,21 +455,54 @@ harmlessly, exactly as Richard's own compiles show. `RMSCT/SCEXEC` now compiles 
 81 cases pass** (78 original plus 3 new — two of the four new assertions extended existing test
 procedures rather than adding new ones), 573 assertions, 0 failures.
 
-**The spooled-file section.** RMSC prints `    spooled file <name> number <n> in <job>` after the
-log line. Upstream has a spooled-file path of its own (`getSpooledFiles`), and **what it prints
-has not been measured**: producing a spooled file owned by the service's own job needs a
-`batch_mode` fixture, because PASE runs each `system` call in its own job and the spooled file
-then belongs to a transient one. Not changed, and not asserted against upstream anywhere.
+**The spooled-file section — MEASURED and FIXED 1 October 2026.** RMSC used to print
+`    spooled file <name> number <n> in <job>` after the log line — never measured against
+anything, because producing a spooled file genuinely owned by a batch service's own job turned
+out to need solving a real staging problem first (upstream's own public `getSpooledFiles()` is,
+by decompiling `sc.jar`, an unconditional stub returning an empty list — the real mechanism
+`printLogInfo` actually calls is `QueryUtils.getSplfsForJob`, undocumented from the outside).
 
-Two consequences of that, found by review and worth knowing before anyone measures it:
+**The staging problem, solved.** PASE's `system()` call always routes a `*PRINT`-destined CL
+command through a separate, transient job, so a spooled file it creates can never be attributed
+to the calling service's own job — confirmed by direct, repeatable experiment, not assumed. The
+PASE bash **builtin** `cl` (distinct from `/QOpenSys/usr/bin/system`) does not have this problem:
+`cl -sk "DSPJOB OUTPUT(*PRINT)"` runs in the current job (`-i`, the default) and **k**eeps the
+spool file instead of deleting it after echoing it back, while `-s` suppresses that echo. Run once
+at the start of a `batch_mode` service's `start_cmd`, before `exec`-ing into the real listener,
+this reliably stages exactly one real, discoverable spooled file for the service's own job.
 
-- The spooled loop runs in the **not-found** case too, so for a batch service with spooled files
-  and no log, a spooled line becomes the FIRST thing on stdout — the log line having moved to
-  stderr. Pre-existing behaviour, but the not-found case's stdout used to carry the log line and
-  now carries only the blank, so the spooled line is newly exposed there. Whether upstream lists
-  spooled files for a service it reports no log for is part of the same unmeasured question.
-- `tools/loginfo-test.sh` tolerates spooled lines from line 2 onward, which does not cover that
-  case. It would fail quoting a spooled line rather than anything about the log.
+**Measured, live, against that fixture:**
+
+```
+upstream:  <short>: DSPSPLF FILE(QPDSPJOB) JOB(<job>) SPLNBR(1)
+           <short>: <log file path>
+           <one trailing blank line>
+stderr:    (empty)
+
+RMSC was:  <short>: <log file path>
+               spooled file QPDSPJOB number 1 in <job>
+           <one trailing blank line>
+```
+
+Two things, not one: the **wording/shape** (`DSPSPLF FILE(<name>) JOB(<job>) SPLNBR(<n>)`, not
+`spooled file <name> number <n> in <job>`), and the **order** — upstream lists spooled files
+*before* the log line, RMSC listed them after. A third thing travels with the fix rather than
+needing its own case: finding at least one spooled file suppresses the not-found warning exactly
+as a non-empty log already does, so a batch service with spooled output but no log of its own is
+not reported as `<unknown>`.
+
+**IMPLEMENTED 1 October 2026.** `SCEXEC_loginfo` now lists spooled files first, in upstream's
+wording, and treats finding one as "found" for the not-found-warning guard. A blind-authored test
+(`tools/loginfo-splf-test.sh`, commissioned without sight of `QRPGLESRC`/`QPROTOSRC`) ran red
+against the old wording and ordering, green after the fix; `tools/loginfo-test.sh` (25 cases) and
+the `SCEXEC` unit suite (81 cases, 573 assertions) show no regression.
+
+**One side effect of the fixture, not of this fix, recorded rather than chased**: staging this
+against upstream can show two extra, always-empty, perpetually-`OPEN` `QPRINT` placeholder
+entries that RMSC's side never produces — traced to the job-identity divergence recorded
+separately above ("Batch services run on a genuinely different OS mechanism than upstream's").
+`tools/loginfo-splf-test.sh` asserts the real `QPDSPJOB` line's presence, wording and position on
+both sides without requiring the total line count to match, for exactly that reason.
 
 **`jobinfo`** — **matched 10 September 2026.** Five differences, all measured with the streams
 apart before anything was written:
@@ -792,6 +825,64 @@ different moments or contexts without realising it) that produced the `diff -q` 
 mistakes caught and fixed the same week while building `tools/sc-cmd-test.sh`. No specific
 command has been identified as the cause; careful, repeated, methodical testing simply cannot
 reproduce the original claim.
+
+### Batch services run on a genuinely different OS mechanism than upstream's — found 1 October 2026, not yet planned
+
+**This is a different question from the retraction above, and the retraction's answer does not
+cover it.** That section asked "do `sc` and `scr` disagree about which job a given port belongs
+to?" and found no — both query `QSYS2.NETSTAT_JOB_INFO` the same way and agree. This section asks
+a question nobody had asked yet: **is RMSC's real, underlying job the same *kind* of job as
+upstream's**, independent of which one a port-lookup happens to name? It is not.
+
+**Found while building a `batch_mode` fixture for the `loginfo` spooled-file work below**, then
+confirmed by decompiling `OperationExecutor.startService()`. Upstream does not build a `SBMJOB`
+CL command at all. It calls, directly from the JVM:
+
+```
+Runtime.exec(["/QOpenSys/pkgs/bin/nohup", "/QOpenSys/pkgs/lib/sc/native/scbash", "-c", <command>],
+             <env>, <workdir>)
+```
+
+— a **custom, stripped native PASE binary** (`scbash`, 64-bit XCOFF, `strings` yields almost
+nothing beyond linker metadata — no further reverse-engineering attempted, see "what wasn't
+chased" below). The environment passed to it includes `PASE_FORK_JOBNAME=<service name,
+alphanumerics only>` — a real, documented IBM i PASE environment variable that tells PASE's own
+`fork()` what name to give the child job — and, only when the user configured
+`sbmjob_jobname`/`sbmjob_opts`, `SBMJOB_JOBNAME=`/`SBMJOB_OPTS=` for `scbash` itself to act on
+(confirmed those reach a real `SBMJOB` by `tools/sbmjob-opts-test.sh`, which already passes for
+both implementations — it just never asked *how* upstream's side gets there).
+
+RMSC's `SCLAUNCH_start` (`QRPGLESRC/SCLAUNCH.RPGLE`) does the opposite: it builds a literal
+`SBMJOB CMD(QSH CMD('cd ... && ...')) JOB(...) CPYENVVAR(*YES) PRTDEV(*USRPRF) ALWMLTTHD(*YES)`
+string and runs it through `QCMD_exc`.
+
+**Measured consequence, live, reproducible (not a timing artefact — checked at t=1/2/3/5/8s after
+start):** for a Python-exec'd batch service, upstream's job comes up as genuine type `BATCH` and
+keeps its chosen name (`SC_<SHORTNAME>` by default) for its whole life. RMSC's comes up as type
+`BCI` and gets reclassified into the PASE worker job (`QP0ZSPWT`/`QP0ZSPWP`) partway through —
+confirmed via side-by-side `DSPJOB OUTPUT(*PRINT)` dumps of both jobs' own "Type of job" and
+"Submitted by" fields. `ALWMLTTHD` is `*YES` on both sides, so that parameter is not the
+differentiator.
+
+**Consequences already found to follow from this, in two different features**, both downstream
+of the same root cause rather than independent bugs:
+
+- `jobinfo` naming the PASE worker rather than the SBMJOB-named job for a Python listener — the
+  behaviour the retraction above confirmed is *consistent* between implementations, but is itself
+  a symptom of RMSC's job having been reclassified, where upstream's never is.
+- `loginfo`'s spooled-file listing (below): staging a real spooled file for a batch job's own
+  `cl -sk` print step lands under two extra, empty, perpetually-`OPEN` `QPRINT` placeholder
+  entries on upstream's side that RMSC's side never produces — traced to the same job-identity
+  difference, not a defect in the spooled-file text rendering itself.
+
+**What wasn't chased, on purpose, pending a planning decision:** disassembling `scbash`'s actual
+machine code to learn precisely what it does with `SBMJOB_JOBNAME`/`SBMJOB_OPTS` when they are
+set; and testing whether RMSC's own non-batch launch path (`PASE_run_cmd`, in `rmtools`) already
+uses a native `fork()`/`exec()` that could be given `PASE_FORK_JOBNAME` directly — which, if true,
+might let RMSC get a correctly-typed, correctly-named batch job **without** a custom compiled
+helper, by replacing the `SBMJOB`/`QSH` path rather than reproducing `scbash`. Neither is started
+here. This is recorded as found, not fixed, pending its own scoping and plan — it is materially
+bigger than a text-formatting fix and touches how every `batch_mode` service is launched.
 
 ## Beyond the operations — a quoted `on` in `enabled:`
 
