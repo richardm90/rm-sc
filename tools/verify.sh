@@ -150,15 +150,28 @@ harness() {
 
 if want suites; then
   echo "########## suites ##########"
-  liblist=""
-  for l in $LIBS; do liblist="${liblist}liblist -a $l; "; done
+  # cl, not qsh -c "... system '...'" - found 01 October 2026, the hard way.
+  # RUCALLTST's own report is a genuine spooled file under the hood (CPYSPLF
+  # on a QPRINT entry retrieves the identical text), and qsh's own `system`
+  # built-in does not reliably bridge a command's spooled output back to this
+  # script's stdout once anything in the same job has opened a UNIXCMDOA-
+  # handled file (PASE_run_cmd, RMPASE.rpgle/rmtools) - confirmed by three
+  # separate negative experiments inside RMPASE.rpgle's own RPGLE (disabling
+  # its job-log-message removal, then its entire error handler) that changed
+  # nothing, before finding the actual cause was the WRAPPER, not RMPASE. `cl`
+  # (a PASE shell builtin, not `system`) explicitly reads back a command's
+  # generated spool files and messages and writes them to its own stdout by
+  # default (see `help cl` - the behaviour `-s` turns OFF), and runs in the
+  # CURRENT job by default (`-i`), which is also the reason this can set the
+  # library list once, outside the loop, instead of repeating `liblist -a`
+  # (qsh's own fix for the same problem, for a different reason: every `system`
+  # call spawns its own job and loses it otherwise) ahead of every suite.
+  for l in $LIBS; do cl -O "ADDLIBLE LIB($l)" >/dev/null 2>&1; done
   for s in $SUITES; do
-    qsh -c "${liblist}
-            system \"RUCRTRPG TSTPGM($TSTLIB/$s) SRCSTMF('qtestsrc/$s.TEST.RPGLE') TGTCCSID(*JOB) DBGVIEW(*SOURCE) RPGPPOPT(*LVL2) COPTION(*EVENTF) INCDIR($INCDIRS)\"" \
+    cl -O "RUCRTRPG TSTPGM($TSTLIB/$s) SRCSTMF('qtestsrc/$s.TEST.RPGLE') TGTCCSID(*JOB) DBGVIEW(*SOURCE) RPGPPOPT(*LVL2) COPTION(*EVENTF) INCDIR($INCDIRS)" \
         >"/tmp/verify.c.$s" 2>&1
     crc=$?
-    out=$(qsh -c "${liblist}
-            system \"RUCALLTST TSTPGM($TSTLIB/$s) ORDER(*API) DETAIL(*BASIC) OUTPUT(*ALLWAYS) RCLRSC(*NO)\"" 2>&1)
+    out=$(cl -O "RUCALLTST TSTPGM($TSTLIB/$s) ORDER(*API) DETAIL(*BASIC) OUTPUT(*ALLWAYS) RCLRSC(*NO)" 2>&1)
     # Both codes are printed. A suite whose compile failed runs the PREVIOUS
     # program and reports its result - which is a pass for code that does not
     # compile. compile=0 is the half that says the other half means anything.
