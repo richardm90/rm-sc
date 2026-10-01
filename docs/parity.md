@@ -925,13 +925,78 @@ unconditionally rather than only when the configured command actually failed. Al
 `tools/narration-test.sh` (65 checks), the `SCEXEC` unit suite (78 cases) and the fidelity gate
 show no regression.
 
-**The two remaining, unmeasured texts stay out of scope, on purpose.** The
-"did not stop within `<n>` seconds" and "did not stop, even immediately" texts belong to the
-*no-`stop_cmd`* path (`ENDJOB` used directly, with its own `*CNTRLD`-then-`*IMMED` escalation),
-which this fix does not touch. Measuring that path's failure/escalation wording live means staging
-a job that resists `ENDJOB OPTION(*IMMED)` on a real box — a materially different risk from
-anything measured here — and remains deliberately unattempted without its own decision on scope
-and safety.
+**The two remaining texts, as recorded here on 19 September, were themselves wrong — found 1
+October 2026, before anything was staged.** Decompiling `sc.jar`'s `OperationExecutor`
+(`javap -c -p`, the same technique already used elsewhere in this file — no live risk) shows
+there is no separate pair of texts for the no-`stop_cmd` path at all. One shared method handles
+the wait-then-escalate sequence for *both* paths, printing exactly the same
+`WARNING: Timed out waiting for service '<friendly>' to stop. Will try harder` this file already
+measured for the `stop_cmd`-failure case — unconditionally, the first time the wait expires,
+`stop_cmd` or not — and, if the service is still up after the one escalation that follows,
+exactly one final text: `ERROR: Timed out waiting for service '<friendly>' to stop. Giving up`.
+`Stopping via endjob` is confirmed gated on whether a `stop_cmd` was configured, matching what
+RMSC already does.
+
+"`<short> did not stop within <n> seconds`" was never upstream's wording for anything — it was
+RMSC's own, and it no longer even exists in this codebase: `git log -S` places its removal in the
+19 September commit above, which replaced it with escalation rather than an error. The row
+describing it as belonging to the no-`stop_cmd` path was a mistake made writing up that fix,
+before anyone had decompiled the jar. "`<short> did not stop, even immediately`" does still
+exist, at the bottom of the same no-`stop_cmd` escalation `stop_one` has always had — and now that
+upstream's real text is known, it is wrong twice over: worded differently, and naming the
+service's **short** name where upstream names the **friendly** one.
+
+**The safety question the 19 September note left open is resolved, not sidestepped.** Researched
+against IBM i's own documentation before anything was built: `ENDJOB OPTION(*CNTRLD)` delivers
+SIGTERM to a job with an established handler and forces it down itself once `DELAY` expires;
+`OPTION(*IMMED)` also delivers SIGTERM to a handler, but bounds how long it gets with the
+`QENDJOBLMT` system value — confirmed **120 seconds** on this box, its shipped default. So a job
+that ignores SIGTERM is bounded, not hung, as long as it stays comfortably under that value.
+`tools/gate-resist.py` (new) does exactly this — ignores SIGTERM/SIGINT for a `--resist` seconds
+it refuses to set above 90 — with `kill -9` as an unconditional backstop regardless, the same
+belt-and-braces `tools/stop-escalation-test.sh` already relies on.
+
+Measured live against it, 1 October 2026, both implementations, `stop_wait_time: 5`, confirming
+the decompiled strings byte for byte:
+
+```
+upstream:  Performing operation 'STOP' on service 'rmscmt_p3'
+stderr:    WARNING: Timed out waiting for service 'RMSC Manual Test P3' to stop. Will try harder
+           ERROR: Timed out waiting for service 'RMSC Manual Test P3' to stop. Giving up
+           <one trailing blank line>
+exit:      253                                                    (total wait ≈ 28s)
+
+RMSC:      Performing operation 'STOP' on service 'rmscmt_p3'
+stderr:    ERROR: rmscmt_p3 did not stop, even immediately
+           <one trailing blank line>
+exit:      253                                                    (total wait ≈ 9s)
+```
+
+Confirmed, with the fixture left running and checked directly (not just trusted from the exit
+code), that RMSC's service is genuinely still up when it reports this — not a false failure.
+
+A naive first version of `gate-resist.py` crashed outright on the *second* SIGTERM (the `*IMMED`
+escalation's): `time.sleep()` raised `OSError(3456, 'Error 3456 occurred.')` instead of retrying,
+confirmed by reproducing the identical crash with a plain `kill -TERM` and no `ENDJOB` involved at
+all — a PASE quirk, not an `ENDJOB` one. See the fixture's own header for the fix (every sleep
+wrapped, the bound re-read from the wall clock rather than trusted from how many sleeps
+completed).
+
+**DECIDED and IMPLEMENTED 1 October 2026: fixed the same way the 19 September one was fixed.**
+`stop_one`'s no-`stop_cmd` escalation now prints `SCOUT_stop_retry`'s existing warning
+unconditionally once the wait expires, not only when a `stop_cmd` was used, and its final failure
+text now reads upstream's exact wording with the friendly name (`Timed out waiting for service
+'<friendly>' to stop. Giving up`) in place of the old `'<short>' did not stop, even immediately`.
+`Stopping via endjob` stays gated on `used_stop_cmd`, unchanged — measured, that line still only
+belongs to the path that had something else to fall back from.
+
+A blind-authored test (`tools/stop-timeout-test.sh`, commissioned without sight of
+`QRPGLESRC`/`QPROTOSRC`, per this file's own "Test first" rule) ran red against the unfixed code
+for the two exact reasons above — missing WARNING, wrong final text — and green after the fix,
+13 of 13 checks, with no reference drift on re-measuring upstream. `tools/stop-escalation-test.sh`
+(the 19 September suite covering the adjacent `stop_cmd`-present path, which shares `stop_one`)
+still passes in full, 15 of 15 — this fix does not regress it. `tools/verify.sh` run clean
+end to end the same day.
 
 ## Beyond the operations — a definition with no `name:` was silently accepted
 

@@ -342,9 +342,9 @@ RMSC's own failure texts in this area, aligned with the narration in the same ch
 |---|---|---|
 | `Could not start <friendly>: <reason>` — **fixed 30 September 2026, was `<short>`** | `ERROR: Could not start dependency '<short>' for service '<friendly>': <reason>` for the dependency case | measured |
 | `<short> did not start within <n> seconds` | `ERROR: Timed out waiting for service '<friendly>' to start` | measured |
-| `Stop command failed for <short>: <reason>` | — | unmeasured |
-| `<short> did not stop within <n> seconds` | — | unmeasured |
-| `<short> did not stop, even immediately` | — | unmeasured |
+| ~~`Stop command failed for <short>: <reason>`~~ — **removed 19 September 2026**, same commit as the escalation fix below; no longer produced by any code path | — | n/a — `git log -S` confirms removal; left here only so the row isn't mistaken for still-open |
+| ~~`<short> did not stop within <n> seconds`~~ — **removed 19 September 2026**, same commit; this row's old note that it "belongs to the no-`stop_cmd` path" was a mistake — it never did, and upstream has no equivalent text under that name at all (see `docs/parity.md`, 1 October 2026) | — | n/a |
+| `Timed out waiting for service '<friendly>' to stop. Giving up` — **fixed 1 October 2026, was `'<short>' did not stop, even immediately`**, preceded by `SCOUT_stop_retry`'s existing `WARNING: Timed out waiting for service '<friendly>' to stop. Will try harder`, which RMSC did not print at all on this path before the fix | same two lines — one shared text pair, used whether or not a `stop_cmd` is configured; not two separate per-path texts as this table previously implied | measured |
 | `No stop_cmd defined` (`SCLAUNCH`) | — | unmeasured; upstream's `No start command specified for service '%s'` may be unreachable through YAML, since a definition without `start_cmd` is rejected at load time |
 
 ## Four defects the fixture pack found on its first run

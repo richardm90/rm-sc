@@ -726,17 +726,29 @@ dcl-proc stop_one;
     return true;
   endif;
 
-  // ESCALATE REGARDLESS OF stop_cmd - MEASURED 19 September 2026,
-  // docs/parity.md. This used to return an error here whenever a stop_cmd
-  // had been tried, on the premise that a service supplying its own stop
-  // command had said how it wants to be stopped and overriding that could
-  // cut short whatever the command was doing. That premise is not what
-  // upstream does: it warns and falls through to the SAME ENDJOB escalation
-  // below whether or not a stop_cmd exists, and succeeds. The warning is
-  // upstream's own text, printed only on this path - the plain ENDJOB path
-  // below it has never shown it to need one and is left as it was.
+  // ESCALATE REGARDLESS OF stop_cmd - MEASURED 19 September 2026, docs/
+  // parity.md. This used to return an error here whenever a stop_cmd had
+  // been tried, on the premise that a service supplying its own stop command
+  // had said how it wants to be stopped and overriding that could cut short
+  // whatever the command was doing. That premise is not what upstream does:
+  // it warns and falls through to the SAME ENDJOB escalation below whether or
+  // not a stop_cmd exists, and succeeds.
+  //
+  // WARN REGARDLESS OF stop_cmd TOO - MEASURED 1 October 2026, docs/parity.md.
+  // Decompiling sc.jar's OperationExecutor shows the warning above and this
+  // escalation are one shared method for both paths: upstream prints the
+  // SAME warning the first time the wait expires, stop_cmd or not, before its
+  // one retry. The 19 September fix above only moved the warning into this
+  // `if used_stop_cmd` block because the plain-ENDJOB path hadn't been
+  // measured yet; it still needed one all along.
+  //
+  // 'Stopping via endjob' stays gated on used_stop_cmd: measured the same
+  // day, that line is upstream's own announcement that it is now falling
+  // back to ENDJOB, which only means something when something else (a
+  // stop_cmd) was tried first. The plain ENDJOB path never had anything else
+  // to fall back FROM, and live upstream agrees - no such line there.
+  SCOUT_warnln(SCOUT_stop_retry(def.friendly));
   if used_stop_cmd;
-    SCOUT_warnln(SCOUT_stop_retry(def.friendly));
     SCOUT_writeln('Stopping via endjob');
   endif;
 
@@ -762,7 +774,12 @@ dcl-proc stop_one;
   delay(SCEXEC_STOP_POLL);
 
   if SCEXEC_status(def) <> SCOUT_NOT_RUNNING;
-    err = %trim(def.short_name) + ' did not stop, even immediately';
+    // Wording and name field MEASURED 1 October 2026, docs/parity.md -
+    // upstream's text, byte for byte, and the FRIENDLY name: this used to
+    // read '<short> did not stop, even immediately', which was never
+    // upstream's wording and named the wrong field.
+    err = 'Timed out waiting for service ''' + %trim(def.friendly) +
+          ''' to stop. Giving up';
     narrate_error(err);
     return false;
   endif;
