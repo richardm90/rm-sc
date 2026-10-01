@@ -545,3 +545,42 @@ adding a `clear_existing_logs` helper (mirrors `SCLOG_path`'s own `IFS_opendir`/
 and suffix match) that deletes every existing log for the fixture before either new test starts
 anything, so a non-empty `SCLOG_path` result afterward can only mean the current call wrote it.
 
+## `qsh -c "... system '...'"` can silently drop a suite's own summary line
+
+Found 1 October 2026, adding `SCLIFE`'s first test to actually call `PASE_run_cmd`
+(`rmtools`'s PASE helper) rather than go through `batch_mode`/`SBMJOB`. `tools/verify.sh`
+started reporting `SCLIFE produced no summary line - it did not run to completion` — every
+time, on a fresh box, the next morning too — even though the suite genuinely passed: its real
+result was always sitting in a spooled `QPRINT` file (`CPYSPLF ... TOSTMF`, `iconv -f IBM-285`)
+and in the job's own job log (visible directly in a 5250 Command Entry screen), just never in
+what `tools/verify.sh` captured.
+
+**Three negative experiments, each a real round trip through `rmtools`, before the actual
+cause was found** — recorded because each one genuinely ruled something out rather than being
+a wasted guess. (1) Disabling the two `rmvmsg()` calls `RMPASE.rpgle`'s `error_handling()`
+makes after a failed `PASE_run_cmd` — no change. (2) Bypassing `error_handling()`'s entire
+body, including both `rcv_jlmsg()` receives, not just the removals — no change. (3) A minimal,
+single-test suite with nothing but a *successful* `PASE_run_cmd('true')` call, no failure
+anywhere — **also** produced zero captured output, which is what finally showed this had
+nothing to do with failure, message queues, or RPG's own exception handling at all.
+
+**The actual cause: the wrapper, not `rmtools`.** `RUCALLTST`'s report is a genuine spooled
+file under the hood. `qsh`'s own `system` built-in does not reliably bridge a command's
+spooled output back to the calling job's stdout once anything in that same job has opened a
+`UNIXCMDOA`-handled file (which is exactly what `PASE_run_cmd` does) — regardless of whether
+that command succeeds or fails. A plain RPG exception caught via `monitor`/`on-error`, with no
+PASE involvement at all, does **not** trigger it — confirmed with its own throwaway suite.
+
+**Fixed by using `cl` (a PASE shell builtin) instead of `qsh -c "... system '...'"`.** `cl`
+explicitly reads back a command's generated spool files and messages and writes them to its
+own stdout by default (`help cl` — the behaviour its `-s` flag turns off), and runs in the
+current job by default too, which incidentally solves `qsh`'s own original reason for existing
+here: a plain `system` call spawning a fresh job per call and losing the library list. `tools/
+verify.sh`'s suite loop now sets the library list once with `cl -O "ADDLIBLE LIB(...)"` rather
+than repeating `liblist -a` ahead of every suite.
+
+**The general shape, worth recognising faster next time**: when a command's real result is
+confirmed correct (by two independent channels, here) but a capture mechanism still reports
+failure, suspect the capture mechanism before the thing it's capturing — especially when nothing
+about the code under test changed between a run that worked and one that didn't, only how much
+of the *runtime machinery* it touched.

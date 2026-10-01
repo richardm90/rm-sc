@@ -136,13 +136,21 @@ makei build
 ```
 
 ```bash
-# compile then run one suite; parameters mirror .vscode/testing.json
-qsh -c "liblist -a RPGUNIT; liblist -a RMSC; liblist -a RMSCT; liblist -a RMTOOLS;
-        system \"RUCALLTST TSTPGM(RMSCT/SCQRY) ORDER(*API) DETAIL(*BASIC) OUTPUT(*ALLWAYS)\""
+# run one suite; parameters mirror .vscode/testing.json
+for l in RPGUNIT RMSC RMSCT RMTOOLS; do cl -O "ADDLIBLE LIB($l)"; done
+cl -O "RUCALLTST TSTPGM(RMSCT/SCQRY) ORDER(*API) DETAIL(*BASIC) OUTPUT(*ALLWAYS)"
 ```
 
-QSH is required because each `system` call runs in its own job and loses any library list set
-by a previous one. `docs/testing-notes.md` has the traps.
+`cl`, not `qsh -c "... system '...'"` — found 1 October 2026, the hard way. A plain `system`
+call spawns its own job and loses any library list set by a previous one, which is a real
+problem `qsh` does solve; but a suite whose tests call `PASE_run_cmd` (`rmtools`'s PASE
+helper) can come back with no summary line at all even though it passed, because `qsh`'s own
+`system` built-in does not reliably bridge a command's spooled output back to this job's
+stdout once anything in the same job has opened a `UNIXCMDOA`-handled file. `cl` (a PASE
+shell builtin) doesn't have that problem — it explicitly reads back a command's generated
+spool files and messages and writes them to its own stdout by default — and it runs in the
+current job by default too, which is what lets the library list be set once rather than
+repeated ahead of every command. `docs/testing-notes.md` has the traps.
 
 ```bash
 tools/fidelity-gate.sh      # output parity against upstream sc; run it on the box
