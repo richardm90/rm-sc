@@ -535,18 +535,31 @@ two things:
   (`SCOUT_err_timeout`/`SCOUT_err_dep_failed`). Nothing to change here; this half was already done
   on 3 September.
 - **What looked like the remaining case — `SCEXEC_start`'s `'Could not start ' + short_name + ':
-  ' + reason` (line ~471) — is not reachable the way it was assumed to be.** A `start_cmd` that
-  does not exist is not a launch failure upstream-side; it is an ordinary timeout, which already
-  goes through the correct, friendly-named path. The branch this text belongs to only fires when
-  `SCLAUNCH_start` itself fails at the PASE level, a rare condition with no cheap, safe way to
-  reproduce live. Left as found, pending a way to trigger it for a proper red-then-green cycle.
+  ' + reason` — FIXED 30 September 2026, and the "unreachable" claim below was itself wrong,
+  generalised from the one case actually probed.** A `start_cmd` that does not exist genuinely is
+  an ordinary timeout, as originally measured — but that is not the only way `SCLAUNCH_start` can
+  fail. Investigated properly once asked to get to the bottom of it: `SCLAUNCH_start`'s non-batch
+  path backgrounds the launched command (`cmd &`), so the synchronous caller gets exit 0 for
+  *starting* the background job regardless of what fails inside it — confirmed live, a bad `dir:`
+  included, matching bash's own documented behaviour. The one crack in that: a `start_cmd` with
+  broken shell syntax (an unbalanced quote) fails the shell's own PARSE before there is a job to
+  background at all, which genuinely is synchronous and genuinely reaches this line — confirmed
+  live, safely, deliberately, end to end against real `scr start` (`ERROR: Could not start
+  <short>: Start command failed with 2: qsh: ... Syntax error...`). Upstream, measured against the
+  same fixture, does not distinguish this from any other launch failure at all — it just times out
+  (`ERROR: Timed out waiting for service '<friendly>' to start`), using the friendly name
+  correctly. Richard's call: keep the richer RMSC diagnostic (genuinely more useful than a bare
+  timeout for a broken definition) as a sanctioned improvement, and fix the naming to match the
+  decided rule rather than matching upstream's silence. `def.short_name` → `def.friendly`, one
+  field, `QRPGLESRC/SCEXEC.RPGLE`. New test: `qtestsrc/SCLIFE.TEST.RPGLE`,
+  `test_start_parse_failure_reports_friendly_name` — blind-authored, watched red against the old
+  code (live narration showed the short name), green against the fix.
 - **The other three candidate texts turned out to sit downstream of a real behavioural gap, not a
   naming one** — see "`stop` does not escalate when its own `stop_cmd` fails", above. Rewording
   them now would be polishing text on a code path this project may replace.
 
 So: **the decided rule is fully applied everywhere it is currently measurable.** What remains is
-one rare, hard-to-trigger case and three texts blocked on the escalation decision above, not a
-wide sweep of call sites.
+three texts blocked on the escalation decision above, not a wide sweep of call sites.
 
 **`info`** — eight measured differences, listed in full in `docs/messages.md`, **all fixed 18
 September 2026.** The two that were shape rather than spelling: upstream prints `Depends on the
@@ -1700,8 +1713,9 @@ live-differential coverage named services always had).
 
 Also decided 18 September 2026: the `sc: ` stderr prefix, **dropped 19 September 2026**.
 Short-versus-friendly naming, **re-checked 19 September 2026: already applied everywhere it is
-currently measurable** — see "The two whole-surface differences" above; a rare `SCEXEC` case
-remains, unreachable in practice. The `stop`-escalation gap found while re-checking that item is
+currently measurable** — see "The two whole-surface differences" above; the one remaining
+`SCEXEC` case, once thought unreachable, turned out not to be and was **fixed 30 September
+2026** — same section. The `stop`-escalation gap found while re-checking that item is
 **fixed, 19 September 2026** — see "Beyond the operations" above; its two remaining unmeasured
 texts (the no-`stop_cmd` path) stay open, deliberately, pending a safe way to measure them. The
 log-filename scheme is **fixed, 19 September 2026** — see "Three things about `loginfo`" above;

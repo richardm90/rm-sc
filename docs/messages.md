@@ -36,9 +36,15 @@ The `sc: ` prefix is RMSC's alone.
 
 **2. RMSC names a service by its short name where upstream names it by its friendly name.**
 Upstream's progress line uses the **short** name and its status and error lines use the
-**friendly** name; RMSC uses the short name throughout. This is already recorded in
-`docs/parity.md` for the narration family and in `tools/error-delivery-test.sh:902` for the
-per-member group error, and it applies to the `SCEXEC` failure texts below as well.
+**friendly** name; RMSC used the short name throughout. This is recorded in `docs/parity.md` for
+the narration family and in `tools/error-delivery-test.sh:902` for the per-member group error,
+and applied to the `SCEXEC` failure texts below too.
+
+**The one `SCEXEC` failure text this applied to (`Could not start <short>: <reason>`, the direct
+case, not the dependency one below) was fixed 30 September 2026** — see `docs/parity.md`,
+"the short-versus-friendly naming" section, for the investigation that made it reachable and
+testable in the first place. Table row updated below; left otherwise unchanged as the historical
+record of what was originally measured.
 
 *Basis: measured for narration; measured for the group error.*
 
@@ -334,7 +340,7 @@ RMSC's own failure texts in this area, aligned with the narration in the same ch
 
 | RMSC (`SCEXEC`) | upstream | basis |
 |---|---|---|
-| `Could not start <short>: <reason>` | `ERROR: Could not start dependency '<short>' for service '<friendly>': <reason>` for the dependency case | measured |
+| `Could not start <friendly>: <reason>` — **fixed 30 September 2026, was `<short>`** | `ERROR: Could not start dependency '<short>' for service '<friendly>': <reason>` for the dependency case | measured |
 | `<short> did not start within <n> seconds` | `ERROR: Timed out waiting for service '<friendly>' to start` | measured |
 | `Stop command failed for <short>: <reason>` | — | unmeasured |
 | `<short> did not stop within <n> seconds` | — | unmeasured |

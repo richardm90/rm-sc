@@ -454,6 +454,78 @@ dcl-proc test_start_with_splf_writes_no_log export;
 
 end-proc;
 
+//==============================================================================
+// The synchronous start-parse-failure path reports the FRIENDLY name, not the
+// short name
+//
+// MEASURED live: a start_cmd a shell cannot parse at all (here, an
+// unbalanced quote) makes SCEXEC_start fail synchronously - before anything
+// is submitted or launched - with a message of the form 'Could not start
+// <NAME>: Start command failed with 2: ...'. Every other error/status line
+// in RMSC reports the service's friendly name (the name: field), not its
+// short name (the filename) - this was the one remaining place found still
+// reporting the short name.
+//
+// The fixture below is built so the two names cannot be mistaken for one
+// another: short name "badstartname" and friendly name "Deliberately Broken
+// Start Command" share no characters. Per CLAUDE.md's "must disagree" rule,
+// this checks for the presence of the ONE exact "Could not start X:" phrase
+// a correct build produces and the absence of the other exact phrase a build
+// using the wrong field would produce instead - not a substring both could
+// satisfy. A fix that swaps back to the short name fails the first
+// assertion; a fix that never touches the field at all (leaving the bug in
+// place) fails the second.
+//
+// Ordinary (non-batch) service deliberately: the synchronous parse-failure
+// path measured here only exists on that path. check_alive is never
+// consulted before the failure, so its value is a fixed placeholder, not a
+// real criterion.
+//==============================================================================
+
+dcl-proc test_start_parse_failure_reports_friendly_name export;
+
+  dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-s err    like(SCEXEC_ERR_t);
+  dcl-s y      like(STRING_t);
+  dcl-s handle like(INTEGER_t);
+  dcl-s path   like(STMF_t);
+
+  y = 'name: Deliberately Broken Start Command' + LF;
+  // Unbalanced single quote: a shell cannot parse this line at all, which is
+  // what drives the synchronous failure under test.
+  y += 'start_cmd: echo ''unterminated' + LF;
+  y += 'check_alive: 1' + LF;
+  y += 'startup_wait_time: 1' + LF;
+  y += 'stop_wait_time: 1' + LF;
+
+  path = %trim(g_dir) + '/badstartname.yaml';
+  handle = IFS_open_file(path: IFS_OPEN_TYPE_WRITE);
+  assert((handle >= 0): 'Could not create ' + %trim(path) +
+                        ' - ' + %trim(IFS_error_text()));
+  IFS_write_utf8(handle: y);
+  IFS_close_file(handle);
+
+  build_collection(coll);
+
+  assert((SCEXEC_start(coll: 'badstartname': false: err) = false):
+         'a start_cmd a shell cannot parse at all must fail synchronously');
+
+  assert((%scan('Could not start Deliberately Broken Start Command:':
+                err) > 0):
+         'error text must report the FRIENDLY name, not the short name ' +
+         '- was: ' + %trim(err));
+
+  assert((%scan('Could not start badstartname:': err) = 0):
+         'error text must NOT report the short name in the ' +
+         '"Could not start X:" position - was: ' + %trim(err));
+
+  // Leave the shared fixture directory exactly as build_collection found it;
+  // tearDownSuite's sweep would also catch this, but this test does not rely
+  // on it.
+  IFS_remove_file(path);
+
+end-proc;
+
 //------------------------------------------------------------------------------
 // clear_existing_logs - remove every log file SCLOG_path could find for def,
 // not just the one most recent. Mirrors SCLOG_path's own directory scan

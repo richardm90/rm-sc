@@ -478,7 +478,7 @@ dcl-proc SCEXEC_start export;
     log_path = SCLOG_new_path(def);
 
     if not SCLAUNCH_start(def: log_path: splf: lerr);
-      err = 'Could not start ' + %trim(def.short_name) + ': ' + %trim(lerr);
+      err = 'Could not start ' + %trim(def.friendly) + ': ' + %trim(lerr);
       narrate_error(err);
       return false;
     endif;
