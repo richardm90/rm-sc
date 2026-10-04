@@ -497,12 +497,17 @@ wording, and treats finding one as "found" for the not-found-warning guard. A bl
 against the old wording and ordering, green after the fix; `tools/loginfo-test.sh` (25 cases) and
 the `SCEXEC` unit suite (81 cases, 573 assertions) show no regression.
 
-**One side effect of the fixture, not of this fix, recorded rather than chased**: staging this
-against upstream can show two extra, always-empty, perpetually-`OPEN` `QPRINT` placeholder
-entries that RMSC's side never produces — traced to the job-identity divergence recorded
-separately above ("Batch services run on a genuinely different OS mechanism than upstream's").
-`tools/loginfo-splf-test.sh` asserts the real `QPDSPJOB` line's presence, wording and position on
-both sides without requiring the total line count to match, for exactly that reason.
+**One side effect of the fixture, not of this fix, recorded rather than chased — UPDATE 4 October
+2026, the premise changed.** This originally recorded that staging this fixture against upstream
+could show two extra, always-empty, perpetually-`OPEN` `QPRINT` placeholder entries that RMSC's
+side never produced, traced to the job-identity divergence recorded separately below ("Batch
+services run on a genuinely different OS mechanism than upstream's"). Now that that divergence is
+fixed, re-measured live rather than assumed: **RMSC's own side now produces the same two extra
+`QPRINT` entries too**, under its own job, matching upstream's shape exactly (same job number
+across all three spooled-file lines, both sides). This isn't a new defect — it's the same shared
+`SBMJOB CMD(CALL PGM(QP2SHELL2) PARM(...))` mechanism now producing the same side effect on both
+implementations, which is the point of the fix. `tools/loginfo-splf-test.sh`'s tolerance for this
+was tightened accordingly once confirmed.
 
 **`jobinfo`** — **matched 10 September 2026.** Five differences, all measured with the streams
 apart before anything was written:
@@ -882,10 +887,13 @@ rather than independent bugs:
   symptom of the extra worker job `QSH`'s dispatch always created, where upstream's single job
   never needed one.
 - `loginfo`'s spooled-file listing (below): staging a real spooled file for a batch job's own
-  `cl -sk` print step lands under two extra, empty, perpetually-`OPEN` `QPRINT` placeholder
+  `cl -sk` print step used to land under two extra, empty, perpetually-`OPEN` `QPRINT` placeholder
   entries on upstream's side that RMSC's side never produced — traced to the same three-job split,
-  not a defect in the spooled-file text rendering itself. Should be re-checked now that the split
-  is gone.
+  not a defect in the spooled-file text rendering itself. **Re-checked now that the split is
+  gone, same day**: RMSC's own side now produces the identical two extra `QPRINT` entries too,
+  under its own job, matching upstream exactly — not a lingering divergence, the same shared
+  mechanism's shared side effect on both sides now. `jobinfo` re-checked directly too: both
+  implementations report the same `SBMJOB`-named job for a batch service, confirmed live.
 
 **Two earlier candidate fixes were tried and rejected before this one, each only after real
 on-box measurement, not just reasoning:** reusing rmtools' `PASE_run_cmd` (which calls `spawn()`)

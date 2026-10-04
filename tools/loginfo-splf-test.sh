@@ -73,28 +73,48 @@
 # A fix is correct here when BOTH read right AND the not-found warning stays
 # suppressed - the third thing pinned below, by the regression control.
 #
-# THE CAVEAT THIS FILE IS DELIBERATELY BUILT AROUND
+# THE CAVEAT THIS FILE WAS ORIGINALLY BUILT AROUND - UPDATE 4 October 2026,
+# RE-MEASURED LIVE, THE PREMISE CHANGED
 #
-# docs/parity.md ("Batch services run on a genuinely different OS mechanism
-# than upstream's") records that RMSC's batch job gets reclassified into the
-# PASE worker job partway through its life, where upstream's never is - and
-# that, as a SEPARATE side effect of that same reclassification, staging
-# this exact fixture against upstream can show TWO EXTRA, always-empty,
-# perpetually-OPEN `QPRINT` placeholder entries that RMSC's side never
-# produces. That is real, reproducible, and not what this file is about - so
-# the assertions below are written to survive it either way:
+# This file originally recorded that docs/parity.md's "Batch services run on
+# a genuinely different OS mechanism than upstream's" job-identity divergence
+# had a separate side effect: staging this exact fixture against upstream
+# could show TWO EXTRA, always-empty, perpetually-OPEN `QPRINT` placeholder
+# entries that RMSC's side never produced - real, reproducible, and not what
+# this file is about, so the assertions were written to tolerate it rather
+# than assert on it, pinning RMSC's output byte-exact (on the premise that
+# RMSC, unlike upstream, only ever produces the one real spooled file) while
+# leaving upstream's QPRINT count/presence NEITHER asserted NOR forbidden.
 #
-#   RMSC:      exactly one real spooled file, ever, in this fixture - so its
-#              whole loginfo output is pinned byte-exact (job number and log
-#              path normalised to placeholders, the same technique
-#              loginfo-test.sh already uses for the log path alone).
-#   upstream:  the QPDSPJOB line is required to be PRESENT, correctly
+# That job-identity divergence is now fixed (docs/parity.md, "FIXED 4 October
+# 2026") - both implementations submit via the same `SBMJOB CMD(CALL
+# PGM(QP2SHELL2) PARM(...))` mechanism now - so the premise above ("RMSC only
+# ever produces one real spooled file") no longer holds, and re-measuring live
+# rather than assuming it still does (three separate runs, same result each
+# time) confirms it: **RMSC's own side now ALSO produces the same two extra
+# `QPRINT` placeholder entries**, under its own job, matching upstream's shape
+# exactly - same job name/number across all three spooled-file lines, on each
+# side. This is the shared mechanism's side effect appearing identically on
+# both implementations now, not a new defect in either one's spooled-file
+# reporting, and not a regression in RMSC's output: RMSC's QPDSPJOB line is
+# still always SPLNBR(1), still always first, still always correctly worded -
+# only the *extra, tolerated* QPRINT count changed, from 0 to matching
+# upstream's.
+#
+# What this means for the assertions below:
+#
+#   RMSC:      the QPDSPJOB line's wording, order and SPLNBR(1) are still
+#               pinned byte-exact, exactly as before - unaffected by this.
+#   upstream:  the QPDSPJOB line is still required to be PRESENT, correctly
 #              formatted, and before the log line; stderr must be empty.
-#              Total line count and any extra QPRINT-named lines are NEITHER
-#              asserted NOR forbidden - their presence or absence depends on
-#              box state this file does not control, and asserting either
-#              way would fail for a reason that has nothing to do with this
-#              fix.
+#   BOTH:      the QPRINT placeholder COUNT is now asserted to MATCH between
+#              the two sides (`splf-qprint-match`, stage 2) - tightened from a
+#              NOTE-only observation into a real PASS/FAIL now that the
+#              workaround this tolerance existed for is gone. Total line
+#              count beyond that, and anything about WHICH job owns the
+#              placeholders beyond "the service's own", remain neither
+#              asserted nor forbidden - see "what else is deliberately not
+#              pinned" below.
 #
 # WHAT ELSE IS DELIBERATELY NOT PINNED
 #
@@ -457,6 +477,12 @@ else
   o="$WORK/scr.loginfo.out"; e="$WORK/scr.loginfo.err"
   problems=()
 
+  # RMSC's own QPRINT placeholder count - captured here so stage 2 can
+  # compare it against upstream's, now that the job-identity fix means both
+  # sides are expected to share this side effect (see header, "THE CAVEAT
+  # THIS FILE WAS ORIGINALLY BUILT AROUND").
+  scr_qprint_n=$(grep -cE "FILE\(QPRINT\)" "$o" || true); [ -z "$scr_qprint_n" ] && scr_qprint_n=0
+
   [ "$scr_rc" -eq 0 ] || problems+=("exit $scr_rc, wanted 0")
   [ -s "$e" ] && problems+=("stderr is not empty: $(head -n 1 "$e")")
 
@@ -566,12 +592,24 @@ else
       refdrift=$((refdrift+1))
     fi
 
-    # Explicitly NOT asserted: total stdout line count, and whether extra
-    # QPRINT-named lines appear. See header - that depends on box state this
-    # file does not control and is a separate, already-recorded finding.
+    # TIGHTENED 4 October 2026 - see header. This was a NOTE-only observation
+    # ("extra QPRINT lines seen, tolerated, not asserted") while RMSC's and
+    # upstream's job-identity mechanisms genuinely differed. They no longer
+    # do, so this is now a real comparison: RMSC's own QPRINT count (captured
+    # in stage 1, as `scr_qprint_n`) must equal upstream's. Total stdout line
+    # count beyond this, and which job owns either side's placeholders, are
+    # still explicitly NOT asserted - see header.
     qprint_n=$(grep -cE "FILE\(QPRINT\)" "$o" || true); [ -z "$qprint_n" ] && qprint_n=0
-    if [ "$qprint_n" -gt 0 ]; then
-      report NOTE splf-upstream-qprint "$qprint_n extra QPRINT placeholder line(s) seen - expected sometimes, tolerated always, not asserted"
+    if [ -n "${scr_qprint_n:-}" ]; then
+      if [ "$qprint_n" -eq "$scr_qprint_n" ]; then
+        report PASS splf-qprint-match "RMSC and upstream show the same QPRINT placeholder count ($qprint_n each) - the shared SBMJOB CALL PGM(QP2SHELL2) mechanism's side effect, now identical on both sides"
+        pass=$((pass+1))
+      else
+        report FAIL splf-qprint-match "QPRINT placeholder count differs: RMSC $scr_qprint_n, upstream $qprint_n - re-check docs/parity.md's 4 October 2026 update before assuming either side is wrong"
+        failed=$((failed+1))
+      fi
+    else
+      report NOTE splf-upstream-qprint "$qprint_n extra QPRINT placeholder line(s) seen on upstream; RMSC's own count was not captured this run (see stage 1) so no comparison could be made"
     fi
   fi
 
@@ -630,7 +668,9 @@ echo "artefacts: $WORK   (.out and .err captured separately for every case; KEEP
 #   WHICH JOB IS NAMED. See "what else is deliberately not pinned" above -
 #   that is docs/parity.md's own open, bigger finding, not this file's.
 #
-#   TOTAL LINE COUNT OR EXTRA QPRINT LINES ON UPSTREAM'S SIDE. Same section.
+#   TOTAL LINE COUNT. Same section - the QPRINT *count* is now compared
+#   between the two sides (`splf-qprint-match`), but nothing else about
+#   total line count is pinned either way.
 #
 #   INTERLEAVING BEYOND "WHICH SECTION COMES FIRST". Streams are captured
 #   whole (not interleaved with each other - stderr is checked only for

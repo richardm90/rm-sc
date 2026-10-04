@@ -171,6 +171,19 @@ RMSC_FORK_HELPER.SRVPGM: rmsc_fork_helper.c
    that defines them** — unlike a generated recipe, which TOBi prefixes itself. The source has
    to be named with its directory (`native/rmsc_fork_helper.c`), not bare, or `cc` reports it
    missing.
+5. **`makei build`'s own "Build Successful!" banner can be wrong when a custom recipe's
+   command actually fails.** MEASURED directly: a real `cc` compile error (a header conflict,
+   unrelated to this point) produced `make: Target 'all' not remade because of errors.` —
+   buried in the middle of the output, easy to miss if anything is piped through `tail` — and
+   `make -k`'s own "keep going past one failure" semantics meant every *other* object still
+   built, so the run still ended with `Objects: 0 failed N succeed N total` / `Build
+   Successful!`, with the custom-recipe target itself simply not counted either way and the
+   stale binary from the previous successful build silently left in place. Caught here only by
+   independently checking the deployed binary's own timestamp/checksum after the "successful"
+   build — which is the actual lesson: **for this target specifically, the build banner is not
+   sufficient evidence it rebuilt; check the deployed file directly.** `grep` the full output
+   for `Target 'all' not remade` rather than trusting the final line, or diff the binary's
+   mtime/checksum against the source's.
 
 `/QOpenSys/pkgs/lib/rmsc/native/` itself is **not** created by this build, deliberately — it's
 owned by `qsys`, matching upstream's own `/QOpenSys/pkgs/lib/sc/native/` (same `drwxr-sr-x`
