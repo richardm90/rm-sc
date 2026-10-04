@@ -455,44 +455,65 @@ dcl-proc test_start_with_splf_writes_no_log export;
 end-proc;
 
 //==============================================================================
-// The synchronous start-parse-failure path reports the FRIENDLY name, not the
-// short name
+// An unparseable start_cmd is now an ORDINARY timeout, reported with the
+// SHORT name - it no longer fails synchronously, and no longer names the
+// service at all
 //
-// MEASURED live: a start_cmd a shell cannot parse at all (here, an
-// unbalanced quote) makes SCEXEC_start fail synchronously - before anything
-// is submitted or launched - with a message of the form 'Could not start
-// <NAME>: Start command failed with 2: ...'. Every other error/status line
-// in RMSC reports the service's friendly name (the name: field), not its
-// short name (the filename) - this was the one remaining place found still
-// reporting the short name.
+// This test used to be test_start_parse_failure_reports_friendly_name, and
+// asserted that a start_cmd a shell cannot parse at all (here, an unbalanced
+// quote) made SCEXEC_start fail SYNCHRONOUSLY, before anything was submitted
+// or launched, with 'Could not start Deliberately Broken Start Command: ...'
+// - the friendly (name:) field, not the short (filename) one.
 //
-// The fixture below is built so the two names cannot be mistaken for one
-// another: short name "badstartname" and friendly name "Deliberately Broken
-// Start Command" share no characters. Per CLAUDE.md's "must disagree" rule,
-// this checks for the presence of the ONE exact "Could not start X:" phrase
-// a correct build produces and the absence of the other exact phrase a build
-// using the wrong field would produce instead - not a substring both could
-// satisfy. A fix that swaps back to the short name fails the first
-// assertion; a fix that never touches the field at all (leaving the bug in
-// place) fails the second.
+// MEASURED since, two ways, that this is no longer so, and was arguably
+// never a behaviour worth keeping:
 //
-// Ordinary (non-batch) service deliberately: the synchronous parse-failure
-// path measured here only exists on that path. check_alive is never
-// consulted before the failure, so its value is a fixed placeholder, not a
-// real criterion.
+//   1. Upstream sc itself does not fail synchronously for this case. An
+//      equivalent YAML run against real upstream `sc start` took 2.4s (not
+//      instant) and printed the same generic "Timed out waiting for service
+//      '<name>' to start" shape it prints for any service that never comes
+//      alive - not a distinct parse-failure message. The old assertion was
+//      never shared with upstream to begin with.
+//
+//   2. RMSC's own SCEXEC_start, called exactly as below, now falls through
+//      to the ordinary startup-timeout path instead, following an unrelated,
+//      confirmed-correct launch-mechanism fix (see docs/parity.md). An
+//      unparseable start_cmd behaves exactly like any other command that
+//      simply never makes check_alive come true.
+//
+// The ordinary timeout path's message was already in place and untouched by
+// that fix - RMSC deliberately matches upstream's own words there - and it
+// uses the SHORT name, not the friendly one: '<short_name> did not start
+// within <startup_wait>s'. That is the opposite of every other
+// error/status line in RMSC, which is exactly why it is worth pinning down
+// explicitly rather than assuming it follows the friendly-name convention.
+//
+// Per CLAUDE.md's "must disagree" rule: the two assertions against the OLD
+// phrasing below are the control. Both held under the old (now-removed)
+// synchronous-fail code - that is what the old version of this test checked
+// - and both must now fail to hold, so that the two versions of this test
+// disagree about this one fixture rather than both passing it vacuously.
+// Reintroducing the old synchronous parse-failure path, even by accident,
+// flips the first of the two back to true and fails this test.
+//
+// Ordinary (non-batch) service deliberately, unchanged from the original
+// version of this test: check_alive's value is a fixed placeholder, not a
+// real criterion, since it is never reached before the timeout fires.
 //==============================================================================
 
-dcl-proc test_start_parse_failure_reports_friendly_name export;
+dcl-proc test_start_unparseable_cmd_times_out_with_short_name export;
 
   dcl-ds coll likeds(SCCOLL_t) inz(*likeds);
+  dcl-ds def  likeds(SCDEF_t)  inz(*likeds);
   dcl-s err    like(SCEXEC_ERR_t);
   dcl-s y      like(STRING_t);
   dcl-s handle like(INTEGER_t);
   dcl-s path   like(STMF_t);
+  dcl-s want   like(STRING_t);
 
   y = 'name: Deliberately Broken Start Command' + LF;
-  // Unbalanced single quote: a shell cannot parse this line at all, which is
-  // what drives the synchronous failure under test.
+  // Unbalanced single quote: a shell cannot parse this line at all. It no
+  // longer drives a distinct failure - see the header comment above.
   y += 'start_cmd: echo ''unterminated' + LF;
   y += 'check_alive: 1' + LF;
   y += 'startup_wait_time: 1' + LF;
@@ -507,17 +528,30 @@ dcl-proc test_start_parse_failure_reports_friendly_name export;
 
   build_collection(coll);
 
-  assert((SCEXEC_start(coll: 'badstartname': false: err) = false):
-         'a start_cmd a shell cannot parse at all must fail synchronously');
+  assert(SCCOLL_find(coll: 'badstartname': def): 'found');
 
+  assert((SCEXEC_start(coll: 'badstartname': false: err) = false):
+         'a start_cmd a shell cannot parse at all must still fail - just ' +
+         'not synchronously any more');
+
+  want = %trim(def.short_name) + ' did not start within ' +
+         %char(def.startup_wait) + 's';
+  assert((%scan(want: err) > 0):
+         'error text must report the ordinary startup-timeout shape, ' +
+         'SHORT name included - wanted "' + %trim(want) + '", was: ' +
+         %trim(err));
+
+  // The control: both of these held under the old synchronous-fail
+  // behaviour and must not hold now - see the header comment's "must
+  // disagree" paragraph.
   assert((%scan('Could not start Deliberately Broken Start Command:':
-                err) > 0):
-         'error text must report the FRIENDLY name, not the short name ' +
-         '- was: ' + %trim(err));
+                err) = 0):
+         'error text must NOT report the old synchronous parse-failure ' +
+         'shape (friendly name) any more - was: ' + %trim(err));
 
   assert((%scan('Could not start badstartname:': err) = 0):
-         'error text must NOT report the short name in the ' +
-         '"Could not start X:" position - was: ' + %trim(err));
+         'error text must NOT report the old synchronous parse-failure ' +
+         'shape (short name) either - was: ' + %trim(err));
 
   // Leave the shared fixture directory exactly as build_collection found it;
   // tearDownSuite's sweep would also catch this, but this test does not rely

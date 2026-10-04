@@ -131,6 +131,10 @@ mechanism, and a discipline survives only on its traps being named accurately.
 
 Both run over SSH from the deploy directory. Neither needs `SBMJOB`.
 
+**`makei build` needs a PASE C compiler present** (`/QOpenSys/pkgs/bin/cc`, gcc-6 via the
+`QOpenSys/pkgs` toolchain) — `native/rmsc_fork_helper.c` is not ILE and cannot be built by
+TOBi's own `CRTCMOD`-based `.C` recipe; see `docs/tobi-binding.md`.
+
 ```bash
 makei build
 ```

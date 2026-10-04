@@ -9,6 +9,10 @@
 // detach would keep RMSC running for as long as the service does.
 //
 // 29/08/2026 - RM - created
+// 04/10/2026 - updated test_start_command_detaches for the exec/nohup
+//              contract, and added SCLAUNCH_fork_command coverage - see the
+//              job-identity fix recorded in docs/parity.md ("Batch services
+//              run on a genuinely different OS mechanism than upstream's")
 //==============================================================================
 
 ctl-opt nomain;
@@ -334,6 +338,21 @@ end-proc;
 //
 // This is the assertion that matters most in this module. Without every part
 // of it, RMSC would block for the lifetime of the service it just started.
+//
+// UPDATED 04/10/2026 - the command now ends 'exec nohup <cmd> ...' rather
+// than 'nohup <cmd> ... &'. MEASURED: SCLAUNCH_start_command's output is now
+// run by RMSC_FORK_HELPER's own `bash -c` for the non-batch path (see
+// SCLAUNCH_fork_command below), and a trailing '&' there left bash itself
+// resident as a SECOND job for the service's whole life; `exec` makes bash
+// replace its own process image with the real command instead, so only one
+// process/job remains.
+//
+// THE TWO ASSERTIONS ON 'exec' AND ON THE LAST CHARACTER are the ones that
+// actually prove this test can tell the two contracts apart (CLAUDE.md: "a
+// fix and the break it could have been must disagree about at least one
+// case in the suite") - the OLD contract ended in '&' and never wrote
+// 'exec' anywhere, so both of those would have FAILED against it; both
+// PASS against the contract pinned here.
 //==============================================================================
 
 dcl-proc test_start_command_detaches export;
@@ -348,12 +367,17 @@ dcl-proc test_start_command_detaches export;
 
   cmd = SCLAUNCH_start_command(def: '/tmp/detach.log');
 
-  assert((%scan('nohup ': cmd) > 0): 'nohup, so a hangup does not kill it');
+  assert((%scan('exec nohup ': cmd) > 0):
+         'exec''d into nohup, so bash does not stay resident as a second ' +
+         'job - the OLD "nohup ... &" contract never wrote "exec" at all ' +
+         'and would fail this');
   assert((%scan('2>&1': cmd) > 0): 'stderr redirected');
   assert((%scan('< /dev/null': cmd) > 0):
          'stdin detached, or the child holds the caller pipe open');
-  aEqualV('&': %subst(cmd: %len(cmd): 1):
-          'backgrounded, so the caller returns instead of waiting');
+  assert((%subst(cmd: %len(cmd): 1) <> '&'):
+         'NOT backgrounded with a trailing & - the OLD contract ended ' +
+         'exactly this way and left bash itself resident; this is the ' +
+         'case that disagrees with it');
   assert((%scan('/usr/bin/webproxy --serve': cmd) > 0):
          'the command itself is intact');
 
@@ -622,5 +646,93 @@ dcl-proc test_job_name_explicit_with_leading_blanks export;
           'and the job is submitted under the name the file asks for - not ' +
           'under a prefix of it, and not under one derived from the service ' +
           'name as though no sbmjob_jobname had been given');
+
+end-proc;
+
+//==============================================================================
+// SCLAUNCH_fork_command - the non-batch launch now goes through
+// RMSC_FORK_HELPER, added 04/10/2026
+//
+// Before this work, RMSC's non-batch path ran SCLAUNCH_start_command's own
+// output directly through PASE_run_cmd (rmtools' spawn()-based helper), which
+// gives the resulting job a generic, collision-prone name - spawn()'s own
+// job-naming mechanisms are argv/parent-based, and PASE_FORK_JOBNAME (the env
+// var that WOULD work) only applies to fork(), which spawn() never calls.
+//
+// SCLAUNCH_fork_command wraps the same start-command string as the two
+// arguments RMSC_FORK_HELPER (a separately-compiled native helper, still run
+// via the SAME PASE_run_cmd call) takes: a job name - SCLAUNCH_job_name's own,
+// unchanged, contract, reused here for non-batch naming too - and the command
+// to exec once that job exists, in double quotes specifically because
+// SCLAUNCH_start_command's own output already contains single-quoted
+// paths/values internally (see test_quoting and
+// test_start_command_working_directory above) and double quotes do not
+// collide with those.
+//
+// MEASURED (see docs/parity.md's "Batch services run on a genuinely different
+// OS mechanism than upstream's", and the brief for this round of work): this
+// is what gives a non-batch service a single, correctly-named, correctly-typed
+// job that owns its own socket, matching upstream's own fork()-based job
+// identity, in place of a generic spawn()-assigned name. tools/job-identity-
+// test.sh measures that live, job by job; these two pin the STRING the RPGLE
+// side hands to the helper, which that live measurement cannot see directly.
+//==============================================================================
+
+dcl-proc test_fork_command_wraps_the_helper export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  startcmd like(SCLAUNCH_CMD_t);
+  dcl-s  forkcmd  like(SCLAUNCH_CMD_t);
+  dcl-s  jobname  like(SCDEF_OBJ_t);
+  dcl-s  wrapped  varchar(4096);
+
+  assert(load_def('fork.yaml':
+    'name: fork' + LF +
+    'start_cmd: /usr/bin/webproxy --serve' + LF +
+    'check_alive: 8080' + LF: def): 'load');
+
+  startcmd = SCLAUNCH_start_command(def: '/tmp/fork.log');
+  forkcmd  = SCLAUNCH_fork_command(def: '/tmp/fork.log');
+  jobname  = SCLAUNCH_job_name(def);
+
+  assert((%scan('/QOpenSys/pkgs/lib/rmsc/native/rmsc_fork_helper': forkcmd) = 1):
+         'starts with the fixed helper path');
+
+  assert((%scan(%trim(jobname): forkcmd) > 0):
+         'the job name SCLAUNCH_job_name derives for this service appears ' +
+         'in the helper call - the same job name the batch path uses');
+
+  wrapped = '"' + %trim(startcmd) + '"';
+  assert((%scan(%trim(wrapped): forkcmd) > 0):
+         'SCLAUNCH_start_command''s own output appears whole and intact, ' +
+         'wrapped in double quotes - not re-escaped, not truncated, and ' +
+         'not mangled by the wrapping');
+
+end-proc;
+
+//------------------------------------------------------------------------------
+// The inner command keeps its OWN single quotes intact under the outer
+// double-quote wrapping - the specific reason double quotes were chosen for
+// the outer layer rather than single ones (see the prototype comment pasted
+// into the brief for this work). A working directory is the simplest fixture
+// that is guaranteed to put a single-quoted token (cd '<dir>') inside the
+// command SCLAUNCH_fork_command wraps.
+//------------------------------------------------------------------------------
+dcl-proc test_fork_command_preserves_inner_single_quotes export;
+
+  dcl-ds def likeds(SCDEF_t) inz(*likeds);
+  dcl-s  forkcmd like(SCLAUNCH_CMD_t);
+
+  assert(load_def('forkwd.yaml':
+    'name: forkwd' + LF +
+    'start_cmd: ./webproxy' + LF +
+    'check_alive: 8080' + LF +
+    'dir: /QOpenSys/opt/webproxy' + LF: def): 'load');
+
+  forkcmd = SCLAUNCH_fork_command(def: '/tmp/x.log');
+
+  assert((%scan('cd ''/QOpenSys/opt/webproxy''': forkcmd) > 0):
+         'the inner command''s own single-quoted cd survives the outer ' +
+         'double-quote wrapping intact');
 
 end-proc;

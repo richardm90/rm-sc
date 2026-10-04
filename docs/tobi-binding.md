@@ -116,3 +116,79 @@ come back as plausible-looking garbage: an integer reading `1077952576` is `0x40
 EBCDIC blanks being interpreted as a number.
 
 List every copybook a module includes, including indirect ones.
+
+## A non-ILE artifact: `native/rmsc_fork_helper`
+
+Added 4 October 2026, for the non-batch job-naming fix in `docs/parity.md`. `f_fork400()` — the
+PASE API that can give a job a specific name, which rmtools' `spawn()`-based `PASE_run_cmd`
+cannot — can only be called from a PASE-compiled program. Per IBM's own documentation it cannot
+be called from any ILE language, RPG or C alike: ILE C (`CRTCMOD`) is a different machine
+environment from PASE, not just a different compiler for the same environment, and has no more
+access to `fork400()` than ILE RPG does. So `native/rmsc_fork_helper.c` is genuinely not an ILE
+object of any kind — it compiles to a plain IFS executable (XCOFF), not a `*MODULE`/`*PGM`/
+`*SRVPGM`, and RMSC calls it at runtime by a fixed absolute path
+(`/QOpenSys/pkgs/lib/rmsc/native/rmsc_fork_helper`, matching `SCLAUNCH_FORK_HELPER` in
+`QRPGLESRC/SCLAUNCH.RPGLE`), not through the binder at all.
+
+**Build prerequisite, not covered by TOBi's own toolchain**: a PASE C compiler, confirmed as
+`/QOpenSys/pkgs/bin/cc` (gcc-6, via the `QOpenSys/pkgs` toolchain) on the box this was built and
+tested against. TOBi's own `.C`/`.CPP` → `.MODULE` recipe uses `CRTCMOD`, i.e. ILE C — not this.
+Installation instructions need this compiler present before `makei build` will succeed.
+
+**The build mechanics are still ordinary `makei build`, via a custom recipe — four things about
+it had to be measured on the box, not assumed from the skill documentation alone:**
+
+```make
+RMSC_FORK_HELPER.SRVPGM: rmsc_fork_helper.c
+	/QOpenSys/pkgs/bin/cc -o /QOpenSys/pkgs/lib/rmsc/native/rmsc_fork_helper native/rmsc_fork_helper.c
+```
+
+(`native/Rules.mk`, in full, comments aside.)
+
+1. **The target's name must carry a real, recognized object-type suffix — a made-up one (the
+   documentation's own `.rebuild` sentinel pattern) is rejected outright.** `rmsc_fork_helper.
+   rebuild: rmsc_fork_helper.c` fails to parse at all: `Warning: Target 'RMSC_FORK_HELPER.
+   REBUILD' is not supported`. TOBi's `RulesMk.__init__` (`src/makei/rules_mk.py`) decomposes
+   every rule's source file by extension and, when that extension maps to more than one possible
+   object type (`.c` maps to both `.MODULE` and `.PGM`), falls back to the *target's own* suffix
+   to disambiguate — and that suffix has to be a real one TOBi knows (`TARGET_GROUPS`), or it
+   exits. `.rebuild` is never valid there; `.SRVPGM` is, which is exactly why the skill's own
+   worked example (`THIRDPARTY.SRVPGM: $(DEPDIR)/THIRDPARTY.SRVPGM.rebuild`) uses that suffix for
+   its custom-recipe target, not for the sentinel.
+2. **It must NOT be listed as a prerequisite of `RMSC.SRVPGM`, or anything else.** Any
+   `.SRVPGM`-suffixed prerequisite of a service-program target gets automatically added to
+   `CRTSRVPGM`'s `BNDSRVPGM()` parameter — the same mechanism that derives `MODULE()` from
+   `.MODULE` prerequisites (see "Two names that are not what you expect" in
+   `tobi-rules-mk.md`). Listing `RMSC_FORK_HELPER.SRVPGM` there makes `RMSC.SRVPGM`'s build try
+   to bind against it as a real service program, which fails — it isn't one. Leaving it off
+   entirely works: `makei build`'s own top-level `all` target already reaches every object TOBi's
+   parser recorded against a recognized suffix, across every `SUBDIRS` directory, with nothing
+   else needing to reference it.
+3. **A plain `Rules.mk` variable (`FOO = ...`, referenced as `$(FOO)`) does not survive into a
+   custom recipe's commands** — it silently expands to empty (`cc -o  rmsc_fork_helper.c`, a
+   missing argument, not an error at parse time). The deploy path is written literally instead.
+4. **A custom recipe's commands run from the project root, not from the `Rules.mk` directory
+   that defines them** — unlike a generated recipe, which TOBi prefixes itself. The source has
+   to be named with its directory (`native/rmsc_fork_helper.c`), not bare, or `cc` reports it
+   missing.
+
+`/QOpenSys/pkgs/lib/rmsc/native/` itself is **not** created by this build, deliberately — it's
+owned by `qsys`, matching upstream's own `/QOpenSys/pkgs/lib/sc/native/` (same `drwxr-sr-x`
+shape), and a `mkdir -p` inside the recipe just fails loudly (`Permission denied`) rather than
+quietly creating a new system directory from an unprivileged build. A privileged profile creates
+it once, during installation, before the first `makei build`:
+
+```bash
+mkdir -p /QOpenSys/pkgs/lib/rmsc/native
+chown qsys:0 /QOpenSys/pkgs/lib/rmsc /QOpenSys/pkgs/lib/rmsc/native
+chmod 2755 /QOpenSys/pkgs/lib/rmsc /QOpenSys/pkgs/lib/rmsc/native
+chgrp qpgmr /QOpenSys/pkgs/lib/rmsc/native
+chmod 2775 /QOpenSys/pkgs/lib/rmsc/native
+```
+
+(the first three lines match upstream's read/execute-for-everyone shape exactly; the last two
+additionally grant write to `qpgmr` — the group the profile that actually runs `makei build`
+belongs to on this box, measured directly rather than assumed, since granting write to group `0`
+alone did nothing for a profile whose own group isn't `0`. A different box may need a different
+group named here — the requirement is "whichever group the building profile belongs to", not
+`qpgmr` specifically.)

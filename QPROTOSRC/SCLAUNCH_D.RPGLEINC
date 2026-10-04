@@ -65,6 +65,23 @@ dcl-pr SCLAUNCH_start_command like(SCLAUNCH_CMD_t);
 end-pr;
 
 ///
+// SCLAUNCH_start_command's output, wrapped as the two arguments
+// RMSC_FORK_HELPER takes: a job name (SCLAUNCH_job_name) and the command
+// to exec once that job exists.
+//
+// A non-batch service's job otherwise comes up unnamed - MEASURED,
+// docs/parity.md ("Batch services run on a genuinely different OS
+// mechanism than upstream's"): rmtools' PASE_run_cmd calls spawn(), whose
+// own job-naming controls cannot reach the way upstream's direct fork()
+// does. RMSC_FORK_HELPER calls f_fork400() directly, which can.
+///
+
+dcl-pr SCLAUNCH_fork_command like(SCLAUNCH_CMD_t);
+  def      likeds(SCDEF_t) const;
+  log_file like(STMF_t) const;
+end-pr;
+
+///
 // The batch job name upstream would derive: non-alphanumerics removed, then
 // truncated to ten characters. sbmjob_jobname overrides it.
 ///

@@ -40,6 +40,13 @@ ctl-opt text('RMSC: Service launch');
 dcl-c ENV_BLOCK_COUNT const(6);
 dcl-s g_blocked varchar(20) dim(ENV_BLOCK_COUNT) ctdata perrcd(1);
 
+// rmtools' PASE_run_cmd calls spawn(), which - MEASURED, docs/parity.md -
+// cannot be told to name the job it creates: unlike fork()'s
+// PASE_FORK_JOBNAME, spawn()'s own job-naming flags are argv/parent-based,
+// not env-based, and neither reaches a job the way upstream's direct
+// fork() does. This helper calls f_fork400() directly instead, which can.
+dcl-c SCLAUNCH_FORK_HELPER const('/QOpenSys/pkgs/lib/rmsc/native/rmsc_fork_helper');
+
 dcl-pr add_env;
   env   likeds(SCLAUNCH_ENV_t);
   entry like(SCDEF_ENVVAR_t) const;
@@ -295,13 +302,41 @@ dcl-proc SCLAUNCH_start_command export;
            SCLAUNCH_quote(env_value(env.entry(i))) + ' ';
   endfor;
 
-  // nohup so a hangup does not take it down, all three descriptors redirected
-  // so nothing is left attached to the caller's pipes, and backgrounded so
-  // PASE_run_cmd returns instead of waiting for the service to finish.
-  cmd += 'nohup ' + %trim(def.start_cmd) +
-         ' >> ' + SCLAUNCH_quote(log_file) + ' 2>&1 < /dev/null &';
+  // nohup so a hangup does not take it down, and all three descriptors
+  // redirected so nothing is left attached to the caller's pipes. exec,
+  // not backgrounded with a trailing '&' - MEASURED, docs/parity.md: this
+  // string is run as the command RMSC_FORK_HELPER execs bash into, and
+  // with '&' here bash itself lingers as a second, persistent job
+  // alongside the real one for the service's whole life; exec replaces
+  // bash's own process image instead, so only the real command remains.
+  cmd += 'exec nohup ' + %trim(def.start_cmd) +
+         ' >> ' + SCLAUNCH_quote(log_file) + ' 2>&1 < /dev/null';
 
   return cmd;
+
+end-proc;
+
+//==============================================================================
+// SCLAUNCH_fork_command
+//   SCLAUNCH_start_command's output, wrapped for RMSC_FORK_HELPER
+//==============================================================================
+
+dcl-proc SCLAUNCH_fork_command export;
+  dcl-pi *n like(SCLAUNCH_CMD_t);
+    def      likeds(SCDEF_t) const;
+    log_file like(STMF_t) const;
+  end-pi;
+
+  dcl-s inner like(SCLAUNCH_CMD_t);
+
+  inner = SCLAUNCH_start_command(def: log_file);
+
+  // The helper's own first argument is the job name, its second the
+  // command to exec once that job exists - MEASURED, docs/parity.md: the
+  // outer double quote and the inner single quotes (from SCLAUNCH_quote,
+  // already inside `inner`) do not collide.
+  return SCLAUNCH_FORK_HELPER + ' ' + %trim(SCLAUNCH_job_name(def)) +
+         ' "' + inner + '"';
 
 end-proc;
 
@@ -376,7 +411,7 @@ dcl-proc SCLAUNCH_start export;
   err = '';
 
   if not def.batch_mode;
-    cmd = SCLAUNCH_start_command(def: log_file);
+    cmd = SCLAUNCH_fork_command(def: log_file);
     rc = PASE_run_cmd(*omit: cmd: stdout);
     if rc <> PASE_RC_SUCCESS;
       err = 'Start command failed with ' + %char(rc) + ': ' + %trim(stdout);
@@ -394,6 +429,11 @@ dcl-proc SCLAUNCH_start export;
                ENVVAR_LEVEL_JOB);
   endfor;
 
+  // QP2SHELL2 refuses to run at all without this - MEASURED, docs/parity.md
+  // ("Batch services run on a genuinely different OS mechanism than
+  // upstream's").
+  ENVVAR_put('QIBM_USE_DESCRIPTOR_STDIO': 'N': ENVVAR_LEVEL_JOB);
+
   // --splf: MEASURED against sc 1.7.1, docs/parity.md - the submitted
   // command carries no redirect at all, not a redirect to something else.
   // Everything else about the SBMJOB is identical either way (confirmed:
@@ -404,8 +444,15 @@ dcl-proc SCLAUNCH_start export;
     redirect = ' >> ' + %trim(log_file) + ' 2>&1';
   endif;
 
-  clcmd = 'SBMJOB CMD(QSH CMD(''cd ' +
-          %trim(SCDEF_effective_dir(def)) + ' && ' +
+  // CALL PGM(QP2SHELL2), not QSH CMD(...): MEASURED, docs/parity.md - QSH's
+  // own dispatch forks a second, concurrent worker job to actually run the
+  // payload, leaving this SBMJOB-named job stuck as CMD-QSH for its whole
+  // life while jobinfo/loginfo find the worker instead. QP2SHELL2 calls
+  // PASE directly: one job, the one named below, for the service's whole
+  // life - matching upstream's real mechanism.
+  clcmd = 'SBMJOB CMD(CALL PGM(QP2SHELL2) PARM(' +
+          '''/QOpenSys/pkgs/bin/bash'' ''-c'' ''cd ' +
+          %trim(SCDEF_effective_dir(def)) + ' && exec ' +
           %trim(def.start_cmd) + redirect + ''')) ' +
           'JOB(' + %trim(SCLAUNCH_job_name(def)) + ') ' +
           'CPYENVVAR(*YES) PRTDEV(*USRPRF) ALWMLTTHD(*YES)';

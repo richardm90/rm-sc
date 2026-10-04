@@ -8,3 +8,4 @@
 # infrastructure detail. Never committed - this repo is public.
 local/
 .deps/
+native/*.rebuild

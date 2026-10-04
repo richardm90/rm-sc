@@ -826,63 +826,159 @@ mistakes caught and fixed the same week while building `tools/sc-cmd-test.sh`. N
 command has been identified as the cause; careful, repeated, methodical testing simply cannot
 reproduce the original claim.
 
-### Batch services run on a genuinely different OS mechanism than upstream's — found 1 October 2026, not yet planned
+### Batch services run on a genuinely different OS mechanism than upstream's — FIXED 4 October 2026
 
 **This is a different question from the retraction above, and the retraction's answer does not
 cover it.** That section asked "do `sc` and `scr` disagree about which job a given port belongs
 to?" and found no — both query `QSYS2.NETSTAT_JOB_INFO` the same way and agree. This section asks
 a question nobody had asked yet: **is RMSC's real, underlying job the same *kind* of job as
-upstream's**, independent of which one a port-lookup happens to name? It is not.
+upstream's**, independent of which one a port-lookup happens to name? It was not.
 
 **Found while building a `batch_mode` fixture for the `loginfo` spooled-file work below**, then
 confirmed by decompiling `OperationExecutor.startService()`. Upstream does not build a `SBMJOB`
-CL command at all. It calls, directly from the JVM:
+CL command directly. It calls, directly from the JVM:
 
 ```
 Runtime.exec(["/QOpenSys/pkgs/bin/nohup", "/QOpenSys/pkgs/lib/sc/native/scbash", "-c", <command>],
              <env>, <workdir>)
 ```
 
-— a **custom, stripped native PASE binary** (`scbash`, 64-bit XCOFF, `strings` yields almost
-nothing beyond linker metadata — no further reverse-engineering attempted, see "what wasn't
-chased" below). The environment passed to it includes `PASE_FORK_JOBNAME=<service name,
-alphanumerics only>` — a real, documented IBM i PASE environment variable that tells PASE's own
-`fork()` what name to give the child job — and, only when the user configured
-`sbmjob_jobname`/`sbmjob_opts`, `SBMJOB_JOBNAME=`/`SBMJOB_OPTS=` for `scbash` itself to act on
-(confirmed those reach a real `SBMJOB` by `tools/sbmjob-opts-test.sh`, which already passes for
-both implementations — it just never asked *how* upstream's side gets there).
+— a thin, stripped native PASE binary (`scbash`, 64-bit XCOFF; its own `nm`/`dump -X64 -T` import
+table is `environ`/`execv`/`Qp2setenv_ile` only — no `fork`/`spawn`, it never creates a job
+itself). For a `batch_mode` service, the command it's handed execs a small POSIX shell script
+Java itself generates (`jesseg.ibmi.opensource.utils.SbmJobScript`), which is what actually issues
+a real `SBMJOB`:
 
-RMSC's `SCLAUNCH_start` (`QRPGLESRC/SCLAUNCH.RPGLE`) does the opposite: it builds a literal
-`SBMJOB CMD(QSH CMD('cd ... && ...')) JOB(...) CPYENVVAR(*YES) PRTDEV(*USRPRF) ALWMLTTHD(*YES)`
-string and runs it through `QCMD_exc`.
+```sh
+exec /QOpenSys/usr/bin/system -kpiveO "SBMJOB CMD(CALL PGM(QP2SHELL2) PARM('/QOpenSys/pkgs/bin/bash' '-c' 'cd $(pwd) && exec $*')) CPYENVVAR(*YES) PRTDEV(*USRPRF) ALWMLTTHD(*YES) $SBMJOB_OPTS"
+```
 
-**Measured consequence, live, reproducible (not a timing artefact — checked at t=1/2/3/5/8s after
-start):** for a Python-exec'd batch service, upstream's job comes up as genuine type `BATCH` and
-keeps its chosen name (`SC_<SHORTNAME>` by default) for its whole life. RMSC's comes up as type
-`BCI` and gets reclassified into the PASE worker job (`QP0ZSPWT`/`QP0ZSPWP`) partway through —
-confirmed via side-by-side `DSPJOB OUTPUT(*PRINT)` dumps of both jobs' own "Type of job" and
-"Submitted by" fields. `ALWMLTTHD` is `*YES` on both sides, so that parameter is not the
-differentiator.
+i.e. `CALL PGM(QP2SHELL2) PARM(...)`, **not** `QSH CMD(...)`. RMSC's `SCLAUNCH_start`
+(`QRPGLESRC/SCLAUNCH.RPGLE`) built the latter: `SBMJOB CMD(QSH CMD('cd ... && ...')) JOB(...)
+CPYENVVAR(*YES) PRTDEV(*USRPRF) ALWMLTTHD(*YES)`, run through `QCMD_exc`.
 
-**Consequences already found to follow from this, in two different features**, both downstream
-of the same root cause rather than independent bugs:
+**The root cause, measured directly (not "reclassified partway through its life" — that was this
+section's own first, wrong description of what it had found).** Starting a real Python listener
+via `SBMJOB CMD(QSH CMD(...))` and snapshotting `WRKACTJOB JOB(*ALL)` — not just the named job —
+at t=0 through t=90s shows **three jobs concurrently alive from the start**: the SBMJOB-named job
+itself (stays type `BCH`, runs `CMD-QSH`, never changes, never runs the actual program because it
+has no trailing `&` of its own — the whole job is meant to *be* the service), a `QZSHSH` job, and
+a `QP0ZSPWP` job (type `BCI`) that actually execs the Python program and owns its socket. Nothing
+reclassifies; there were always two extra jobs, because `QSH`'s own command dispatch forks a
+worker to run the payload. `jobinfo`'s socket-based lookup correctly finds the `QP0ZSPWP` worker —
+it just isn't the job the caller submitted and is tracking by name. Switching to `CALL
+PGM(QP2SHELL2) PARM(...)` — which calls PASE directly, bypassing `QSH`'s dispatcher entirely — was
+measured, side by side on the same box in the same session, to produce exactly one job, type
+`BCH`, under the submitted name, for the service's whole lifetime, owning the socket throughout:
+matching upstream's own job exactly. `QP2SHELL2` additionally requires
+`QIBM_USE_DESCRIPTOR_STDIO=N` set on the submitting job before `SBMJOB` runs (carried in via the
+existing `CPYENVVAR(*YES)`) — it refuses to run at all without it.
+
+**Consequences this explains, in two different features**, both downstream of the three-job split
+rather than independent bugs:
 
 - `jobinfo` naming the PASE worker rather than the SBMJOB-named job for a Python listener — the
-  behaviour the retraction above confirmed is *consistent* between implementations, but is itself
-  a symptom of RMSC's job having been reclassified, where upstream's never is.
+  behaviour the retraction above confirmed is *consistent* between implementations is itself a
+  symptom of the extra worker job `QSH`'s dispatch always created, where upstream's single job
+  never needed one.
 - `loginfo`'s spooled-file listing (below): staging a real spooled file for a batch job's own
   `cl -sk` print step lands under two extra, empty, perpetually-`OPEN` `QPRINT` placeholder
-  entries on upstream's side that RMSC's side never produces — traced to the same job-identity
-  difference, not a defect in the spooled-file text rendering itself.
+  entries on upstream's side that RMSC's side never produced — traced to the same three-job split,
+  not a defect in the spooled-file text rendering itself. Should be re-checked now that the split
+  is gone.
 
-**What wasn't chased, on purpose, pending a planning decision:** disassembling `scbash`'s actual
-machine code to learn precisely what it does with `SBMJOB_JOBNAME`/`SBMJOB_OPTS` when they are
-set; and testing whether RMSC's own non-batch launch path (`PASE_run_cmd`, in `rmtools`) already
-uses a native `fork()`/`exec()` that could be given `PASE_FORK_JOBNAME` directly — which, if true,
-might let RMSC get a correctly-typed, correctly-named batch job **without** a custom compiled
-helper, by replacing the `SBMJOB`/`QSH` path rather than reproducing `scbash`. Neither is started
-here. This is recorded as found, not fixed, pending its own scoping and plan — it is materially
-bigger than a text-formatting fix and touches how every `batch_mode` service is launched.
+**Two earlier candidate fixes were tried and rejected before this one, each only after real
+on-box measurement, not just reasoning:** reusing rmtools' `PASE_run_cmd` (which calls `spawn()`)
+with `PASE_FORK_JOBNAME` set does nothing — that env var is documented by IBM as `fork()`/
+`f_fork()`-specific, and `spawn()` never reads it; and the very first attempt at the
+`CALL PGM(QP2SHELL2) PARM(...)` form, tested without `QIBM_USE_DESCRIPTOR_STDIO=N` and without a
+representative (Python-listener) workload, appeared both to fail outright and to fail to
+reproduce the original defect — both were artefacts of an incomplete test, not of the mechanism,
+caught by re-running with the full upstream-equivalent script and a real workload.
+
+**IMPLEMENTED 4 October 2026.** `SCLAUNCH_start`'s batch branch now builds the `CALL
+PGM(QP2SHELL2) PARM(...)` form and sets `QIBM_USE_DESCRIPTOR_STDIO=N`. No exported signature or
+parameter-list change.
+
+### Non-batch services get an unusable, generic job name — FIXED 4 October 2026
+
+**Found while investigating the batch finding above, checking whether non-batch had the same
+problem — it does not have a job-identity *split*, but it has a different, real problem of its
+own.** Non-batch services detach via `cd <dir> && ... nohup <start_cmd> ... < /dev/null &`, run
+through rmtools' `PASE_run_cmd`. Source trace through `RMPASE.rpgle` → `UNIXCMDOA.rpgle` →
+`UNIXPIPER4.rpgle` confirms `PASE_run_cmd` calls IBM i's native `spawn()` API, not `fork()`+
+`exec()`. Because the command string already ends in `&`, the dispatching shell returns almost
+immediately and only the backgrounded worker persists — so, unlike batch, there is no multi-job
+split here.
+
+What there is: the resulting job's name is generic and collision-prone (`QP0ZSPWP` by default),
+not tied to the service. Upstream's own non-batch path (the same `Runtime.exec(nohup, scbash,
+-c, ...)` call as batch, just with a plain `<start_cmd> >> <log> 2>&1` as the `-c` argument
+instead of a `SBMJOB`-issuing script) sets `PASE_FORK_JOBNAME=<service name>` in the forked
+process's environment, and a genuine PASE `fork()` honours that. `spawn()` does not: IBM's own
+documentation for `PASE_FORK_JOBNAME` states it applies only to `fork()`/`f_fork()`, and
+`spawn()`'s own documentation describes its job-naming controls as inheritance-structure flags
+(`SPAWN_SETJOBNAMEPARENT_NP`, `SPAWN_SETJOBNAMEARGV_NP`) with no mention of any environment
+variable affecting it at all — confirmed empirically too: setting `PASE_FORK_JOBNAME` before a
+`PASE_run_cmd` call does nothing.
+
+**Two further candidates were tried and rejected, both only after on-box proof, not reasoning
+alone:**
+
+- `spawn()`'s own `SPAWN_SETJOBNAMEARGV_NP` flag does rename the job in isolation (confirmed: a
+  trivial `spawn()` call with this flag set names the job exactly as given) — but breaks silently
+  when combined with the real ILE↔PASE bridge objects (`qzshsh.pgm`, `qp2shell.pgm`): the dispatch
+  wrapper exits immediately without ever running the requested command, for every variant tried.
+  The job name change alone was never sufficient evidence this worked — only confirming the real
+  payload actually ran (a listening port, a real process in `ps -ef`) exposed that it didn't.
+- Routing non-batch through rmtools' `PASE:` dispatch prefix (`qp2shell.pgm`/`/qopensys/usr/bin/sh`
+  instead of the default `QSH`) does not, by itself, fix the separate PATH bug below either —
+  `/qopensys/usr/bin/sh`'s default `PATH` is just as narrow as `QSH`'s.
+
+**IMPLEMENTED 4 October 2026, via a new native helper, not a change inside rmtools.**
+`fork400()`/`f_fork400()` — the PASE API that can name a job directly, the same way upstream's
+`fork()` does — can only be called from a PASE-compiled program; IBM's own documentation states
+plainly it cannot be called from ILE RPG, ILE C, COBOL or CL, because PASE and ILE are genuinely
+different machine environments (the same reason `spawn()`/`QP2SHELL2` exist at all, as the
+documented bridges between them). So a new, separately-compiled artifact, `rmsc_fork_helper`
+(`native/rmsc_fork_helper.c`, built by a `makei build`-integrated `Rules.mk` custom recipe — see
+`docs/tobi-binding.md`), takes a job name and a command, calls `f_fork400(jobname, 0)`, and in the
+child execs `bash -c "<command>"` — invoked via rmtools' **existing, completely unmodified**
+`PASE_run_cmd`, so this touches no shared rmtools code and has no effect on any other consumer of
+it. `SCLAUNCH_fork_command` (new, exported, appended at the end of `RMSC.BND`) builds the wrapped
+command; `SCLAUNCH_start`'s non-batch branch now calls it instead of calling
+`SCLAUNCH_start_command` directly.
+
+Two non-obvious defects were found only by testing this exact composition end-to-end, not by
+testing `f_fork400()` or `PASE_run_cmd` separately: the helper's child must close/redirect its own
+inherited fd 0/1/2 to `/dev/null` before exec, or it inherits `PASE_run_cmd`'s capture pipes and
+blocks the launching call for the service's entire runtime; and the command the helper execs into
+must end in `exec nohup <start_cmd> ...` rather than `nohup <start_cmd> ... &`, or `bash` itself
+lingers as a second, permanent job alongside the real one. `SCLAUNCH_start_command`'s own output
+changed accordingly (still exported, same signature, contract updated — see
+`qtestsrc/SCLAUNCH.TEST.RPGLE`).
+
+### A `start_cmd` with an unqualified PASE-package binary name fails to start — FIXED 4 October 2026
+
+**Found as a side effect of testing the fixes above with a realistic workload instead of
+`sleep`.** A bare, unqualified binary name in `start_cmd` (`python3`, not
+`/QOpenSys/pkgs/bin/python3`) failed outright under non-batch's dispatch (`nohup: 001-0014
+Command python3 not found`), because `QSH`'s default `PATH` excludes `/QOpenSys/pkgs/bin`.
+Upstream never has this problem, because it always execs via `bash`, whose default `PATH`
+includes it. This is a real, independent parity gap — an outright failure to start, not a
+cosmetic identity issue — and would have affected batch too if upstream's own mechanism weren't
+already `bash`-based.
+
+Tried and rejected: overriding `PATH` via `spawn()`'s own `envp` array (confirmed other variables
+pass through that mechanism correctly; `PATH` specifically did not — something downstream of
+`spawn()` disregards an inherited `PATH` override regardless of insertion order, not chased
+further since the fix below made it moot).
+
+**FIXED as a side effect of the two fixes above, not by a separate change.** Both batch (`CALL
+PGM(QP2SHELL2) PARM('/QOpenSys/pkgs/bin/bash' '-c' ...)`) and non-batch (`rmsc_fork_helper`'s
+`execl("/QOpenSys/pkgs/bin/bash", ...)`) now run the real command via `bash`, whose default `PATH`
+already includes `/QOpenSys/pkgs/bin` — confirmed directly: a bare `python3` now starts
+successfully on both paths.
 
 ## Beyond the operations — a quoted `on` in `enabled:`
 
@@ -1937,3 +2033,30 @@ two axes:
 the new stage did not fail it — added alongside, generated from its own `fake-scr` stand-in the same
 way its `check`/`list`/`groups` baselines already are, rather than a hand-written literal that could
 drift from the stub silently.
+
+## `SCLOG_path` attributes a stale log to a job that hasn't written one yet — found 4 October 2026, not yet planned
+
+**Found by `tools/fidelity-gate.sh`'s own `loginfo` check, flagged `REGRESSION` against the
+real `mapepire` service, while verifying the unrelated launch-mechanism fix above.** `SCLOG_path`
+(`QRPGLESRC/SCLOG.RPGLE`) finds a service's log by directory scan alone — "find the greatest
+matching filename", MEASURED 19 September 2026 against a stop-then-fresh-start scenario where it
+was the right rule. It takes no job-identity input at all, so this is provably unrelated to the
+launch-mechanism work above; confirmed by reading the procedure, not just reasoning about it.
+
+**The gap `SCLOG_path`'s rule doesn't cover**: `mapepire`'s real, currently-running job started
+today (`DSPJOB`: entered the system 04/10/26 09:10:49 — almost certainly a side effect of
+unrelated box maintenance earlier the same day, not this work), but the newest log file matching
+its name pattern on disk is from 30 September — four days earlier, from whichever run before
+this one last wrote one. The current job hasn't written a log of its own yet. RMSC's rule has no
+way to tell "stale log left over from a previous run" apart from "this run's own log, not yet
+written" — it just reports the newest matching name either way, so it confidently reports the old
+file as if it belonged to the job running right now. Confirmed reproducible, not a timing flake:
+three consecutive live `sc loginfo mapepire` calls against real upstream all report `<unknown>
+(try checking in log directory ...)` for this exact state, never the stale file — upstream's own
+rule evidently can tell the difference RMSC's can't.
+
+**Not fixed here — found while verifying unrelated work, logged rather than chased.** Whatever
+upstream's real rule is (most likely: only consider a log file written at or after the current
+job's own start time) hasn't been reverse-engineered yet. Worth its own measurement and plan,
+the same way every other finding in this file got one, rather than a quick patch guessed at
+here.

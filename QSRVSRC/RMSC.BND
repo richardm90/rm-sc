@@ -148,4 +148,7 @@ STRPGMEXP PGMLVL(*CURRENT) SIGNATURE('RMSC 0.5.0')
   /* Filters .scrc/SC_OPTIONS content to the tokens RMSC's parser
      recognises - see SCMAIN_D. Appended, never inserted. */
   EXPORT SYMBOL(SCMAIN_config_prefix)
+  /* SCLAUNCH_start_command's output, wrapped for RMSC_FORK_HELPER - see
+     SCLAUNCH_D. Appended, never inserted. */
+  EXPORT SYMBOL(SCLAUNCH_fork_command)
 ENDPGMEXP
