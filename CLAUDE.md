@@ -135,8 +135,13 @@ Both run over SSH from the deploy directory. Neither needs `SBMJOB`.
 `QOpenSys/pkgs` toolchain) — `native/rmsc_fork_helper.c` is not ILE and cannot be built by
 TOBi's own `CRTCMOD`-based `.C` recipe; see `docs/tobi-binding.md`.
 
+**`OBJLIB` is required, not defaulted** — `iproj.json`'s `objlib`/`curlib` are `&OBJLIB`, so
+the target library is supplied at build time, not a literal in the project file. Omitting it
+fails immediately (`OBJLIB must be defined first in the environment variable.`) rather than
+silently building into the wrong place.
+
 ```bash
-makei build
+makei build -e OBJLIB=RMSC
 ```
 
 ```bash

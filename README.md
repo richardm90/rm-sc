@@ -9,10 +9,68 @@ query.
 
 | | |
 |---|---|
-| **Library** | `RMSC` — object names cannot contain hyphens |
+| **Library** | `OBJLIB` at build time (e.g. `RMSC`) — object names cannot contain hyphens |
 | **Test library** | `RMSCT` |
 | **Build** | [TOBi](https://github.com/IBM/tobi) — `makei build` |
 | **Tests** | IBM i Testing extension + iRPGUnit |
+
+## Installation
+
+**Prerequisites**
+
+- [TOBi](https://github.com/IBM/tobi) installed on the target IBM i partition.
+- [`rmtools`](#dependencies) 2.0.7 or later — see [Dependencies](#dependencies) below.
+- A PASE C compiler at `/QOpenSys/pkgs/bin/cc`. One small native helper
+  (`native/rmsc_fork_helper.c`) has to be PASE-compiled, not ILE — see
+  [`docs/tobi-binding.md`](docs/tobi-binding.md) if you want to know why.
+
+**One-time setup, before the first build**
+
+The target library is `OBJLIB`, supplied at build time — [`iproj.json`](iproj.json) sets
+`objlib`/`curlib` to `&OBJLIB`, so it's never a literal and never needs editing to build into a
+different library. `makei build` does not create it for you — confirmed directly: pointed at a
+library that doesn't exist, the build fails outright (`CPFA0A9: Object not found`) rather than
+creating it — so create it first, named whatever you're about to pass as `OBJLIB` below (`RMSC`
+is the obvious choice, and what the rest of this README assumes):
+
+```bash
+CRTLIB LIB(RMSC) TEXT('RMSC: Service Commander for IBM i')
+```
+
+The native helper above is deployed to a fixed path outside any library,
+`/QOpenSys/pkgs/lib/rmsc/native/`. A profile with authority to create objects there sets it up
+once:
+
+```bash
+mkdir -p /QOpenSys/pkgs/lib/rmsc/native
+chown qsys:0 /QOpenSys/pkgs/lib/rmsc /QOpenSys/pkgs/lib/rmsc/native
+chmod 2755 /QOpenSys/pkgs/lib/rmsc /QOpenSys/pkgs/lib/rmsc/native
+
+# Replace QPGMR with whichever group the profile running `makei build` belongs to —
+# it needs write access here to deploy the compiled helper.
+chgrp QPGMR /QOpenSys/pkgs/lib/rmsc/native
+chmod 2775 /QOpenSys/pkgs/lib/rmsc/native
+```
+
+**Build**
+
+```bash
+cd rm-sc
+makei build -e OBJLIB=RMSC
+```
+
+(`OBJLIB` can equally be exported first — `export OBJLIB=RMSC && makei build` — `-e` is just
+the one-line form. Leaving it unset entirely fails the build immediately with
+`OBJLIB must be defined first in the environment variable.`, rather than silently defaulting
+to anything.)
+
+This builds `RMSC/RMSC` (the service program, into whichever library `OBJLIB` named) and the
+native `SC` CL command. See [`CLAUDE.md`](CLAUDE.md#build-and-test) for running the test suites.
+
+`scr` itself is not built or deployed anywhere — it's the plain bash script at
+[`scripts/scr`](scripts/scr), run directly from wherever this repository is checked out
+(`scripts/scr check`, or put it on `PATH` yourself). Set `RMSC_LIB` to match whatever you built
+`OBJLIB` as, if not `RMSC`.
 
 ## Status
 

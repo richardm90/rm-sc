@@ -1,14 +1,14 @@
 {
   "version": "0.0.1",
   "description": "RMSC: Service Commander for IBM i, in RPGLE",
-  "objlib": "RMSC",
-  "curlib": "RMSC",
+  "objlib": "&OBJLIB",
+  "curlib": "&OBJLIB",
   "includePath": [
     "QPROTOSRC",
     "/prj/rmtools"
   ],
   "preUsrlibl": [
-    "RMSC",
+    "&OBJLIB",
     "RMSCT",
     "RMTOOLS",
     "RPGUNIT",
