@@ -75,7 +75,7 @@
 #   box (see the implementer's note below) - so two things about it are
 #   explicitly NOT verified live: that QSYS2.NETSTAT_JOB_INFO's job-identity
 #   column is really named JOB_NAME (matching QSYS2.ACTIVE_JOB_INFO's column
-#   of the same name, which IS confirmed - see qtestsrc/SCQRY.TEST.RPGLE's own
+#   of the same name, which IS confirmed - see tests/SCQRY.TEST.RPGLE's own
 #   measured dump), and that the named generic worker jobs really do run
 #   under the SAME job user as the service's own submitter on this box. If
 #   this check reports a false FAIL, suspect the column name or the user
@@ -158,7 +158,7 @@ mkdir -p "$WORK" || setup_fail "cannot create work directory $WORK"
 # sbmjob-opts-test.sh - a wholly predictable submitted name removes any
 # question about the TRUNCATION rule from this file, which is about identity,
 # not about SCLAUNCH_job_name's own derivation (that is pinned directly in
-# qtestsrc/SCLAUNCH.TEST.RPGLE).
+# tests/SCLAUNCH.TEST.RPGLE).
 SVC_B="rmsc_jobid_b_$$"
 JOBNAME_B="JB$(printf '%08d' "$(( $$ % 100000000 ))")"
 PORT_B=59499
@@ -179,7 +179,7 @@ SVC_N="jn$(printf '%08d' "$(( $$ % 100000000 ))")"
 PORT_N=59500
 
 derive_job_name() {  # the SAME rule SCLAUNCH_job_name uses when no
-                      # sbmjob_jobname is given - see qtestsrc/SCLAUNCH.TEST.
+                      # sbmjob_jobname is given - see tests/SCLAUNCH.TEST.
                       # RPGLE's own test_job_name_from_service and the
                       # "DERIVED JOB NAME STILL TRUNCATES" block beside it.
   printf '%s' "$1" | tr -cd 'A-Za-z0-9' | tr '[:lower:]' '[:upper:]' | cut -c1-10

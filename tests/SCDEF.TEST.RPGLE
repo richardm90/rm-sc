@@ -601,7 +601,7 @@ end-proc;
 // so the value that is a JOB NAME in the direct form is still a PORT here, and
 // still renders verbatim. It is an UNUSABLE port - nothing can be asked about
 // it, and `check` says so and exits 253 - which is asserted where the rest of
-// the unusable family lives, in qtestsrc/SCEXEC.TEST.RPGLE. What is asserted
+// the unusable family lives, in tests/SCEXEC.TEST.RPGLE. What is asserted
 // here is the half SCDEF owns: the kind, the text kept as written, and no
 // number invented for it.
 //------------------------------------------------------------------------------
@@ -1114,7 +1114,7 @@ dcl-proc test_effective_dir_absent export;
 
 end-proc;
 
-// BLOCK 1 - paste into qtestsrc/SCDEF.TEST.RPGLE
+// BLOCK 1 - paste into tests/SCDEF.TEST.RPGLE
 //
 // Needs, at the top of that suite:
 //   /include 'SCDEF_D.rpgleinc'
@@ -2023,7 +2023,7 @@ end-proc;
 
 //##############################################################################
 //##                                                                          ##
-//##  BLOCK C - paste into qtestsrc/SCDEF.TEST.RPGLE                          ##
+//##  BLOCK C - paste into tests/SCDEF.TEST.RPGLE                             ##
 //##                                                                          ##
 //##############################################################################
 //

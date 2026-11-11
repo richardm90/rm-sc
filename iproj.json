@@ -3,17 +3,8 @@
   "description": "RMSC: Service Commander for IBM i, in RPGLE",
   "objlib": "&OBJLIB",
   "curlib": "&OBJLIB",
-  "includePath": [
-    "QPROTOSRC",
-    "deps/rm-tools"
-  ],
-  "preUsrlibl": [
-    "&OBJLIB",
-    "RMSCT",
-    "RPGUNIT",
-    "QDEVTOOLS"
-  ],
-  "postUsrlibl": [],
+  "includePath": ["QPROTOSRC","deps/rm-tools"],
+  "postUsrlibl": ["QGPL","QTEMP","RPGUNIT"],
   "setIBMiEnvCmd": [],
   "buildCommand": "/QOpenSys/pkgs/bin/makei build",
   "compileCommand": "/QOpenSys/pkgs/bin/makei c -f {filename}"

@@ -55,8 +55,11 @@ DEPLOY="${DEPLOY:-$(dirname "$HERE")}"
 # The libraries the suites need on the list, and where the copybooks come from.
 # INCDIRS mirrors iproj.json's includePath; keep the two in step.
 SRVLIB="${SRVLIB:-RMSC}"
-TSTLIB="${TSTLIB:-RMSCT}"
-LIBS="${LIBS:-RPGUNIT $SRVLIB $TSTLIB}"
+# The suites go into the service program's own library by default - the same
+# place the IBM i Testing extension puts them (testing.json leaves tstPgm at its
+# &CURLIB/&SHORTNAME default, and curlib is OBJLIB). TSTLIB moves them elsewhere.
+TSTLIB="${TSTLIB:-$SRVLIB}"
+if [ "$TSTLIB" = "$SRVLIB" ]; then LIBS="${LIBS:-RPGUNIT $SRVLIB}"; else LIBS="${LIBS:-RPGUNIT $SRVLIB $TSTLIB}"; fi
 INCDIRS="${INCDIRS:-'QPROTOSRC' 'deps/rm-tools'}"
 
 SUITES="${SUITES:-SCYAML SCDEF SCDIRS SCCOLL SCQRY SCNET SCJOB SCOUT SCLAUNCH SCEXEC SCMAIN SCAPI SCLIFE}"
@@ -168,10 +171,13 @@ if want suites; then
   # call spawns its own job and loses it otherwise) ahead of every suite.
   for l in $LIBS; do cl -O "ADDLIBLE LIB($l)" >/dev/null 2>&1; done
   for s in $SUITES; do
-    cl -O "RUCRTRPG TSTPGM($TSTLIB/$s) SRCSTMF('qtestsrc/$s.TEST.RPGLE') TGTCCSID(*JOB) DBGVIEW(*SOURCE) RPGPPOPT(*LVL2) COPTION(*EVENTF) INCDIR($INCDIRS)" \
+    # T$s is the extension's own &SHORTNAME for tests/$s.TEST.RPGLE (strip
+    # .TEST, prefix T), so a shell run and a Test Explorer run build the SAME
+    # object - and a suite's *SRVPGM never shares the name of the *MODULE it tests.
+    cl -O "RUCRTRPG TSTPGM($TSTLIB/T$s) SRCSTMF('tests/$s.TEST.RPGLE') TGTCCSID(*JOB) DBGVIEW(*SOURCE) RPGPPOPT(*LVL2) COPTION(*EVENTF) INCDIR($INCDIRS)" \
         >"${TMPDIR:-/tmp}/verify.c.$(id -un).$s" 2>&1
     crc=$?
-    out=$(cl -O "RUCALLTST TSTPGM($TSTLIB/$s) ORDER(*API) DETAIL(*BASIC) OUTPUT(*ALLWAYS) RCLRSC(*NO)" 2>&1)
+    out=$(cl -O "RUCALLTST TSTPGM($TSTLIB/T$s) ORDER(*API) DETAIL(*BASIC) OUTPUT(*ALLWAYS) RCLRSC(*NO)" 2>&1)
     # Both codes are printed. A suite whose compile failed runs the PREVIOUS
     # program and reports its result - which is a pass for code that does not
     # compile. compile=0 is the half that says the other half means anything.

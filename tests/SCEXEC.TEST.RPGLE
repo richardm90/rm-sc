@@ -945,7 +945,7 @@ dcl-proc test_check_all_reports_how_many export;
 
 end-proc;
 
-// BLOCK 2 - paste into qtestsrc/SCEXEC.TEST.RPGLE
+// BLOCK 2 - paste into tests/SCEXEC.TEST.RPGLE
 //
 // Needs pt_dir and pt_load_def from Block 1 (a second copy - the suites are
 // separate programs), plus:
@@ -1424,7 +1424,7 @@ end-proc;
 
 //##############################################################################
 //##                                                                          ##
-//##  BLOCK A - paste into qtestsrc/SCEXEC.TEST.RPGLE                         ##
+//##  BLOCK A - paste into tests/SCEXEC.TEST.RPGLE                            ##
 //##                                                                          ##
 //##  Blocks B (SCOUT.TEST) and C (SCDEF.TEST) are already in their suites    ##
 //##  and are not reproduced here.                                            ##
@@ -3617,7 +3617,7 @@ end-proc;
 //   port:65536                rc 0, NOT RUNNING        rc 0, NOT RUNNING
 //
 // and the message, on stderr, is the one SCOUT_invalid_criteria already
-// renders and qtestsrc/SCOUT.TEST.RPGLE already pins byte for byte:
+// renders and tests/SCOUT.TEST.RPGLE already pins byte for byte:
 //
 //   Invalid data for port number or job name criteria for service '<friendly>': PORT:<raw>
 //

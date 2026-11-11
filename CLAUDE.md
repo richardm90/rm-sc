@@ -146,8 +146,8 @@ makei build -e OBJLIB=RMSC
 
 ```bash
 # run one suite; parameters mirror .vscode/testing.json
-for l in RPGUNIT RMSC RMSCT; do cl -O "ADDLIBLE LIB($l)"; done
-cl -O "RUCALLTST TSTPGM(RMSCT/SCQRY) ORDER(*API) DETAIL(*BASIC) OUTPUT(*ALLWAYS)"
+for l in RPGUNIT RMSC; do cl -O "ADDLIBLE LIB($l)"; done
+cl -O "RUCALLTST TSTPGM(RMSC/TSCQRY) ORDER(*API) DETAIL(*BASIC) OUTPUT(*ALLWAYS)"
 ```
 
 `cl`, not `qsh -c "... system '...'"` — found 1 October 2026, the hard way. A plain `system`
@@ -203,7 +203,7 @@ before every commit.** Three things about it are worth knowing before you do:
 | | |
 |---|---|
 | `QRPGLESRC/` | the modules; `QPROTOSRC/` holds the matching prototype copybooks |
-| `qtestsrc/` | iRPGUnit suites, excluded from `SUBDIRS` so TOBi never builds them |
+| `tests/` | iRPGUnit suites, excluded from `SUBDIRS` so TOBi never builds them |
 | `docs/performance.md` | every measurement taken, and how to re-run it |
 | `docs/parity.md` | where RMSC matches upstream `sc` and where it deliberately does not |
 | `docs/testing-notes.md` | what has cost real time here — read before debugging a test |

@@ -1,7 +1,7 @@
 {
     "IBM i Testing.productLibrary": "RPGUNIT",
     "IBM i Testing.testStubPreferences": {
-        "Test Source Directory": "qtestsrc"
+        "Test Source Directory": "tests"
     },
     "files.associations": {
         "*.rpgleinc": "rpgle",

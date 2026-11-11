@@ -11,7 +11,7 @@
 # and the effect of a command-line flag only exist OUTSIDE the ILE job, and
 # iRPGUnit runs inside one. No assertion in this file is reachable from RPG.
 #
-# ITS OTHER HALF IS qtestsrc/SCOUT.TEST.RPGLE, which holds the WORDING. The four
+# ITS OTHER HALF IS tests/SCOUT.TEST.RPGLE, which holds the WORDING. The four
 # procedures return their line rather than printing it, so every byte of every
 # sentence is asserted there, where the test needs no service and no fixture.
 # The split is not arbitrary and it is worth stating which side answers what:
@@ -360,7 +360,7 @@ FAIL=rmscn_fail;  FAIL_F='Echo Five Narrate'
 # ITS SHORT NAME IS NOT rmscn_fail2, AND THAT IS DELIBERATE. It was, and
 # 'rmscn_fail' is a prefix of it - so every substring test naming one member
 # matched inside the other's name and could not fail for the defect it named.
-# The same slip was found in qtestsrc/SCAPI.TEST.RPGLE's staged pair. No staged
+# The same slip was found in tests/SCAPI.TEST.RPGLE's staged pair. No staged
 # name here is a prefix or a substring of any other staged name, in either
 # direction, and that is a rule this file relies on rather than a tidiness.
 FAIL2=rmscn_second; FAIL2_F='India Nine Narrate'
@@ -996,7 +996,7 @@ fi
 
 # --- the progress line names the SHORT name, the state line the FRIENDLY one --
 #
-# THE RULE THIS SCRIPT EXISTS FOR, and the one qtestsrc/SCOUT.TEST.RPGLE cannot
+# THE RULE THIS SCRIPT EXISTS FOR, and the one tests/SCOUT.TEST.RPGLE cannot
 # reach. docs/messages.md § "The two whole-surface differences": "RMSC names a
 # service by its short name where upstream names it by its friendly name.
 # Upstream's progress line uses the SHORT name and its status and error lines
@@ -1962,7 +1962,7 @@ fi
 # a fifth constant would put it on the wrong stream."
 #
 # SO THE STREAM IS THE ASSERTION. The wording is pinned in
-# qtestsrc/SCOUT.TEST.RPGLE, where it needs no fixture; what only this file can
+# tests/SCOUT.TEST.RPGLE, where it needs no fixture; what only this file can
 # ask is which stream it came out on, and that is exactly the thing the obvious
 # implementation gets wrong.
 #
@@ -2636,7 +2636,7 @@ echo "artefacts: $WORK   (.out and .err captured separately for every case; KEEP
 # WHAT THIS SCRIPT CANNOT ASSERT, and where it would have to be done instead
 #
 #   THE WORDING. Every sentence is asserted byte for byte in
-#   qtestsrc/SCOUT.TEST.RPGLE, where it needs no service. What is asserted here
+#   tests/SCOUT.TEST.RPGLE, where it needs no service. What is asserted here
 #   is the wording only as it appears in a whole line of real output - so a
 #   failure here on a line's text is the SAME defect SCOUT.TEST reports, and
 #   SCOUT.TEST is the better place to read it from.

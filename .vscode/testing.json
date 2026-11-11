@@ -7,7 +7,6 @@
             "cOption": [
                 "*EVENTF"
             ],
-            "tstPgm": "RMSCT/&SHORTNAME",
             "incDir": [
                 "QPROTOSRC",
                 "deps/rm-tools"
@@ -20,8 +19,7 @@
             "detail": "*BASIC",
             "output": "*ALLWAYS",
             "rclRsc": "*NO",
-            "onFailure": "*ABORT",
-            "tstPgm": "RMSCT/&SHORTNAME"
+            "onFailure": "*ABORT"
         }
     },
     "codecov": {

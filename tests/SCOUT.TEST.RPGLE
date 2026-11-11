@@ -431,7 +431,7 @@ dcl-proc test_tty_detection export;
 
 end-proc;
 
-// BLOCK 3 - paste into qtestsrc/SCOUT.TEST.RPGLE
+// BLOCK 3 - paste into tests/SCOUT.TEST.RPGLE
 //
 // Pure formatting: no fixtures, no system state, deterministic on any box.
 // This is the block that holds the byte-exact contract, so it is the one to
@@ -865,7 +865,7 @@ end-proc;
 
 //##############################################################################
 //##                                                                          ##
-//##  BLOCK B - paste into qtestsrc/SCOUT.TEST.RPGLE                          ##
+//##  BLOCK B - paste into tests/SCOUT.TEST.RPGLE                             ##
 //##                                                                          ##
 //##############################################################################
 //
@@ -2114,7 +2114,7 @@ end-proc;
 // needs the companion discipline the narration block above uses.
 //
 // It is asserted in tools/api-silence-test.sh, which drives
-// qtestsrc/SCAPIDRV.PGM.RPGLE - a caller of the API that is CALLable from
+// tests/SCAPIDRV.PGM.RPGLE - a caller of the API that is CALLable from
 // `system -kpieO`, writes nothing itself, and reports through a file - and
 // requires both of its streams to be byte-empty, with a companion `scr` run
 // proving each suppressed line would otherwise have been there.

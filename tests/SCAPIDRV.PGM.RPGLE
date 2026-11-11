@@ -11,8 +11,8 @@
 //
 // That promise is an ABSENCE, and an absence on a FILE DESCRIPTOR. iRPGUnit
 // runs inside the ILE job whose descriptor 1 is the thing under test, and a
-// suite cannot capture its own stdout - so no assertion in qtestsrc/*.TEST can
-// see whether the promise holds. qtestsrc/SCOUT.TEST.RPGLE can pin the silence
+// suite cannot capture its own stdout - so no assertion in tests/*.TEST can
+// see whether the promise holds. tests/SCOUT.TEST.RPGLE can pin the silence
 // FLAG's own contract and nothing more; what a caller actually receives on its
 // two streams only exists outside the job.
 //

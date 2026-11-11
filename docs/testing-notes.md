@@ -174,8 +174,8 @@ list from the job description, so a `CHGLIBL` or `ADDLIBLE` in a previous call i
 QSH holds one job for the whole invocation:
 
 ```bash
-qsh -c "liblist -a RPGUNIT; liblist -a RMSC; liblist -a RMSCT;
-        system \"RUCALLTST TSTPGM(RMSCT/SCQRY) ORDER(*API) DETAIL(*BASIC) OUTPUT(*ALLWAYS)\""
+qsh -c "liblist -a RPGUNIT; liblist -a RMSC;
+        system \"RUCALLTST TSTPGM(RMSC/TSCQRY) ORDER(*API) DETAIL(*BASIC) OUTPUT(*ALLWAYS)\""
 ```
 
 Results arrive on stdout - no spooled file to chase. Swap `RUCALLTST` for `RUCRTRPG` with the
@@ -489,7 +489,7 @@ re-issued `ENVVAR_put`/`SC_refresh` before every test case (mirroring `SCOUT.TES
 per-test pattern) changed nothing — the three failures reproduced byte-for-byte, which is what
 ruled the environment-variable hypothesis out rather than in.
 
-**The real cause**: two of `write_width_defs`'s three staged fixtures (`qtestsrc/SCAPI.TEST.RPGLE`
+**The real cause**: two of `write_width_defs`'s three staged fixtures (`tests/SCAPI.TEST.RPGLE`
 — the 100-character-name fixture behind `g_apiln`, and the `API_TAIL` fixture used by the
 ignore-list pair) had no `name:` key. `SCDEF_from_doc` (`QRPGLESRC/SCDEF.RPGLE`) has refused any
 definition without one, outright, since 19 September 2026 — the same day this note was first

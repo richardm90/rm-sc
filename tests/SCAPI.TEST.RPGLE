@@ -440,7 +440,7 @@ end-proc;
 // simply LOST. SC_start returns false and says nothing, where it used to say
 // `<short> did not start within <n> seconds`.
 //
-// MEASURED 3 September 2026, through qtestsrc/SCAPIDRV.PGM.RPGLE against the
+// MEASURED 3 September 2026, through tests/SCAPIDRV.PGM.RPGLE against the
 // deployed build, with a staged service that cannot come up:
 //
 //     op=start

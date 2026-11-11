@@ -7,7 +7,7 @@
 # Runs ON the IBM i box, beside tools/fidelity-gate.sh and the other harnesses.
 #
 # WHY A NEW FILE. A coverage audit (30 September 2026) found these two keys
-# had no live coverage at all - qtestsrc/SCEXEC.TEST.RPGLE checks that the
+# had no live coverage at all - tests/SCEXEC.TEST.RPGLE checks that the
 # definition is PARSED, and nothing measured the submitted job against either
 # implementation. Neither existing harness is a fit: loginfo-test.sh asks
 # where a LOG lands, and jobinfo-test.sh asks about the SHAPE of `jobinfo`'s

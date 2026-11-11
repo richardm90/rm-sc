@@ -739,7 +739,7 @@ echo "artefacts: $WORK   (.out and .err captured separately for every case; KEEP
 #   THE stop_cmd-PRESENT ESCALATION PATH. tools/stop-escalation-test.sh's
 #   territory - out of scope here on purpose, see the header.
 #
-#   THE WORDING IN ISOLATION. A candidate for qtestsrc/SCOUT.TEST.RPGLE once
+#   THE WORDING IN ISOLATION. A candidate for tests/SCOUT.TEST.RPGLE once
 #   SCOUT grows a procedure for it, same as the narration family. This file
 #   is the only place that can see the STREAM, the EXIT STATUS, the WALL
 #   CLOCK and whether the JOB ACTUALLY SURVIVED, which is why those four are

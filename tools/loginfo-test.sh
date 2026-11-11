@@ -1206,7 +1206,7 @@ else
     wr_base="${wr_file##*/}"
 
     # The shape MEASURED live: 19 characters, YYYY-MM-DD-HH.MM.SS, then a dot,
-    # the short name, then .log. qtestsrc/SCEXEC.TEST.RPGLE's
+    # the short name, then .log. tests/SCEXEC.TEST.RPGLE's
     # pt_stamp_shape_ok pins the same shape from inside the ILE job; this pins
     # it on the actual file SCLOG_new_path wrote, outside it.
     if [[ "$wr_base" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.${WR}\.log$ ]]; then
@@ -1351,7 +1351,7 @@ heading
 #
 # A coverage audit (30 September 2026) found log_dir's ONLY existing coverage
 # was info's DISPLAY of the value (tools/gate-fixtures/base/rmscgate_info_full.yaml)
-# and RMSC's own internal SCLOG_dir accessor (qtestsrc/SCEXEC.TEST.RPGLE) -
+# and RMSC's own internal SCLOG_dir accessor (tests/SCEXEC.TEST.RPGLE) -
 # never whether a started service's log actually LANDS there, and never
 # against upstream. This stage closes that: a real start, with each
 # implementation, of the SAME shared definition (staged in $SVCDIR so both

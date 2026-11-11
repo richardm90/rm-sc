@@ -39,7 +39,7 @@
 # on a PTY and on a pipe for different reasons, and the second half of stage 1
 # is the only thing pinning that they agree at all.
 #
-# ITS OTHER HALF IS qtestsrc/SCOUT.TEST.RPGLE, and the split is the same one
+# ITS OTHER HALF IS tests/SCOUT.TEST.RPGLE, and the split is the same one
 # narration-test.sh describes:
 #
 #   SCOUT.TEST      which bytes a row is made of, with colour forced on by
@@ -978,12 +978,12 @@ check_named groups-stays-uncoloured measured \
 # (7) `info`'S HEADER IS THE SAME CONSTRUCT AS A `list` ROW, AND IS COLOURED
 #     THE SAME WAY.
 #
-# WHY THIS CASE IS HERE AND NOT IN qtestsrc/SCOUT.TEST.RPGLE. What bytes
+# WHY THIS CASE IS HERE AND NOT IN tests/SCOUT.TEST.RPGLE. What bytes
 # SCOUT_list_row produces is already pinned there, coloured and uncoloured,
 # down to the position of every escape. What is NOT pinned anywhere is whether
 # `info` USES it. SCEXEC_info builds its header line by hand and returns
 # nothing - it prints - and an RPGUnit suite cannot capture its own stdout
-# (qtestsrc/SCAPIDRV.PGM.RPGLE says so at length and exists because of it). So
+# (tests/SCAPIDRV.PGM.RPGLE says so at length and exists because of it). So
 # "does info go through the shared row builder" is an end-to-end question by
 # nature, and this file is the only instrument here that can ask it.
 #

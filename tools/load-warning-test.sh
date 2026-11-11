@@ -13,7 +13,7 @@
 # `SCEXEC_info` returns nothing at all, so there is no value an in-job assertion
 # could read for either.
 #
-# ITS OTHER HALVES ARE IN qtestsrc/, and it is worth saying which side answers
+# ITS OTHER HALVES ARE IN tests/, and it is worth saying which side answers
 # what, because between them they cover one defect from two directions:
 #
 #   SCDEF.TEST    what SCDEF_criterion_text RENDERS for a criterion reached
@@ -215,7 +215,7 @@ control() { def "$1" rmsclw_control 'Control Svc' "check_alive: $DEADPORT"; }
 # EVERY ONE OF THESE FILES HOLDS THE SAME VALID DEFINITION, so content cannot
 # explain any difference in the outcome and only the NAME can. A fixture whose
 # rejected files were also malformed would pass against an implementation that
-# applied no name rule at all - the argument qtestsrc/SCCOLL.TEST.RPGLE's
+# applied no name rule at all - the argument tests/SCCOLL.TEST.RPGLE's
 # filename block already makes for its own nine files.
 mkd names
 control names
@@ -475,7 +475,7 @@ svc_names() { awk 'NF && $1 !~ /^WARNING:/ {print $1}' "$1" | LC_ALL=C sort; }
 
 # The conflict criteria a run warned about, sorted. Member ORDER is not read:
 # upstream's is Java hash iteration order and is not a contract, which
-# qtestsrc/SCCOLL.TEST.RPGLE's conflict header records at length.
+# tests/SCCOLL.TEST.RPGLE's conflict header records at length.
 cfl_criteria() {
   sed -n "s/^WARNING: the following services all have conflicting definitions for liveliness check '\(.*\)':$/\1/p" \
     "$1" 2>/dev/null | LC_ALL=C sort
@@ -563,7 +563,7 @@ ign_names "$WORK/names-warn.scr.err" > "$WORK/names.scr.ign"
 # So the directory is read back and compared to the list this file intends,
 # byte for byte, before any of it is believed. CLAUDE.md is explicit that a
 # suite must not report something it has not established, and the blank-name
-# block in qtestsrc/SCCOLL.TEST.RPGLE makes the same argument at length.
+# block in tests/SCCOLL.TEST.RPGLE makes the same argument at length.
 { printf '%s\n' rmsclw_control.yaml "${SILENT[@]}" "${ALL_WARNED[@]}"; } \
   | LC_ALL=C sort > "$WORK/names.want"
 # ls -A1, not ls -1. A dotfile is invisible to `ls -1`, so a fixture beginning
@@ -806,7 +806,7 @@ check_named comp-same-conflicts \
 # MEASURED 4 September. A port written into check_alive: is NORMALISED and one
 # arriving through check_alive_criteria: is kept VERBATIM, which is the
 # job-name rule in a different alphabet. docs/parity.md:377 has the rendering
-# half; qtestsrc/SCCOLL.TEST.RPGLE has the four conflict counts.
+# half; tests/SCCOLL.TEST.RPGLE has the four conflict counts.
 #
 # THESE ROWS RUN THE OTHER WAY ROUND. Every job-name row above guards against
 # RMSC INVENTING a warning; portzero guards against it LOSING one - two

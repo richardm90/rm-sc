@@ -89,7 +89,6 @@ command -v qsh >/dev/null 2>&1 || setup_fail \
   "this file reaches it. See this script's own header for why."
 
 RMSC_LIB="${RMSC_LIB:-RMSC}"
-RMSCT_LIB="${RMSCT_LIB:-RMSCT}"
 
 CHK="$(qsh -c "liblist -a $RMSC_LIB; system 'CHKOBJ OBJ($RMSC_LIB/SC) OBJTYPE(*CMD)'" 2>&1)"
 echo "$CHK" | grep -q 'CPF9801\|not found' && setup_fail \
@@ -120,7 +119,7 @@ heading() {
 # already plain ASCII/UTF-8 - see NOT AN EBCDIC QUESTION above.
 sc_native() {  # cmd -> writes $WORK/native.out, $WORK/native.err, sets $NATIVE_RC
   local cmd="$1"
-  qsh -c "liblist -a $RMSC_LIB; liblist -a $RMSCT_LIB; system '$cmd'" \
+  qsh -c "liblist -a $RMSC_LIB; system '$cmd'" \
     >"$WORK/native.out" 2>"$WORK/native.err"
   NATIVE_RC=$?
 }

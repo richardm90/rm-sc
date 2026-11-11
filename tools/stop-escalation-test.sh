@@ -666,7 +666,7 @@ echo "artefacts: $WORK   (.out and .err captured separately for every case; KEEP
 #   here stages a job that resists ENDJOB OPTION(*IMMED).
 #
 #   THE WORDING IN ISOLATION. Every sentence here is also a candidate for
-#   qtestsrc/SCOUT.TEST.RPGLE once SCOUT grows a procedure for it, the way
+#   tests/SCOUT.TEST.RPGLE once SCOUT grows a procedure for it, the way
 #   the narration family's wording is pinned there rather than here. This
 #   file is the only place that can see the STREAM, the EXIT STATUS and
 #   whether the JOB ACTUALLY DIED, which is why those three are what it

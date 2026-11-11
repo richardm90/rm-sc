@@ -9,7 +9,7 @@
 #    status is returned rather than printed."
 #
 # Nothing has ever checked it, and it is not true today. Measured 3 September
-# 2026 against the build then deployed, through qtestsrc/SCAPIDRV.PGM.RPGLE:
+# 2026 against the build then deployed, through tests/SCAPIDRV.PGM.RPGLE:
 #
 #   SC_start of a service that comes up   -> 43 bytes on STDOUT
 #       Service 'Zulu Api Up' successfully started
@@ -40,20 +40,20 @@
 #
 # The property under test is an ABSENCE ON A FILE DESCRIPTOR. iRPGUnit runs
 # inside the ILE job whose descriptor 1 is the subject, and a suite cannot
-# capture its own stdout - so no assertion in qtestsrc/*.TEST.RPGLE can see
-# whether the promise holds. qtestsrc/SCOUT.TEST.RPGLE pins the silence FLAG's
+# capture its own stdout - so no assertion in tests/*.TEST.RPGLE can see
+# whether the promise holds. tests/SCOUT.TEST.RPGLE pins the silence FLAG's
 # own contract, which is all it can reach, and says so.
 #
 # From the shell there was nothing to point at: `scripts/scr` runs SCRUN, which
 # is the command line and is supposed to print, and the API is a set of bound
 # procedures no shell can call. So the harness needed a caller of its own, and
-# qtestsrc/SCAPIDRV.PGM.RPGLE is it - a program CALLable from `system -kpieO`
+# tests/SCAPIDRV.PGM.RPGLE is it - a program CALLable from `system -kpieO`
 # that makes one API call and writes NOTHING to either stream itself. Its
 # outcome goes to an IFS file, which is the whole reason it has one: a driver
 # that reported by printing would make the assertion "the API path printed
 # nothing" impossible to state.
 #
-# It is built here, on every run, rather than by TOBi. qtestsrc/ is excluded
+# It is built here, on every run, rather than by TOBi. tests/ is excluded
 # from SUBDIRS, so `makei build` never touches it, and a driver left over from
 # an older build would test an older API. The build is a hard failure.
 #
@@ -105,8 +105,8 @@ DEPLOY="${DEPLOY:-$(dirname "$HERE")}"
 SCR="${SCR:-$DEPLOY/scripts/scr}"
 PY="${PY:-/QOpenSys/pkgs/bin/python3}"
 SYSTEM="${SYSTEM:-/QOpenSys/usr/bin/system}"
-DRVLIB="${DRVLIB:-RMSCT}"
-DRVSRC="${DRVSRC:-$DEPLOY/qtestsrc/SCAPIDRV.PGM.RPGLE}"
+DRVLIB="${DRVLIB:-RMSC}"
+DRVSRC="${DRVSRC:-$DEPLOY/tests/SCAPIDRV.PGM.RPGLE}"
 PROTO="${PROTO:-$DEPLOY/QPROTOSRC}"
 RMTOOLS_INC="${RMTOOLS_INC:-$DEPLOY/deps/rm-tools}"
 WORK="${WORK:-/tmp/api-silence-test.$$}"
@@ -168,7 +168,7 @@ ls -dt /tmp/api-silence-test.* 2>/dev/null | tail -n +3 | while read -r stale; d
 done
 SVCDIR="$WORK/services"
 
-# The marker qtestsrc/SCAPIDRV.PGM.RPGLE writes through SCOUT_writeln after an
+# The marker tests/SCAPIDRV.PGM.RPGLE writes through SCOUT_writeln after an
 # API call. Kept in step with LEAK_MARKER in that file.
 LEAK_MARKER='SCAPIDRV-STILL-SPEAKING'
 
@@ -219,7 +219,7 @@ setup_fail() { printf '%s\n' "$@" >&2; exit 2; }
 [ -f "$DRVSRC" ] || setup_fail \
   "the API driver source is missing: $DRVSRC" \
   "" \
-  "qtestsrc/SCAPIDRV.PGM.RPGLE is the only caller of the bound-call API that a" \
+  "tests/SCAPIDRV.PGM.RPGLE is the only caller of the bound-call API that a" \
   "shell can reach. Without it nothing in this file can observe anything."
 
 mkdir -p "$SVCDIR" || setup_fail "cannot create $SVCDIR"
@@ -487,7 +487,7 @@ printf '  %-9s %-34s %s\n' --------- ---------------------------------- ------
 # ---------------------------------------------------------------------------
 
 # THE DRIVER IS BUILT ON EVERY RUN, and a stale one is the failure mode worth
-# naming. qtestsrc/ is excluded from SUBDIRS so `makei build` never touches it;
+# naming. tests/ is excluded from SUBDIRS so `makei build` never touches it;
 # an object left from an older build would be bound to an older API and would
 # answer a question about that instead.
 qsh -c "liblist -a RMSC; liblist -a $DRVLIB;
@@ -656,7 +656,7 @@ sleep 2
 # on stderr and a single switch has to catch both, so both are asked.
 #
 # THE MESSAGE IS ASSERTED HERE TOO. A failure that reports no reason is the
-# regression qtestsrc/SCAPI.TEST.RPGLE was extended for; this is the same rule
+# regression tests/SCAPI.TEST.RPGLE was extended for; this is the same rule
 # seen from outside the job, and it is the reason the silence is safe to want.
 # Silencing a stream that carried the only copy of the reason would be a
 # straight loss of information - it is only acceptable BECAUSE the reason comes
@@ -754,7 +754,7 @@ printf '  %-9s %-34s %s\n' --------- ---------------------------------- ------
 # fill a subfile and then, for its own reasons, writes a line through SCOUT gets
 # nothing, with no way to find out why.
 #
-# THE PROBE. qtestsrc/SCAPIDRV.PGM.RPGLE's leak-probe operation makes an API
+# THE PROBE. tests/SCAPIDRV.PGM.RPGLE's leak-probe operation makes an API
 # call and then writes a marker through SCOUT_writeln - the ordinary way any
 # consumer of the service program writes a line. The marker must appear.
 #
@@ -820,7 +820,7 @@ check_named silence-does-not-outlive-the-call design \
 #   a single service that RAN
 #
 # Each has to put the silence flag back. leak-probe reaches none of them - it
-# calls SC_check_all, which stops at the loader - and qtestsrc/SCAPI.TEST.RPGLE
+# calls SC_check_all, which stops at the loader - and tests/SCAPI.TEST.RPGLE
 # does not include SCOUT_D at all, so it cannot ask what the flag holds. The
 # consequence was exact and worth writing down: DELETE ANY ONE OF THE FOUR
 # RESTORES AND EVERY SUITE IN THIS PROJECT STAYED GREEN.
@@ -977,7 +977,7 @@ echo "artefacts: $WORK   (.out .err .res per case; KEEP=1 to keep them)"
 #
 #   THE FLAG'S OWN CONTRACT. SCOUT_set_silent and SCOUT_silent are procedures,
 #   and their round trip, their default and their independence from
-#   SCOUT_set_colour belong in qtestsrc/SCOUT.TEST.RPGLE, where they need no
+#   SCOUT_set_colour belong in tests/SCOUT.TEST.RPGLE, where they need no
 #   service and no fixture. What is here is only what needs a file descriptor.
 #
 #   (THE DEFAULT VALUE IN A FRESH ACTIVATION used to be listed here, and it is

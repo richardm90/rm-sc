@@ -435,7 +435,7 @@ implementations now discover logs the same way, one staged file serves both side
 already matched by SHAPE, not by the static name, once checked closely) except for
 `log_reset`/`log_bytes`, two helpers that hardcoded the old static path and would have silently
 read 0 bytes for every case built on log growth — found by actually running the suite after the
-fix landed, not anticipated in advance. `qtestsrc/SCEXEC.TEST.RPGLE` gained four unit tests
+fix landed, not anticipated in advance. `tests/SCEXEC.TEST.RPGLE` gained four unit tests
 covering `SCLOG_new_path`'s shape and `SCLOG_path`'s empty/newest-wins/exact-suffix-match
 behaviour directly, isolated from any live differential.
 
@@ -589,7 +589,7 @@ two things:
   correctly. Richard's call: keep the richer RMSC diagnostic (genuinely more useful than a bare
   timeout for a broken definition) as a sanctioned improvement, and fix the naming to match the
   decided rule rather than matching upstream's silence. `def.short_name` → `def.friendly`, one
-  field, `QRPGLESRC/SCEXEC.RPGLE`. New test: `qtestsrc/SCLIFE.TEST.RPGLE`,
+  field, `QRPGLESRC/SCEXEC.RPGLE`. New test: `tests/SCLIFE.TEST.RPGLE`,
   `test_start_parse_failure_reports_friendly_name` — blind-authored, watched red against the old
   code (live narration showed the short name), green against the fix.
 - **The other three candidate texts turned out to sit downstream of a real behavioural gap, not a
@@ -624,7 +624,7 @@ upstream does (`SCEXEC.RPGLE`, the `info` write, changed from `SCDEF_effective_d
 `def.dir`); the resolved form is still what `SCDEF_effective_dir` returns for the ACTUAL launch,
 via `SCLAUNCH`, which must keep resolving correctly and now does so against the real, symlink-
 followed location rather than the raw one. `tools/info-test.sh`'s new `RELDIR` case pins the
-display; `qtestsrc/SCDEF.TEST.RPGLE`'s new symlink cases pin the resolution. The fidelity gate now
+display; `tests/SCDEF.TEST.RPGLE`'s new symlink cases pin the resolution. The fidelity gate now
 matches on all 5 real services, `info` moved from `UNDECIDED` to fully matching
 (`tools/fidelity-gate.sh` reported `RECLASSIFY` the moment this landed, confirming the list was
 right to update), and **Verification step 8 is complete** for the first time — see "Closing
@@ -964,7 +964,7 @@ blocks the launching call for the service's entire runtime; and the command the 
 must end in `exec nohup <start_cmd> ...` rather than `nohup <start_cmd> ... &`, or `bash` itself
 lingers as a second, permanent job alongside the real one. `SCLAUNCH_start_command`'s own output
 changed accordingly (still exported, same signature, contract updated — see
-`qtestsrc/SCLAUNCH.TEST.RPGLE`).
+`tests/SCLAUNCH.TEST.RPGLE`).
 
 ### A `start_cmd` with an unqualified PASE-package binary name fails to start — FIXED 4 October 2026
 
@@ -1057,7 +1057,7 @@ same as upstream's unless there is a very good reason, and there was none.
 The measured family is in `docs/messages.md` § "Narration" — every text, which name each line
 uses, which stream each goes to, the order they appear in, the trailing blank line, and the fact
 that `-q` does **not** suppress any of it. `tools/narration-test.sh` pins it end to end, and the
-wording is pinned separately by `qtestsrc/SCOUT.TEST.RPGLE` because the nine `SCOUT` procedures
+wording is pinned separately by `tests/SCOUT.TEST.RPGLE` because the nine `SCOUT` procedures
 return their line rather than printing it.
 
 **The section above, describing RMSC as silent, is what this looked like before the work.** It is
@@ -1603,7 +1603,7 @@ made for a `.scrc` file ending in a trailing newline abending (`RNX0100`, a prev
 trap in this codebase) — the ordinary shape of a text file, and the shape a `.scrc` written with
 `echo` actually takes. Cases for all three were added directly (mechanically pinning already
 -measured, already-decided facts, not new interpretation) rather than restarting the blind-review
-round trip. `qtestsrc/SCMAIN.TEST.RPGLE`: 54 test cases, 299 assertions, 0 failures. Confirmed
+round trip. `tests/SCMAIN.TEST.RPGLE`: 54 test cases, 299 assertions, 0 failures. Confirmed
 end to end, live, against every scenario measured above — the three-source precedence chain, the
 exact `.scrc`-versus-`SC_OPTIONS` whitespace-splitting asymmetry (both the simple case and the
 corrected prefix-matching one), the exact warning text, the verb-hijack near-miss now refused,
@@ -1666,7 +1666,7 @@ symlinked-load pair over the SAME real file: today the pair disagrees on `def.de
 `SCDEF_effective_dir(def)` (the bug); after the fix, both must produce the SAME value as the
 direct load, for `dir: .`, and for no `dir:` at all. All three pinned values against the real
 file's own path, not only against each other, so a fix that made both sides agree on some other,
-still-wrong, value would not pass by coincidence. `qtestsrc/SCDEF.TEST.RPGLE`: 126 test cases,
+still-wrong, value would not pass by coincidence. `tests/SCDEF.TEST.RPGLE`: 126 test cases,
 654 assertions, 0 failures.
 
 `tools/info-test.sh`'s new `RELDIR` fixture and the fidelity gate's real `mapepire` sweep both

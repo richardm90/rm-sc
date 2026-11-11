@@ -10,7 +10,7 @@ query.
 | | |
 |---|---|
 | **Library** | `OBJLIB` at build time (e.g. `RMSC`) — object names cannot contain hyphens |
-| **Test library** | `RMSCT` |
+| **Test library** | The same library, `OBJLIB` |
 | **Build** | [TOBi](https://github.com/IBM/tobi) — `makei build` |
 | **Tests** | IBM i Testing extension + iRPGUnit |
 
@@ -46,7 +46,7 @@ creating it — so create it first, named whatever you're about to pass as `OBJL
 is the obvious choice, and what the rest of this README assumes):
 
 ```bash
-CRTLIB LIB(RMSC) TEXT('RMSC: Service Commander for IBM i')
+system "CRTLIB LIB(RMSC) TEXT('RMSC: Service Commander for IBM i')"
 ```
 
 The native helpers are deployed outside any library, one directory per release:
@@ -86,7 +86,23 @@ to anything.)
 
 This builds `RMSC/RMSC` (the service program, into whichever library `OBJLIB` named) and the
 native `SC` CL command. It also builds rm-tools from the submodule into the same library:
-its modules, the `RMTOOLS` binding directory RMSC binds them through, and `RMMSGF`. See [`CLAUDE.md`](CLAUDE.md#build-and-test) for running the test suites.
+its modules, the `RMTOOLS` binding directory RMSC binds them through, and `RMMSGF`.
+
+**Tests**
+
+The iRPGUnit suites in `tests/` need [iRPGUnit](https://github.com/tools-400/irpgunit)
+installed (its `RPGUNIT` library); the build itself does not. They compile into the same library
+as the build, as `T`-prefixed service programs (`TSCCOLL` for `SCCOLL.TEST.RPGLE`) - both from the
+IBM i Testing extension in VS Code and from the shell, from the repository root:
+
+```bash
+tools/verify.sh suites
+```
+
+Each suite should report `compile=0` and `Success`, and the run should end `VERDICT OK`. Set
+`SRVLIB` if you built into a library other than `RMSC`, or `TSTLIB` to put the suites somewhere
+else. `tools/verify.sh` with no arguments is the full verification, including the fidelity gate
+against captured upstream output; see [`CLAUDE.md`](CLAUDE.md#build-and-test).
 
 `scr` itself is not built or deployed anywhere — it's the plain bash script at
 [`scripts/scr`](scripts/scr), run directly from wherever this repository is checked out
