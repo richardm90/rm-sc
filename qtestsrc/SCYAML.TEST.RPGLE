@@ -36,10 +36,10 @@
 
 ctl-opt nomain;
 // RMSCPGM brings in RMSC.SRVPGM for the SCYAML_* procedures under test.
-// RMSCDEPS is needed separately for the rmtools IFS_* procedures the fixture
-// helpers call: RMSC.BND exports only SCYAML_* symbols, so the rmtools code
+// RMTOOLS is needed separately for the rm-tools IFS_* procedures the fixture
+// helpers call: RMSC.BND exports only SCYAML_* symbols, so the rm-tools code
 // copied into RMSC.SRVPGM is deliberately not reachable from here.
-ctl-opt bnddir('RMSCPGM':'RMSCDEPS');
+ctl-opt bnddir('RMSCPGM':'RMTOOLS');
 
 /include 'SCYAML_D.rpgleinc'
 /include 'include/RMIFS_D.rpgleinc'

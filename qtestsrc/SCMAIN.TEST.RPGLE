@@ -49,10 +49,10 @@
 //==============================================================================
 
 ctl-opt nomain;
-// RMSCPGM brings in RMSC.SRVPGM, which exports SCMAIN_parse. RMSCDEPS is
-// listed for the same reason the other suites list it: the rmtools code is
+// RMSCPGM brings in RMSC.SRVPGM, which exports SCMAIN_parse. RMTOOLS is
+// listed for the same reason the other suites list it: the rm-tools code is
 // bound by copy into RMSC.SRVPGM and so is not reachable through its exports.
-ctl-opt bnddir('RMSCPGM':'RMSCDEPS');
+ctl-opt bnddir('RMSCPGM':'RMTOOLS');
 
 /include 'SCMAIN_D.rpgleinc'
 /include 'SCDEF_D.rpgleinc'

@@ -10,7 +10,7 @@
             "tstPgm": "RMSCT/&SHORTNAME",
             "incDir": [
                 "QPROTOSRC",
-                "/prj/rmtools"
+                "deps/rm-tools"
             ]
         },
         "rucalltst": {

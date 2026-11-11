@@ -1,0 +1,3 @@
+[submodule "deps/rm-tools"]
+	path = deps/rm-tools
+	url = https://github.com/richardm90/rm-tools

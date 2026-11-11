@@ -7,43 +7,53 @@
 # TOBi's own parser requires a custom-recipe target's NAME to carry a real,
 # recognized object-type suffix - MEASURED: a target named with a made-up
 # suffix (e.g. ".rebuild") is rejected outright ("Warning: Target '...' is
-# not supported"), even though the skill documentation's own example for an
-# externally-built object uses exactly this shape (".SRVPGM", chosen there
-# for the same reason - not because a real *SRVPGM object results; nothing
-# here calls CRTSRVPGM). No corresponding QSYS object exists for this
-# target, so TOBi's own staleness check (looking for the object on the
-# library list) never finds one - this target recompiles on every
-# `makei build`, which is harmless and fast (a few lines of C), not a
-# correctness concern.
+# not supported").
 #
-# NOT listed as a prerequisite of RMSC.SRVPGM or anything else - MEASURED,
-# two ways: (1) doing so makes TOBi auto-add it to CRTSRVPGM's BNDSRVPGM()
-# parameter, since that's how TOBi derives BNDSRVPGM from any .SRVPGM
-# prerequisite (the same mechanism that derives MODULE() from .MODULE
-# prerequisites) - and binding to it fails, because it isn't a real
-# *SRVPGM. (2) it does not need to be: `makei build`'s own top-level `all`
-# target already reaches every object TOBi's parser recorded against a
-# recognized suffix, across every SUBDIRS directory, with no other target
-# needing to reference it at all.
+# The target is a *DTAARA, and the recipe really creates it: after the
+# compile it recreates <OBJLIB>/RMSCFORK, holding the deployed binary's
+# path. That object is what make compares the prerequisites' timestamps
+# against, so the helper is rebuilt only when rmsc_fork_helper.c or
+# SCLAUNCH_D changes. (This target used to be RMSC_FORK_HELPER.SRVPGM,
+# naming an object nothing created, so TOBi never found it and the recipe
+# ran on every `makei build`.) Consequence: deleting the binary alone does
+# not trigger a rebuild - delete the data area as well (DLTDTAARA
+# DTAARA(<OBJLIB>/RMSCFORK)), or touch rmsc_fork_helper.c.
 #
-# The deployed path must match SCLAUNCH_FORK_HELPER in
-# QRPGLESRC/SCLAUNCH.RPGLE exactly - RMSC calls it by this fixed, absolute
-# path at runtime, with no PATH lookup. /QOpenSys/pkgs/lib/rmsc/native/
-# itself is NOT created by this build - it is owned by qsys, matching
-# upstream's own /QOpenSys/pkgs/lib/sc/native/ (same ownership, same
-# drwxr-sr-x/755 shape). A privileged profile creates it once, during
-# installation, before the first `makei build` - see docs/tobi-binding.md.
-# A missing or unwritable directory here fails the compile loudly and
-# clearly (no such file or directory), which is the point: this is an
-# installation precondition, not something a regular build should be able
-# to silently paper over by creating a system directory itself.
+# NOT listed as a prerequisite of RMSC.SRVPGM or anything else: `makei
+# build`'s own top-level `all` target already reaches every object TOBi's
+# parser recorded, across every SUBDIRS directory. (When this target was a
+# .SRVPGM, listing it also made TOBi add it to CRTSRVPGM's BNDSRVPGM() -
+# MEASURED - which failed, since it was never a real *SRVPGM.)
 #
-# The deploy path is written literally, not as a make variable - MEASURED:
-# TOBi's custom-recipe handling does not preserve a plain Rules.mk variable
-# reference the way ordinary GNU make would (it expanded to empty).
+# The deploy path - /QOpenSys/opt/rm-sc/<release>/bin/rmsc_fork_helper - is
+# read from SCLAUNCH_FORK_HELPER in QPROTOSRC/SCLAUNCH_D.RPGLEINC, the one
+# place the release number is written, so the path RMSC calls and the path
+# the helper is deployed to can never disagree. It is read in the recipe
+# itself because a plain Rules.mk variable does not survive into a custom
+# recipe's command line (MEASURED - it expands to empty); TOBi's own
+# $(OBJLIB) does. The recipe is one shell command (joined with \) so the
+# path, held in a shell variable, is still set on every step.
 #
-# The source is named with its directory (native/...), not bare - MEASURED:
-# a custom recipe's commands run from the project root, not from this
-# directory, unlike a generated recipe (which TOBi itself prefixes).
-RMSC_FORK_HELPER.SRVPGM: rmsc_fork_helper.c
-	/QOpenSys/pkgs/bin/cc -o /QOpenSys/pkgs/lib/rmsc/native/rmsc_fork_helper native/rmsc_fork_helper.c
+# The recipe names its files only through $< and $(lastword $^), never
+# literally: a custom recipe's commands run from the project root, not from
+# this directory, and TOBi rewrites the prerequisites relative to that root
+# (MEASURED).
+#
+# The recipe creates the <release>/bin directories, but NOT
+# /QOpenSys/opt/rm-sc itself - creating that is a one-time installation
+# step for a privileged profile (an ordinary build profile cannot create
+# entries under /QOpenSys), which also makes it writable by the build
+# profile's group; see README.md "Installation". A missing or unwritable
+# directory fails the build loudly, which is the point.
+#
+# makei build's own "Build Successful!" banner can be wrong when a custom
+# recipe's command fails (MEASURED in rm-tools) - check the command output.
+# A failed step stops the recipe before the data area is recreated, so the
+# next build retries.
+RMSCFORK.DTAARA: rmsc_fork_helper.c SCLAUNCH_D.RPGLEINC
+	P=$$(sed -n "s/^dcl-c SCLAUNCH_FORK_HELPER const('\(.*\)');.*$$/\1/p" "$(lastword $^)") && \
+	test -n "$$P" && \
+	mkdir -p "$${P%/rmsc_fork_helper}" && \
+	/QOpenSys/pkgs/bin/cc -o "$$P" "$<" && \
+	{ system "DLTDTAARA DTAARA($(OBJLIB)/RMSCFORK)" >/dev/null 2>&1 ; true ; } && \
+	system "CRTDTAARA DTAARA($(OBJLIB)/RMSCFORK) TYPE(*CHAR) LEN(64) VALUE('$$P') TEXT('RMSC: rmsc_fork_helper build stamp')"

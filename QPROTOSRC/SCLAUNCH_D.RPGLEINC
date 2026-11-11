@@ -18,6 +18,17 @@
 
 dcl-c SCLAUNCH_MAX_ENV const(48);
 
+// Where native/rmsc_fork_helper.c is deployed, and so where RMSC calls it from
+// at runtime (a fixed, absolute path - no PATH lookup). One directory per
+// release, /QOpenSys/opt/rm-sc/<release>/bin, so releases can be installed
+// side by side and each RMSC calls the helper it was built with.
+//
+// This is the ONLY place the release number is written: native/Rules.mk reads
+// this line to decide where to deploy the helper. Update it for every release.
+// Keep the line's shape (a single-line dcl-c with a literal) - the build, and
+// tools/fork-helper-test.sh, read it with sed.
+dcl-c SCLAUNCH_FORK_HELPER const('/QOpenSys/opt/rm-sc/1.0.0/bin/rmsc_fork_helper');
+
 dcl-s SCLAUNCH_CMD_t varchar(4096) template;
 dcl-s SCLAUNCH_ERR_t varchar(512)  template;
 

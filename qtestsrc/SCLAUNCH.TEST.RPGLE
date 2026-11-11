@@ -16,7 +16,7 @@
 //==============================================================================
 
 ctl-opt nomain;
-ctl-opt bnddir('RMSCPGM':'RMSCDEPS');
+ctl-opt bnddir('RMSCPGM':'RMTOOLS');
 
 /include 'SCLAUNCH_D.rpgleinc'
 /include 'SCDEF_D.rpgleinc'
@@ -695,7 +695,7 @@ dcl-proc test_fork_command_wraps_the_helper export;
   forkcmd  = SCLAUNCH_fork_command(def: '/tmp/fork.log');
   jobname  = SCLAUNCH_job_name(def);
 
-  assert((%scan('/QOpenSys/pkgs/lib/rmsc/native/rmsc_fork_helper': forkcmd) = 1):
+  assert((%scan(SCLAUNCH_FORK_HELPER: forkcmd) = 1):
          'starts with the fixed helper path');
 
   assert((%scan(%trim(jobname): forkcmd) > 0):

@@ -29,7 +29,7 @@
 //==============================================================================
 
 ctl-opt nomain;
-ctl-opt bnddir('RMSCPGM':'RMSCDEPS');
+ctl-opt bnddir('RMSCPGM':'RMTOOLS');
 
 /include 'SCDIRS_D.rpgleinc'
 /include 'include/RMIFS_D.rpgleinc'

@@ -108,7 +108,7 @@ SYSTEM="${SYSTEM:-/QOpenSys/usr/bin/system}"
 DRVLIB="${DRVLIB:-RMSCT}"
 DRVSRC="${DRVSRC:-$DEPLOY/qtestsrc/SCAPIDRV.PGM.RPGLE}"
 PROTO="${PROTO:-$DEPLOY/QPROTOSRC}"
-RMTOOLS_INC="${RMTOOLS_INC:-/prj/rmtools}"
+RMTOOLS_INC="${RMTOOLS_INC:-$DEPLOY/deps/rm-tools}"
 WORK="${WORK:-/tmp/api-silence-test.$$}"
 
 # CLEAN UP ON ENTRY AS WELL AS ON EXIT.
@@ -490,7 +490,7 @@ printf '  %-9s %-34s %s\n' --------- ---------------------------------- ------
 # naming. qtestsrc/ is excluded from SUBDIRS so `makei build` never touches it;
 # an object left from an older build would be bound to an older API and would
 # answer a question about that instead.
-qsh -c "liblist -a RMSC; liblist -a $DRVLIB; liblist -a RMTOOLS;
+qsh -c "liblist -a RMSC; liblist -a $DRVLIB;
         system \"CRTBNDRPG PGM($DRVLIB/SCAPIDRV) SRCSTMF('$DRVSRC') DFTACTGRP(*NO) TGTCCSID(*JOB) INCDIR('$PROTO' '$RMTOOLS_INC')\"" \
   > "$WORK/build.log" 2>&1
 if grep -q 'placed in library' "$WORK/build.log"; then

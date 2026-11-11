@@ -19,10 +19,22 @@ query.
 **Prerequisites**
 
 - [TOBi](https://github.com/IBM/tobi) installed on the target IBM i partition.
-- [`rmtools`](#dependencies) 2.0.7 or later — see [Dependencies](#dependencies) below.
 - A PASE C compiler at `/QOpenSys/pkgs/bin/cc`. One small native helper
   (`native/rmsc_fork_helper.c`) has to be PASE-compiled, not ILE — see
-  [`docs/tobi-binding.md`](docs/tobi-binding.md) if you want to know why.
+  [`docs/tobi-binding.md`](docs/tobi-binding.md) if you want to know why. The
+  [rm-tools](#dependencies) build needs it too, for its own `rmfork` helper.
+- `*PUBLIC` `*USE` authority to `QSYS/QCLSTMF`, which the build needs to create binding
+  directories and the message file from CL pseudo-source (the default is `*EXCLUDE`):
+  `GRTOBJAUT OBJ(QSYS/QCLSTMF) OBJTYPE(*PGM) USER(*PUBLIC) AUT(*USE)`.
+
+**Get the source**
+
+[rm-tools](#dependencies) is a git submodule, so clone with `--recursive` (or run
+`git submodule update --init` in an existing clone):
+
+```bash
+git clone --recursive https://github.com/richardm90/rm-sc.git
+```
 
 **One-time setup, before the first build**
 
@@ -37,20 +49,28 @@ is the obvious choice, and what the rest of this README assumes):
 CRTLIB LIB(RMSC) TEXT('RMSC: Service Commander for IBM i')
 ```
 
-The native helper above is deployed to a fixed path outside any library,
-`/QOpenSys/pkgs/lib/rmsc/native/`. A profile with authority to create objects there sets it up
-once:
+The native helpers are deployed outside any library, one directory per release:
+`/QOpenSys/opt/rm-sc/<release>/bin/rmsc_fork_helper`, and rm-tools'
+`/QOpenSys/opt/rm-tools/<release>/bin/rmfork`. Each build creates its release's own
+`<release>/bin`, but only a privileged profile can create the parent directories, so one with
+`*ALLOBJ` sets them up once:
 
 ```bash
-mkdir -p /QOpenSys/pkgs/lib/rmsc/native
-chown qsys:0 /QOpenSys/pkgs/lib/rmsc /QOpenSys/pkgs/lib/rmsc/native
-chmod 2755 /QOpenSys/pkgs/lib/rmsc /QOpenSys/pkgs/lib/rmsc/native
+# /QOpenSys/opt does not exist on a new system. If it is missing, create it
+# and leave it readable by everyone (it may hold other products' directories).
+[ -d /QOpenSys/opt ] || { mkdir /QOpenSys/opt && chmod 755 /QOpenSys/opt; }
 
-# Replace QPGMR with whichever group the profile running `makei build` belongs to —
-# it needs write access here to deploy the compiled helper.
-chgrp QPGMR /QOpenSys/pkgs/lib/rmsc/native
-chmod 2775 /QOpenSys/pkgs/lib/rmsc/native
+# Replace qpgmr with whichever group the profile running `makei build` belongs
+# to - it needs write access here to deploy the compiled helpers.
+mkdir -p /QOpenSys/opt/rm-sc /QOpenSys/opt/rm-tools
+chgrp qpgmr /QOpenSys/opt/rm-sc /QOpenSys/opt/rm-tools
+chmod 2775 /QOpenSys/opt/rm-sc /QOpenSys/opt/rm-tools
 ```
+
+Because each release has its own directory, releases can be installed side by side and each
+`RMSC` calls the helper from the release it was built with. A release's directory is not needed
+once nothing built from that release is in use; remove it by hand with
+`rm -r /QOpenSys/opt/rm-sc/<release>`.
 
 **Build**
 
@@ -65,7 +85,8 @@ the one-line form. Leaving it unset entirely fails the build immediately with
 to anything.)
 
 This builds `RMSC/RMSC` (the service program, into whichever library `OBJLIB` named) and the
-native `SC` CL command. See [`CLAUDE.md`](CLAUDE.md#build-and-test) for running the test suites.
+native `SC` CL command. It also builds rm-tools from the submodule into the same library:
+its modules, the `RMTOOLS` binding directory RMSC binds them through, and `RMMSGF`. See [`CLAUDE.md`](CLAUDE.md#build-and-test) for running the test suites.
 
 `scr` itself is not built or deployed anywhere — it's the plain bash script at
 [`scripts/scr`](scripts/scr), run directly from wherever this repository is checked out
@@ -239,26 +260,39 @@ behaviour diverges from upstream and why.
 
 ## Dependencies
 
-Requires **`rmtools` 2.0.7 or later**, a general-purpose RPGLE helper library (service
-program `RMBASE`), consumed two ways with different lifetimes:
+[**rm-tools**](https://github.com/richardm90/rm-tools), a general-purpose RPGLE helper library,
+is a git submodule at `deps/rm-tools`, pinned to a release tag. `makei build` builds it as part
+of this project (`deps` is first in the root `SUBDIRS`), so there is nothing to install
+separately and no `RMTOOLS` library involved. It is consumed two ways with different lifetimes:
 
-- **Copybooks** — needed at **compile time only**, via `INCDIR`.
-- **Modules** — bound **by copy**, so `RMSC` carries no runtime dependency on the `RMTOOLS`
-  library and no job calling it needs `RMTOOLS` on its library list. See
+- **Copybooks** — needed at **compile time only**, from `deps/rm-tools` on the include path.
+- **Modules** — bound **by copy** through the `RMTOOLS` binding directory built into `OBJLIB`,
+  so `RMSC` carries no runtime dependency on any rm-tools library. See
   [`docs/tobi-binding.md`](docs/tobi-binding.md).
 
-**Why 2.0.7 specifically.** Before it, `PATH_BASENAME_t` was `varchar(128)`, so a service
-whose file name exceeded 127 characters lost its name entirely — `PATH_name` truncated the
-name, lost the extension off the end, failed to find the dot and returned an empty string
-through a `MONITOR`. Two such services then collided, and one vanished from `check`.
+Keep any other library that holds an `RMTOOLS` binding directory (such as an older, separately
+built rmtools) off the build's library list: an unqualified `RMTOOLS` resolves to the first one
+found.
 
-Built against 2.0.6 the suites go red in about ten places across `SCDEF`, `SCCOLL` and
-`SCLAUNCH`, and **nothing in the failure text names rmtools as the cause** — the markers that
-used to say so were flipped to ordinary assertions when 2.0.7 landed. If you see that
-cluster, check the version first.
+To move to a newer rm-tools release:
 
-**`rmtools` is not currently publicly available**, so this repository cannot be built by
-third parties as it stands. Publishing it is intended but not yet straightforward.
+```bash
+git -C deps/rm-tools fetch --tags
+git -C deps/rm-tools checkout vX.Y.Z
+git add deps/rm-tools && git commit -m "Use rm-tools vX.Y.Z"
+```
+
+**Minimum version.** rm-tools v1.0.0 already contains the `PATH_BASENAME_t` widening that RMSC
+depends on (from private rmtools 2.0.7). Without it, a service whose file name exceeded 127
+characters lost its name entirely and collided with any other such service, and the suites go
+red in about ten places across `SCDEF`, `SCCOLL` and `SCLAUNCH` with nothing in the failure
+text naming rm-tools as the cause.
+
+## Releasing
+
+The release number appears in the code in one place only: `SCLAUNCH_FORK_HELPER` in
+`QPROTOSRC/SCLAUNCH_D.RPGLEINC` (`/QOpenSys/opt/rm-sc/<release>/bin/rmsc_fork_helper`). The build
+reads it from there to decide where to deploy the native helper. Update it for every release.
 
 ## Licence
 

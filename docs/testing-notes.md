@@ -174,7 +174,7 @@ list from the job description, so a `CHGLIBL` or `ADDLIBLE` in a previous call i
 QSH holds one job for the whole invocation:
 
 ```bash
-qsh -c "liblist -a RPGUNIT; liblist -a RMSC; liblist -a RMSCT; liblist -a RMTOOLS;
+qsh -c "liblist -a RPGUNIT; liblist -a RMSC; liblist -a RMSCT;
         system \"RUCALLTST TSTPGM(RMSCT/SCQRY) ORDER(*API) DETAIL(*BASIC) OUTPUT(*ALLWAYS)\""
 ```
 

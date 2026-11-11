@@ -38,7 +38,7 @@
 ctl-opt text('RMSC: Service Commander');
 ctl-opt dftactgrp(*no) actgrp(*caller);
 ctl-opt main(SCRUN);
-ctl-opt bnddir('RMSCPGM':'RMSCDEPS':'QC2LE');
+ctl-opt bnddir('RMSCPGM':'RMTOOLS':'QC2LE');
 /include 'include/RMCOMP_H.rpgleinc'
 
 /include 'SCMAIN_D.rpgleinc'

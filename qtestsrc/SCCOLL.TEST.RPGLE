@@ -11,7 +11,7 @@
 //==============================================================================
 
 ctl-opt nomain;
-ctl-opt bnddir('RMSCPGM':'RMSCDEPS');
+ctl-opt bnddir('RMSCPGM':'RMTOOLS');
 
 /include 'SCCOLL_D.rpgleinc'
 /include 'SCDEF_D.rpgleinc'

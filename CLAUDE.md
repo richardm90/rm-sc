@@ -146,7 +146,7 @@ makei build -e OBJLIB=RMSC
 
 ```bash
 # run one suite; parameters mirror .vscode/testing.json
-for l in RPGUNIT RMSC RMSCT RMTOOLS; do cl -O "ADDLIBLE LIB($l)"; done
+for l in RPGUNIT RMSC RMSCT; do cl -O "ADDLIBLE LIB($l)"; done
 cl -O "RUCALLTST TSTPGM(RMSCT/SCQRY) ORDER(*API) DETAIL(*BASIC) OUTPUT(*ALLWAYS)"
 ```
 
@@ -224,6 +224,11 @@ Phase 0 also has its own internally numbered steps, which is why a Verification 
 or **"performance.md §N"** in full. A bare "step 8" or "§8" is ambiguous, and has already cost
 one round of confusion.
 
-`rmtools` is a dependency in two ways with different lifetimes: copybooks at compile time via
-`INCDIR`, and modules bound **by copy**, so `RMSC` has no runtime dependency on the `RMTOOLS`
-library. It is not publicly available, so third parties cannot currently build this.
+[rm-tools](https://github.com/richardm90/rm-tools) is a git submodule at `deps/rm-tools`, pinned
+to a release tag, and `makei build` builds it as part of this project (`deps` is first in the root
+`SUBDIRS`): its modules, `RMTOOLS` binding directory and `RMMSGF` land in `OBJLIB` alongside RMSC's
+own objects. Copybooks come from `deps/rm-tools` on the include path, and the modules are bound
+**by copy** through `RMTOOLS`, so `RMSC` has no runtime dependency on any rm-tools library. No
+`RMTOOLS` library belongs on the library list - a stray one ahead of `OBJLIB` would supply its own
+`RMTOOLS` binding directory. To move to a newer rm-tools: `git -C deps/rm-tools checkout vX.Y.Z`,
+commit the submodule change, rebuild.

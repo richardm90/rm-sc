@@ -7,6 +7,10 @@ Proven against TOBi 3.3.0 on IBM i 7.5.
 Bind `rmtools` modules **by copy**, so `RMSC` carries no runtime dependency on the `RMTOOLS`
 library and no job calling it needs `RMTOOLS` on its library list.
 
+(Since 11 November 2026 those modules come from [rm-tools](https://github.com/richardm90/rm-tools),
+the public successor to rmtools, built from a submodule into RMSC's own library - see
+[rm-tools as a submodule](#rm-tools-as-a-submodule). The by-copy findings below are unchanged.)
+
 ## Three TOBi constraints
 
 **1. There is no `MODULE =` variable.** TOBi builds the `MODULE()` parameter solely from
@@ -66,7 +70,8 @@ RESULT: CALL SUCCEEDED with RMTOOLS off the library list
 
 ## Consequences for later phases
 
-- `RMSC.SRVPGM` gets `BNDDIR = RMSCDEPS`; `RMSCDEPS` lists the twelve `rmtools` modules.
+- `RMSC.SRVPGM` gets `BNDDIR = RMTOOLS`, rm-tools' own binding directory (this was RMSC's own
+  `RMSCDEPS`, listing the `rmtools` modules, until rm-tools became a submodule).
 - `SCMAIN.PGM` needs `ctl-opt bnddir('RMSCPGM')` in its source, and `RMSCPGM.BNDDIR` as a
   `Rules.mk` prerequisite for ordering.
 - `RMSCPGM` must library-qualify its `RMSC.SRVPGM` entry.
@@ -76,10 +81,10 @@ RESULT: CALL SUCCEEDED with RMTOOLS off the library list
 A test suite binding to the service program under test needs **two** binding directories:
 
 ```rpgle
-ctl-opt bnddir('RMSCPGM':'RMSCDEPS');
+ctl-opt bnddir('RMSCPGM':'RMTOOLS');
 ```
 
-`RMSCPGM` supplies `RMSC.SRVPGM` for the procedures under test. `RMSCDEPS` is needed
+`RMSCPGM` supplies `RMSC.SRVPGM` for the procedures under test. `RMTOOLS` is needed
 separately whenever the test itself calls `rmtools` procedures — `RMSC.BND` exports only this
 project's own symbols, so the `rmtools` code copied into `RMSC.SRVPGM` is deliberately not
 reachable from outside it. That restriction is correct; the test just needs its own copy.
@@ -117,6 +122,26 @@ EBCDIC blanks being interpreted as a number.
 
 List every copybook a module includes, including indirect ones.
 
+## rm-tools as a submodule
+
+Measured 11 November 2026 (TOBi on IBM i 7.5), building rm-sc from a fresh tree into a scratch
+library. rm-tools is at `deps/rm-tools`, `deps/Rules.mk` is just `SUBDIRS = rm-tools`, and `deps`
+is first in the root `SUBDIRS`. `SUBDIRS` accepts only immediate child directories (a multi-level
+path makes `makei` crash with a `KeyError`), hence the one-line `deps/Rules.mk`. It means the
+**whole** rm-tools tree is built, including its `rmfork` native helper.
+
+- **rm-tools' root-relative prerequisites resolve.** Its `Rules.mk` files name copybooks as
+  `include/X.rpgleinc` and `tpp/unixcmd/X`, relative to rm-tools' root; TOBi finds them through
+  the include path (`deps/rm-tools` is on it), so every module builds unchanged.
+- **Its `.ibmi.json` files are honoured** (`tgtCcsid: *JOB` for its UTF-8 sources).
+- **A custom recipe must not name its files literally.** Its commands run from the root of the
+  project being built, which is rm-sc's, not rm-tools'. TOBi rewrites a recipe's *prerequisites*
+  relative to that root (`deps/rm-tools/src/pase/RMFORK.c` here, `src/pase/RMFORK.c` in
+  rm-tools' own build), so recipes use `$<`/`$^` - fixed in rm-tools after v1.0.0.
+- **Everything lands in `OBJLIB`**: the rm-tools modules, its `RMTOOLS` binding directory (whose
+  entries are `&O`-qualified `*MODULE`s) and `RMMSGF`. `BOUND_MODULE_INFO` for `RMSC` shows
+  every bound module from `OBJLIB` and none from an `RMTOOLS` library.
+
 ## A non-ILE artifact: `native/rmsc_fork_helper`
 
 Added 4 October 2026, for the non-batch job-naming fix in `docs/parity.md`. `f_fork400()` — the
@@ -127,23 +152,29 @@ environment from PASE, not just a different compiler for the same environment, a
 access to `fork400()` than ILE RPG does. So `native/rmsc_fork_helper.c` is genuinely not an ILE
 object of any kind — it compiles to a plain IFS executable (XCOFF), not a `*MODULE`/`*PGM`/
 `*SRVPGM`, and RMSC calls it at runtime by a fixed absolute path
-(`/QOpenSys/pkgs/lib/rmsc/native/rmsc_fork_helper`, matching `SCLAUNCH_FORK_HELPER` in
-`QRPGLESRC/SCLAUNCH.RPGLE`), not through the binder at all.
+(`/QOpenSys/opt/rm-sc/<release>/bin/rmsc_fork_helper`, `SCLAUNCH_FORK_HELPER` in
+`QPROTOSRC/SCLAUNCH_D.RPGLEINC`), not through the binder at all.
 
 **Build prerequisite, not covered by TOBi's own toolchain**: a PASE C compiler, confirmed as
 `/QOpenSys/pkgs/bin/cc` (gcc-6, via the `QOpenSys/pkgs` toolchain) on the box this was built and
 tested against. TOBi's own `.C`/`.CPP` → `.MODULE` recipe uses `CRTCMOD`, i.e. ILE C — not this.
 Installation instructions need this compiler present before `makei build` will succeed.
 
-**The build mechanics are still ordinary `makei build`, via a custom recipe — four things about
-it had to be measured on the box, not assumed from the skill documentation alone:**
+**The build mechanics are still ordinary `makei build`, via a custom recipe — several things
+about it had to be measured on the box, not assumed from the skill documentation alone.** The
+recipe as first written (October 2026) was:
 
 ```make
 RMSC_FORK_HELPER.SRVPGM: rmsc_fork_helper.c
 	/QOpenSys/pkgs/bin/cc -o /QOpenSys/pkgs/lib/rmsc/native/rmsc_fork_helper native/rmsc_fork_helper.c
 ```
 
-(`native/Rules.mk`, in full, comments aside.)
+Since 11 November 2026 the target is `RMSCFORK.DTAARA`: the recipe compiles the helper and then
+recreates `<OBJLIB>/RMSCFORK`, a data area holding the deployed path, so make has a real object
+to compare timestamps against and the helper is rebuilt only when its source or `SCLAUNCH_D`
+changes (the `.SRVPGM` target named an object nothing created, so it rebuilt every time). The
+deploy path is read with `sed` from `SCLAUNCH_FORK_HELPER`, so it is written in one place, and
+files are named through `$<`/`$(lastword $^)`. See `native/Rules.mk`. The findings:
 
 1. **The target's name must carry a real, recognized object-type suffix — a made-up one (the
    documentation's own `.rebuild` sentinel pattern) is rejected outright.** `rmsc_fork_helper.
@@ -166,11 +197,13 @@ RMSC_FORK_HELPER.SRVPGM: rmsc_fork_helper.c
    else needing to reference it.
 3. **A plain `Rules.mk` variable (`FOO = ...`, referenced as `$(FOO)`) does not survive into a
    custom recipe's commands** — it silently expands to empty (`cc -o  rmsc_fork_helper.c`, a
-   missing argument, not an error at parse time). The deploy path is written literally instead.
+   missing argument, not an error at parse time). The recipe reads the deploy path into a
+   shell variable instead.
 4. **A custom recipe's commands run from the project root, not from the `Rules.mk` directory
-   that defines them** — unlike a generated recipe, which TOBi prefixes itself. The source has
-   to be named with its directory (`native/rmsc_fork_helper.c`), not bare, or `cc` reports it
-   missing.
+   that defines them** — unlike a generated recipe, which TOBi prefixes itself. A bare
+   `rmsc_fork_helper.c` is reported missing. Naming it with its directory works, but `$<` is
+   better: TOBi rewrites the prerequisites relative to the root, so it is right however the
+   project is nested (see [rm-tools as a submodule](#rm-tools-as-a-submodule)).
 5. **`makei build`'s own "Build Successful!" banner can be wrong when a custom recipe's
    command actually fails.** MEASURED directly: a real `cc` compile error (a header conflict,
    unrelated to this point) produced `make: Target 'all' not remade because of errors.` —
@@ -185,23 +218,13 @@ RMSC_FORK_HELPER.SRVPGM: rmsc_fork_helper.c
    for `Target 'all' not remade` rather than trusting the final line, or diff the binary's
    mtime/checksum against the source's.
 
-`/QOpenSys/pkgs/lib/rmsc/native/` itself is **not** created by this build, deliberately — it's
-owned by `qsys`, matching upstream's own `/QOpenSys/pkgs/lib/sc/native/` (same `drwxr-sr-x`
-shape), and a `mkdir -p` inside the recipe just fails loudly (`Permission denied`) rather than
-quietly creating a new system directory from an unprivileged build. A privileged profile creates
-it once, during installation, before the first `makei build`:
-
-```bash
-mkdir -p /QOpenSys/pkgs/lib/rmsc/native
-chown qsys:0 /QOpenSys/pkgs/lib/rmsc /QOpenSys/pkgs/lib/rmsc/native
-chmod 2755 /QOpenSys/pkgs/lib/rmsc /QOpenSys/pkgs/lib/rmsc/native
-chgrp qpgmr /QOpenSys/pkgs/lib/rmsc/native
-chmod 2775 /QOpenSys/pkgs/lib/rmsc/native
-```
-
-(the first three lines match upstream's read/execute-for-everyone shape exactly; the last two
-additionally grant write to `qpgmr` — the group the profile that actually runs `makei build`
-belongs to on this box, measured directly rather than assumed, since granting write to group `0`
-alone did nothing for a profile whose own group isn't `0`. A different box may need a different
-group named here — the requirement is "whichever group the building profile belongs to", not
-`qpgmr` specifically.)
+`/QOpenSys/opt/rm-sc` itself is **not** created by this build, deliberately: only a privileged
+profile can create entries under `/QOpenSys`, and a `mkdir -p` inside the recipe fails loudly
+(`Permission denied`) rather than quietly working around a missing installation step. A
+privileged profile creates it once, before the first `makei build`, and gives write access to
+the group of the profile that runs the build (`qpgmr` on this box; granting write to group `0`
+did nothing for a profile whose own group isn't `0`) - see the README's Installation section.
+Each build then creates its own release's `<release>/bin` under it. (Until 11 November 2026 the
+helper went to `/QOpenSys/pkgs/lib/rmsc/native/`, chosen to match upstream's
+`/QOpenSys/pkgs/lib/sc/native/`; it moved because `/QOpenSys/pkgs` belongs to the RPM package
+manager, and to give each release its own directory.)

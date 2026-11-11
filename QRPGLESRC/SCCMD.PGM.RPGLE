@@ -12,7 +12,7 @@
 ctl-opt text('RMSC: SC command processing program');
 ctl-opt dftactgrp(*no) actgrp(*caller);
 ctl-opt main(SCCMD);
-ctl-opt bnddir('RMSCPGM':'RMSCDEPS');
+ctl-opt bnddir('RMSCPGM':'RMTOOLS');
 /include 'include/RMCOMP_H.rpgleinc'
 
 /include 'SCMAIN_D.rpgleinc'

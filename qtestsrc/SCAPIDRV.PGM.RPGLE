@@ -85,7 +85,7 @@
 //==============================================================================
 
 ctl-opt dftactgrp(*no) actgrp(*new);
-ctl-opt bnddir('RMSCPGM':'RMSCDEPS');
+ctl-opt bnddir('RMSCPGM':'RMTOOLS');
 
 /include 'SCAPI_D.rpgleinc'
 /include 'SCOUT_D.rpgleinc'

@@ -5,12 +5,11 @@
   "curlib": "&OBJLIB",
   "includePath": [
     "QPROTOSRC",
-    "/prj/rmtools"
+    "deps/rm-tools"
   ],
   "preUsrlibl": [
     "&OBJLIB",
     "RMSCT",
-    "RMTOOLS",
     "RPGUNIT",
     "QDEVTOOLS"
   ],

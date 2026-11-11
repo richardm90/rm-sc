@@ -45,7 +45,7 @@ dcl-s g_blocked varchar(20) dim(ENV_BLOCK_COUNT) ctdata perrcd(1);
 // PASE_FORK_JOBNAME, spawn()'s own job-naming flags are argv/parent-based,
 // not env-based, and neither reaches a job the way upstream's direct
 // fork() does. This helper calls f_fork400() directly instead, which can.
-dcl-c SCLAUNCH_FORK_HELPER const('/QOpenSys/pkgs/lib/rmsc/native/rmsc_fork_helper');
+// Its path, SCLAUNCH_FORK_HELPER, is in SCLAUNCH_D.
 
 dcl-pr add_env;
   env   likeds(SCLAUNCH_ENV_t);

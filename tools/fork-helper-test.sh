@@ -6,7 +6,7 @@
 #
 # Runs ON the IBM i box, beside tools/job-identity-test.sh and the other
 # harnesses. Invokes the deployed binary directly
-# (/QOpenSys/pkgs/lib/rmsc/native/rmsc_fork_helper) - this is deliberately
+# (SCLAUNCH_FORK_HELPER in QPROTOSRC/SCLAUNCH_D.RPGLEINC) - this is deliberately
 # NOT a staged `.sc/services` fixture. tools/job-identity-test.sh and
 # tools/unqualified-binary-test.sh already exercise this helper THROUGH
 # SCLAUNCH_fork_command, for a different question (job identity, PATH) -
@@ -104,7 +104,7 @@
 set -o pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-HELPER="${HELPER:-/QOpenSys/pkgs/lib/rmsc/native/rmsc_fork_helper}"
+HELPER="${HELPER:-$(sed -n "s/^dcl-c SCLAUNCH_FORK_HELPER const('\(.*\)');.*$/\1/p" "$HERE/../QPROTOSRC/SCLAUNCH_D.RPGLEINC")}"
 PY="${PY:-/QOpenSys/pkgs/bin/python3}"
 GL="$HERE/gate-listen.py"
 DB2UTIL="${DB2UTIL:-/QOpenSys/pkgs/bin/db2util}"
@@ -128,7 +128,7 @@ setup_fail() { printf '%s\n' "$@" >&2; exit 2; }
   "rmsc_fork_helper is not executable at: $HELPER" \
   "" \
   "This is the fixed, deployed path RMSC calls at runtime by convention" \
-  "(docs/tobi-binding.md, QRPGLESRC/SCLAUNCH.RPGLE's SCLAUNCH_FORK_HELPER) -" \
+  "(docs/tobi-binding.md, QPROTOSRC/SCLAUNCH_D.RPGLEINC's SCLAUNCH_FORK_HELPER) -" \
   "build and deploy it (makei build) before running this file. Set" \
   "HELPER=<path> if it genuinely lives elsewhere on this box."
 

@@ -56,8 +56,8 @@ DEPLOY="${DEPLOY:-$(dirname "$HERE")}"
 # INCDIRS mirrors iproj.json's includePath; keep the two in step.
 SRVLIB="${SRVLIB:-RMSC}"
 TSTLIB="${TSTLIB:-RMSCT}"
-LIBS="${LIBS:-RPGUNIT $SRVLIB $TSTLIB RMTOOLS}"
-INCDIRS="${INCDIRS:-'QPROTOSRC' '/prj/rmtools'}"
+LIBS="${LIBS:-RPGUNIT $SRVLIB $TSTLIB}"
+INCDIRS="${INCDIRS:-'QPROTOSRC' 'deps/rm-tools'}"
 
 SUITES="${SUITES:-SCYAML SCDEF SCDIRS SCCOLL SCQRY SCNET SCJOB SCOUT SCLAUNCH SCEXEC SCMAIN SCAPI SCLIFE}"
 
@@ -169,7 +169,7 @@ if want suites; then
   for l in $LIBS; do cl -O "ADDLIBLE LIB($l)" >/dev/null 2>&1; done
   for s in $SUITES; do
     cl -O "RUCRTRPG TSTPGM($TSTLIB/$s) SRCSTMF('qtestsrc/$s.TEST.RPGLE') TGTCCSID(*JOB) DBGVIEW(*SOURCE) RPGPPOPT(*LVL2) COPTION(*EVENTF) INCDIR($INCDIRS)" \
-        >"/tmp/verify.c.$s" 2>&1
+        >"${TMPDIR:-/tmp}/verify.c.$(id -un).$s" 2>&1
     crc=$?
     out=$(cl -O "RUCALLTST TSTPGM($TSTLIB/$s) ORDER(*API) DETAIL(*BASIC) OUTPUT(*ALLWAYS) RCLRSC(*NO)" 2>&1)
     # Both codes are printed. A suite whose compile failed runs the PREVIOUS

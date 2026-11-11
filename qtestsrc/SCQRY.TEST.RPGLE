@@ -52,7 +52,7 @@
 //==============================================================================
 
 ctl-opt nomain;
-ctl-opt bnddir('RMSCPGM':'RMSCDEPS');
+ctl-opt bnddir('RMSCPGM':'RMTOOLS');
 
 /include 'SCQRY_D.rpgleinc'
 /include 'include/RMQCMD_D.rpgleinc'
